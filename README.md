@@ -35,9 +35,12 @@ across browsers, viewports and runs.
 - **Assigns stable identifiers.** A component has the same id in every browser,
   at every viewport, on every run.
 - **Records state and evidence.** Role, accessible name, selectors, position,
-  visibility, enabled state, and a cropped screenshot per component.
+  visibility and enabled state. With `--crops`, a cropped screenshot per
+  component too.
 - **Runs the same way everywhere.** One in-page collector is used for every
   browser, so results are directly comparable.
+- **Runs browsers side by side.** A run takes about as long as its slowest
+  browsers, and reports where each one spent its time.
 - **Works from any language.** The engine is a standalone program that speaks a
   documented JSON protocol. A Python SDK is included.
 
@@ -88,7 +91,8 @@ webkit-390x844           completed          37        67        1    3.0s
 Run folder: runs/r_20261013_162841_e4f0
 ```
 
-Every browser is run at every viewport. See [docs/usage.md](docs/usage.md) for
+Every browser is run at every viewport, several at a time. Add `--crops` to
+also save a picture of each component. See [docs/usage.md](docs/usage.md) for
 all options.
 
 ## Python
@@ -121,8 +125,8 @@ runs/<runId>/
   events.jsonl               one event per line, in order
   <browser>-<width>x<height>/
     components.json          every component found
-    page.png                 screenshot of the page
-    crops/<componentId>.png  one crop per component
+    page.png                 screenshot of the page    (with --crops)
+    crops/<componentId>.png  one crop per component    (with --crops)
 ```
 
 A component in `components.json`:

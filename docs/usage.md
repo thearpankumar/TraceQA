@@ -40,16 +40,19 @@ traceqa extract [OPTIONS] <URL>
 | `--viewport LIST` | `1280x800` | Viewport sizes as `WIDTHxHEIGHT`, comma separated. |
 | `--out DIR` | `runs` | Where the run folder is created. |
 | `--headed` | off | Show the browser windows. |
-| `--no-crops` | off | Do not save screenshots. |
+| `--crops` | off | Also save pictures: a screenshot of the page and one crop per component. Slower on long pages: see [Speed](#speed). |
 | `--visible-only` | off | Leave out elements that are not visible. |
 | `--max-scroll-steps N` | `50` | How many screens to scroll through on a long page. `0` reads the page without scrolling. |
 | `--timeout-ms MS` | `30000` | Time allowed for a page to load. |
 | `--settle-ms MS` | `0` | Extra time to wait after the page has loaded, before reading it. For pages with a timed intro or splash screen. |
+| `--parallel N` | chosen from the machine | How many browsers run at the same time. `1` runs them one after another. The default is half the machine's cores, at most 4. |
+| `--timings` | off | Also print where each browser's time went. |
 | `--json` | off | Print the run manifest as JSON instead of a table. |
 | `--driver COMMAND` | see above | Command that starts a browser driver. |
 
-Every browser is run at every viewport. Progress is written to standard error
-and the result to standard output.
+Every browser is run at every viewport, several at a time. Progress is written
+to standard error, each line marked with the browser it is about, and the
+result to standard output.
 
 ### Browser values
 
@@ -73,6 +76,9 @@ and the result to standard output.
 ```sh
 # Three browsers, desktop and mobile viewports
 traceqa extract https://example.com --browser chromium,firefox,webkit --viewport 1280x800,390x844
+
+# The same, with a picture of every component
+traceqa extract https://example.com --browser chromium,firefox,webkit --viewport 1280x800,390x844 --crops
 
 # Attach to a running browser
 traceqa extract https://example.com --browser cdp=http://127.0.0.1:9222
@@ -115,11 +121,12 @@ with traceqa.Engine() as engine:
 | `viewports` | `((1280, 800),)` | `(width, height)` pairs. |
 | `out_dir` | `runs` | Where the run folder is created. |
 | `headless` | `True` | Hide the browser windows. |
-| `crops` | `True` | Save screenshots. |
+| `crops` | `False` | Also save a screenshot of the page and a picture of each component. |
 | `include_hidden` | `True` | Include elements that are not visible. |
 | `max_scroll_steps` | `50` | How many screens to scroll through. `0` reads the page without scrolling. |
 | `timeout_ms` | `30000` | Time allowed for a page to load. |
 | `settle_ms` | `0` | Extra time to wait after the page has loaded. For pages with a timed intro. |
+| `parallel` | chosen from the machine | How many browsers run at the same time. |
 | `on_event` | `None` | Called with each progress event as it happens. |
 
 `traceqa.extract` and `traceqa.Engine` also accept `binary`, the path of the
@@ -148,12 +155,12 @@ runs/<runId>/
   events.jsonl
   <browser>-<width>x<height>/
     components.json
-    page.png
-    crops/<componentId>.png
+    page.png                  only with --crops
+    crops/<componentId>.png   only with --crops
 ```
 
-`page.png` is an overview: the whole page when the browser can capture that, and
-the first screen otherwise. Crops are not cut from it. They come from the
+Pictures are saved only with `--crops`. `page.png` is an overview: the whole
+page when the browser can capture that, and the first screen otherwise. Crops are not cut from it. They come from the
 screens the engine saw while scrolling, so a component in an animated or pinned
 section is shown as it looked when it was on screen.
 
@@ -163,6 +170,18 @@ The run manifest: run id, URL, start and finish time, overall status, and one
 entry per target with its status, component count, instance count, warning
 count, duration and, on failure, the error.
 
+Each completed target also has `timings`, in milliseconds:
+
+| Field | Time spent |
+|---|---|
+| `openMs` | Starting the driver if needed, and opening the browser. |
+| `loadMs` | Loading the page and waiting for it to settle, including any `--settle-ms`. |
+| `readMs` | Running the collector. |
+| `scrollMs` | Scrolling, and waiting for the page to settle after each scroll. |
+| `screenshotMs` | Taking screenshots. |
+| `cropMs` | Cutting the crops. |
+| `screens` | Not a time: how many screens the page was read in. |
+
 ### `events.jsonl`
 
 One JSON object per line, numbered from zero. The same events are delivered
@@ -171,7 +190,8 @@ live to an SDK's `on_event` callback.
 | Event type | When |
 |---|---|
 | `run.started`, `run.finished` | Start and end of the run. |
-| `target.started`, `target.finished` | Start and end of one browser at one viewport. |
+| `target.started`, `target.finished` | Start and end of one browser at one viewport. `target.finished` carries its timings. |
+| `target.retried` | A browser timed out while others were running and is being tried again on its own. |
 | `page.opened` | The page has loaded. |
 | `page.scrolled` | The page has been scrolled through. |
 | `elements.collected` | The collector has returned. |
@@ -191,7 +211,7 @@ live to an SDK's `on_event` callback.
 | `confidence` | `high` for native controls and explicit interactive roles. `low` for elements that only look interactive. |
 | `signals` | Why the element is considered interactive: `native`, `role`, `contenteditable`, `tabindex`, `onclick-attr`, `cursor-pointer`. |
 | `path` | The structural path to the component, for example `main > list "Products" > listitem`. |
-| `crop` | Path of a crop of the component, relative to `components.json`. Absent when the component never appeared on screen. |
+| `crop` | Path of a crop of the component, relative to `components.json`. Absent without `--crops`, and when the component never appeared on screen. |
 | `instances` | Every element that belongs to the component. |
 
 Each instance has a `key`, its own `name`, `tag`, a subset of `attrs`,
@@ -212,6 +232,33 @@ of the element the previous part matched.
 | `scroll_limit_reached` | The page is longer than the scroll limit, so its end was not read. |
 | `screenshot_failed` | The browser could not take a screenshot, so some crops are missing. The component data is unaffected. |
 | `browsers_disagree` | Browsers found different numbers of elements at the same viewport. Reported once for the run, in `events.jsonl`. |
+
+## Speed
+
+Three things decide how long a run takes.
+
+**How many browsers run at once.** By default several do, so a run takes about
+as long as its slowest browsers and not all of them added up. Use `--parallel`
+to change the number. A browser that times out while others are running is
+tried once more on its own, because a page that is heavy to render can time out
+only for lack of a free processor.
+
+**Whether pictures are wanted.** By default they are not: the page is only
+scrolled, to load what loads on scroll, and read once at the end. With
+`--crops` the page is gone through a screen at a time: read, photographed,
+scrolled, and given time for its animations. The components and their ids are
+the same either way.
+
+**The page itself.** Its length, how long it takes to load, and how long its
+intro runs. `--timings` shows which of these a run spent its time on.
+
+Measured on one machine, three browsers at two viewports:
+
+| Page | Default | With `--crops` | With `--crops --parallel 1` |
+|---|---|---|---|
+| Demo shop | 7 s | 8 s | 24 s |
+| Marketing page, 10,000 px, intro and scroll animations | 26 s | 34 s | 94 s |
+| Portfolio, 21,000 px | 27 s | 86 s | about 250 s |
 
 ## Pages that are not ready when they load
 

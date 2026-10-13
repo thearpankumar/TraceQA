@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex};
+use std::thread;
 use std::time::Instant;
 
 use serde_json::json;
@@ -11,7 +13,7 @@ use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams,
 use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
 
 use crate::driver::{DriverCommand, DriverError, Drivers};
-use crate::extract::{extract_target, Job, Progress};
+use crate::extract::{extract_target, Job, Progress, Sink};
 
 pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_protocol::contracts::run_folder::VERSION;
 
@@ -28,6 +30,8 @@ pub const DRIVERS_ENV: &str = "TRACEQA_DRIVERS";
 pub struct EngineError {
     message: String,
     cancelled: bool,
+    /// The browser or its driver did not answer in time.
+    timed_out: bool,
 }
 
 impl EngineError {
@@ -35,6 +39,7 @@ impl EngineError {
         Self {
             message: message.into(),
             cancelled: false,
+            timed_out: false,
         }
     }
 
@@ -42,6 +47,7 @@ impl EngineError {
         Self {
             message: "cancelled".into(),
             cancelled: true,
+            timed_out: false,
         }
     }
 }
@@ -56,7 +62,10 @@ impl std::error::Error for EngineError {}
 
 impl From<DriverError> for EngineError {
     fn from(error: DriverError) -> Self {
-        Self::new(error.to_string())
+        Self {
+            timed_out: error.kind == "timeout",
+            ..Self::new(error.to_string())
+        }
     }
 }
 
@@ -125,13 +134,16 @@ impl Run {
     }
 
     /// Runs every target and returns the final manifest, which is also in `run.json`.
-    /// A target that fails does not stop the others.
-    pub fn execute(self, drivers: &mut Drivers, listener: &mut dyn FnMut(&Event), cancel: &AtomicBool) -> RunManifest {
-        let Self { params, mut writer } = self;
-        let options = params.options.as_ref();
+    ///
+    /// Targets run side by side, as many at a time as the request or the machine allows. A
+    /// target that fails does not stop the others. Events from all of them reach `listener`
+    /// one at a time, in the order they are written to `events.jsonl`.
+    pub fn execute(self, execution: &Execution, listener: &mut (dyn FnMut(&Event) + Send)) -> RunManifest {
+        let Self { params, writer } = self;
+        let run_id = writer.run_id().to_string();
         let mut manifest = RunManifest {
             format_version: RUN_FOLDER_VERSION,
-            run_id: writer.run_id().to_string(),
+            run_id: run_id.clone(),
             feature: params.feature.clone(),
             url: params.url.clone(),
             status: RunStatus::Running,
@@ -142,98 +154,87 @@ impl Run {
         };
         save(&writer, &manifest);
 
-        let jobs: Vec<(&BrowserTarget, &Viewport)> = params
+        // Every browser at every viewport, each with the folder name it will write to.
+        let mut used_names = HashSet::new();
+        let jobs: Vec<Planned> = params
             .targets
             .iter()
             .flat_map(|target| params.viewports.iter().map(move |viewport| (target, viewport)))
+            .map(|(target, viewport)| Planned {
+                name: unique_name(&mut used_names, target, viewport),
+                target,
+                viewport,
+            })
             .collect();
-        let mut progress = Progress {
-            writer: &mut writer,
-            listener,
-        };
+        let workers = match params.parallel {
+            Some(asked) if asked > 0 => asked as usize,
+            _ => default_parallelism(),
+        }
+        .min(jobs.len());
+
+        let sink = Mutex::new(Sink { writer, listener });
+        let progress = Progress { sink: &sink };
         progress.emit(
             "run.started",
             None,
             format!(
-                "Extracting {} in {} browser and viewport combinations",
+                "Extracting {} in {} browser and viewport combinations, {workers} at a time",
                 params.url,
                 jobs.len()
             ),
-            json!({ "targets": jobs.len() }),
+            json!({ "targets": jobs.len(), "parallel": workers }),
         );
 
-        let mut used_names = HashSet::new();
-        for (target, viewport) in jobs {
-            let name = unique_name(&mut used_names, target, viewport);
-            let mut summary = TargetSummary {
-                dir: name.clone(),
-                target: target.clone(),
-                viewport: viewport.clone(),
-                browser: None,
-                status: RunStatus::Cancelled,
-                component_count: 0,
-                instance_count: 0,
-                warning_count: 0,
-                duration_ms: 0,
-                error: None,
-            };
-            if cancel.load(Ordering::Relaxed) {
-                manifest.targets.push(summary);
-                continue;
-            }
-
-            progress.emit("target.started", Some(&name), format!("Starting {name}"), json!({}));
-            let started = Instant::now();
-            let outcome = progress
-                .writer
-                .target_dir(&name)
-                .map_err(EngineError::from)
-                .and_then(|dir| {
-                    let job = Job {
-                        url: &params.url,
-                        target,
-                        viewport,
-                        max_scroll_steps: options.and_then(|o| o.max_scroll_steps),
-                        timeout_ms: options.and_then(|o| o.timeout_ms),
-                        crops: options.and_then(|o| o.crops).unwrap_or(true),
-                        include_hidden: options.and_then(|o| o.include_hidden).unwrap_or(true),
-                        settle_ms: options.and_then(|o| o.settle_ms).unwrap_or(0),
-                        name: &name,
-                        dir: &dir,
-                        cancel,
-                    };
-                    let (file, browser) = extract_target(drivers, &job, &mut progress)?;
-                    progress.writer.write_components(&name, &file)?;
-                    Ok((file, browser))
+        let exclusive = Exclusive::default();
+        let shared = Shared {
+            params: &params,
+            run_id: &run_id,
+            progress,
+            exclusive: &exclusive,
+            cancel: execution.cancel,
+        };
+        let next = AtomicUsize::new(0);
+        let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
+        thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    // A driver process serves one browser at a time, so each worker has its own.
+                    let mut drivers = (execution.drivers)();
+                    while let Some((index, job)) = claim(&next, &jobs) {
+                        let outcome = run_target(job, &shared, &mut drivers);
+                        finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
+                    }
                 });
-            summary.duration_ms = started.elapsed().as_millis() as u64;
-
-            match outcome {
-                Ok((file, browser)) => {
-                    summary.status = RunStatus::Completed;
-                    summary.browser = Some(browser);
-                    summary.component_count = file.components.len() as u64;
-                    summary.instance_count = file.components.iter().map(|c| c.instances.len() as u64).sum();
-                    summary.warning_count = file.warnings.len() as u64;
-                    progress.emit(
-                        "target.finished",
-                        Some(&name),
-                        format!(
-                            "{name}: {} components, {} instances, {} warnings",
-                            summary.component_count, summary.instance_count, summary.warning_count
-                        ),
-                        json!({ "components": summary.component_count, "instances": summary.instance_count }),
-                    );
-                }
-                Err(error) if error.cancelled => {}
-                Err(error) => {
-                    summary.status = RunStatus::Failed;
-                    summary.error = Some(error.to_string());
-                    progress.emit("error", Some(&name), format!("{name} failed: {error}"), json!({}));
-                }
             }
-            manifest.targets.push(summary);
+        });
+        let mut finished: Vec<Finished> = finished
+            .into_inner()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .into_iter()
+            .map(|outcome| outcome.expect("every job is claimed by a worker"))
+            .collect();
+
+        // A page that is heavy to render can time out only because several browsers were
+        // rendering it at once. Such a target gets a second go with the machine to itself.
+        if workers > 1 {
+            for (job, outcome) in jobs.iter().zip(&mut finished).filter(|(_, outcome)| outcome.timed_out) {
+                if execution.cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                progress.emit(
+                    "target.retried",
+                    Some(&job.name),
+                    format!(
+                        "Trying {} again on its own: it timed out while other browsers were running",
+                        job.name
+                    ),
+                    json!({}),
+                );
+                *outcome = run_target(job, &shared, &mut (execution.drivers)());
+            }
         }
+        // In the order they were asked for, whatever order they finished in.
+        manifest.targets = finished.into_iter().map(|outcome| outcome.summary).collect();
 
         for message in disagreements(&manifest.targets) {
             progress.emit("warning", None, message, json!({ "code": "browsers_disagree" }));
@@ -254,8 +255,192 @@ impl Run {
             format!("Run {}", manifest.status),
             json!({ "status": manifest.status }),
         );
+        let writer = sink
+            .into_inner()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .writer;
         save(&writer, &manifest);
         manifest
+    }
+}
+
+/// How a run is carried out.
+pub struct Execution<'a> {
+    /// Makes the drivers one worker uses. It is called once per worker.
+    pub drivers: &'a (dyn Fn() -> Drivers + Sync),
+    /// Set this to stop the run. Targets that have not started are skipped, and the ones
+    /// that are running stop at their next step.
+    pub cancel: &'a AtomicBool,
+}
+
+/// One browser at one viewport, and the folder its results go to.
+struct Planned<'a> {
+    name: String,
+    target: &'a BrowserTarget,
+    viewport: &'a Viewport,
+}
+
+/// What every target of a run has in common.
+struct Shared<'a, 'b> {
+    params: &'a RunStartParams,
+    run_id: &'a str,
+    progress: Progress<'a, 'b>,
+    exclusive: &'a Exclusive,
+    cancel: &'a AtomicBool,
+}
+
+/// How many browsers to run at once when the request does not say. Each one is a browser
+/// process that renders a page, so half the cores is a safe share, and beyond four the gain
+/// is small while the memory use is not.
+fn default_parallelism() -> usize {
+    let cores = thread::available_parallelism().map_or(1, |cores| cores.get());
+    (cores / 2).clamp(1, 4)
+}
+
+/// Hands out the next job that no worker has taken.
+fn claim<'a, 'b>(next: &AtomicUsize, jobs: &'a [Planned<'b>]) -> Option<(usize, &'a Planned<'b>)> {
+    let index = next.fetch_add(1, Ordering::Relaxed);
+    jobs.get(index).map(|job| (index, job))
+}
+
+/// How one target went.
+struct Finished {
+    summary: TargetSummary,
+    /// It failed because the browser or its driver did not answer in time.
+    timed_out: bool,
+}
+
+/// Runs one target and reports how it went. It never fails: a failure is part of the report.
+fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished {
+    let name = job.name.as_str();
+    let options = shared.params.options.as_ref();
+    let progress = shared.progress;
+    let mut summary = TargetSummary {
+        dir: job.name.clone(),
+        target: job.target.clone(),
+        viewport: job.viewport.clone(),
+        browser: None,
+        status: RunStatus::Cancelled,
+        component_count: 0,
+        instance_count: 0,
+        warning_count: 0,
+        duration_ms: 0,
+        timings: None,
+        error: None,
+    };
+    if shared.cancel.load(Ordering::Relaxed) {
+        return Finished {
+            summary,
+            timed_out: false,
+        };
+    }
+
+    progress.emit("target.started", Some(name), format!("Starting {name}"), json!({}));
+    let started = Instant::now();
+    let outcome = progress
+        .with_writer(|writer| writer.target_dir(name))
+        .map_err(EngineError::from)
+        .and_then(|dir| {
+            let extraction = Job {
+                run_id: shared.run_id,
+                url: &shared.params.url,
+                target: job.target,
+                viewport: job.viewport,
+                max_scroll_steps: options.and_then(|o| o.max_scroll_steps),
+                timeout_ms: options.and_then(|o| o.timeout_ms),
+                crops: options.and_then(|o| o.crops).unwrap_or(false),
+                include_hidden: options.and_then(|o| o.include_hidden).unwrap_or(true),
+                settle_ms: options.and_then(|o| o.settle_ms).unwrap_or(0),
+                name,
+                dir: &dir,
+                exclusive: shared.exclusive,
+                cancel: shared.cancel,
+            };
+            let (file, browser, timings) = extract_target(drivers, &extraction, progress)?;
+            progress.with_writer(|writer| writer.write_components(name, &file))?;
+            Ok((file, browser, timings))
+        });
+    summary.duration_ms = started.elapsed().as_millis() as u64;
+
+    match outcome {
+        Ok((file, browser, timings)) => {
+            summary.status = RunStatus::Completed;
+            summary.browser = Some(browser);
+            summary.component_count = file.components.len() as u64;
+            summary.instance_count = file.components.iter().map(|c| c.instances.len() as u64).sum();
+            summary.warning_count = file.warnings.len() as u64;
+            progress.emit(
+                "target.finished",
+                Some(name),
+                format!(
+                    "{name}: {} components, {} instances, {} warnings, {:.1} s",
+                    summary.component_count,
+                    summary.instance_count,
+                    summary.warning_count,
+                    summary.duration_ms as f64 / 1000.0
+                ),
+                json!({
+                    "components": summary.component_count,
+                    "instances": summary.instance_count,
+                    "durationMs": summary.duration_ms,
+                    "timings": timings,
+                }),
+            );
+            summary.timings = Some(timings);
+        }
+        Err(error) if error.cancelled => {}
+        Err(error) => {
+            summary.status = RunStatus::Failed;
+            summary.error = Some(error.to_string());
+            progress.emit("error", Some(name), format!("{name} failed: {error}"), json!({}));
+            return Finished {
+                summary,
+                timed_out: error.timed_out,
+            };
+        }
+    }
+    Finished {
+        summary,
+        timed_out: false,
+    }
+}
+
+/// Browsers of which only one session may exist on the machine. A target that needs one
+/// waits here until the target that has it is done.
+#[derive(Default)]
+pub(crate) struct Exclusive {
+    busy: Mutex<HashSet<String>>,
+    freed: Condvar,
+}
+
+impl Exclusive {
+    /// Waits until `browser` is free and takes it until the returned value is dropped.
+    pub(crate) fn hold<'a>(&'a self, browser: &str) -> Held<'a> {
+        let mut busy = self.busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        while busy.contains(browser) {
+            busy = self.freed.wait(busy).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        busy.insert(browser.to_string());
+        Held {
+            owner: self,
+            browser: browser.to_string(),
+        }
+    }
+}
+
+pub(crate) struct Held<'a> {
+    owner: &'a Exclusive,
+    browser: String,
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        self.owner
+            .busy
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.browser);
+        self.owner.freed.notify_all();
     }
 }
 
@@ -333,6 +518,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
             ),
+            parallel: None,
             options: None,
         }
     }
@@ -362,6 +548,7 @@ mod tests {
             instance_count: found,
             warning_count: 0,
             duration_ms: 0,
+            timings: None,
             error: None,
         };
         let targets = [
@@ -379,6 +566,32 @@ mod tests {
             "{}",
             messages[0]
         );
+    }
+
+    #[test]
+    fn an_exclusive_browser_is_held_by_one_target_at_a_time() {
+        let exclusive = Exclusive::default();
+        let inside = AtomicUsize::new(0);
+        let most_at_once = AtomicUsize::new(0);
+        thread::scope(|scope| {
+            for _ in 0..6 {
+                scope.spawn(|| {
+                    let _held = exclusive.hold("safari");
+                    most_at_once.fetch_max(inside.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                    thread::sleep(std::time::Duration::from_millis(5));
+                    inside.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        assert_eq!(most_at_once.load(Ordering::SeqCst), 1);
+        // A different browser is not held up by it.
+        let _safari = exclusive.hold("safari");
+        let _other = exclusive.hold("another");
+    }
+
+    #[test]
+    fn the_default_number_of_browsers_at_once_is_sensible() {
+        assert!((1..=4).contains(&default_parallelism()));
     }
 
     #[test]

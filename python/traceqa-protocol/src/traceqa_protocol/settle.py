@@ -20,12 +20,18 @@ STEP_S = 0.1
 
 
 def wait_until_settled(
-    read_state: Callable[[], dict[str, Any]], sleep: Callable[[float], None], limit_s: float
+    read_state: Callable[[], dict[str, Any]],
+    sleep: Callable[[float], None],
+    limit_s: float,
+    *,
+    animations: bool = True,
 ) -> None:
     """Return once the page height has stopped changing and no ending animation is running,
     for two checks in a row. Gives up after `limit_s`, because some pages never rest.
 
     `read_state` evaluates `PAGE_STATE` in the page. `sleep` waits the given number of seconds.
+    With `animations=False` only the height has to be stable, which is quicker and enough
+    when nobody is going to look at the page.
     """
     sleep(STEP_S)
     height = read_state()["height"]
@@ -35,5 +41,6 @@ def wait_until_settled(
         sleep(STEP_S)
         waited += STEP_S
         state = read_state()
-        quiet = quiet + 1 if state["height"] == height and state["animating"] == 0 else 0
+        still = state["height"] == height and (state["animating"] == 0 or not animations)
+        quiet = quiet + 1 if still else 0
         height = state["height"]

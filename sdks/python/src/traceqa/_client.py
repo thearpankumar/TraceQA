@@ -151,16 +151,20 @@ class Engine:
         viewports: Sequence[tuple[int, int]] = ((1280, 800),),
         out_dir: str | os.PathLike[str] | None = None,
         headless: bool = True,
-        crops: bool = True,
+        crops: bool = False,
         include_hidden: bool = True,
         max_scroll_steps: int | None = None,
         timeout_ms: int | None = None,
         settle_ms: int | None = None,
+        parallel: int | None = None,
         on_event: EventHandler | None = None,
     ) -> ExtractResult:
         """List every interactive component on `url`, in every browser at every viewport.
 
         `settle_ms` is extra time to wait after the page loads, for pages with a timed intro.
+        `parallel` is how many browsers run at the same time. Leave it out to let the engine choose.
+        `crops=True` also saves a screenshot of the page and a picture of each component. It is
+        several times slower on long pages, because the page is then gone through a screen at a time.
 
         Blocks until the run is finished. A browser that fails does not raise: look at
         `result.status` and at each target's `status` and `error`.
@@ -175,6 +179,7 @@ class Engine:
             targets=targets,
             viewports=[models.Viewport(width=width, height=height) for width, height in viewports],
             out_dir=str(Path(out_dir).resolve()) if out_dir is not None else None,
+            parallel=parallel,
             options=models.ExtractOptions(
                 crops=crops,
                 include_hidden=include_hidden,

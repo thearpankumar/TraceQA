@@ -125,7 +125,7 @@ def main() -> None:
     rows: dict[str, dict[str, Any]] = {}
     with tempfile.TemporaryDirectory(prefix="traceqa-bench-") as out_dir:
         for _ in range(args.repeats):
-            command = [str(binary), "extract", url, "--browser", args.browsers, "--viewport", ",".join(viewports), "--out", out_dir, "--json"]  # fmt: skip
+            command = [str(binary), "extract", url, "--browser", args.browsers, "--viewport", ",".join(viewports), "--out", out_dir, "--crops", "--json"]  # fmt: skip
             done = subprocess.run(command, capture_output=True, check=False, text=True, encoding="utf-8")
             if not done.stdout.strip():
                 sys.exit(f"traceqa produced no manifest:\n{done.stderr}")

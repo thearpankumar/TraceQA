@@ -29,7 +29,16 @@
         "componentCount": 18,
         "instanceCount": 64,
         "warningCount": 1,
-        "durationMs": 4210
+        "durationMs": 4210,
+        "timings": {
+          "openMs": 612,
+          "loadMs": 1480,
+          "readMs": 96,
+          "scrollMs": 1240,
+          "screenshotMs": 310,
+          "cropMs": 84,
+          "screens": 3
+        }
       }
     ]
   }
