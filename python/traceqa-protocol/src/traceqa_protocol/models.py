@@ -1,0 +1,816 @@
+# Generated from spec/ by scripts/gen_python_protocol.py. Do not edit.
+
+from __future__ import annotations
+
+from typing import Any
+from pydantic import BaseModel, ConfigDict, Field, RootModel
+from enum import Enum
+
+
+class Model(RootModel[Any]):
+    root: Any
+
+
+class EngineHelloParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    protocol_version: int = Field(..., alias="protocolVersion", ge=0)
+    client_name: str | None = Field(None, alias="clientName")
+    client_version: str | None = Field(None, alias="clientVersion")
+
+
+class EngineHelloResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    engine_version: str = Field(..., alias="engineVersion")
+    protocol_version: int = Field(..., alias="protocolVersion", ge=0)
+    features: list[str] = Field(
+        ..., description="Features this engine can run. Known values: extract."
+    )
+
+
+class ExtractOptions(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    max_scroll_steps: int | None = Field(
+        None,
+        alias="maxScrollSteps",
+        description="How many screens to scroll through before giving up on a very long page. 0 reads the page without scrolling.",
+        ge=0,
+    )
+    timeout_ms: int | None = Field(
+        None, alias="timeoutMs", description="Per page.", ge=0
+    )
+    settle_ms: int | None = Field(
+        None,
+        alias="settleMs",
+        description="Extra time to wait after the page has loaded, before reading it. For pages that show a timed intro or splash screen. Default 0.",
+        ge=0,
+    )
+    crops: bool | None = Field(
+        None, description="Save one screenshot crop per component. Default true."
+    )
+    include_hidden: bool | None = Field(
+        None,
+        alias="includeHidden",
+        description="List hidden elements too. Default true.",
+    )
+
+
+class RunStartResult(BaseModel):
+    """
+    Returned as soon as the run is accepted. Progress and the result arrive as notifications.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., alias="runId")
+    run_folder: str = Field(..., alias="runFolder", description="Absolute path.")
+
+
+class RunCancelParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., alias="runId")
+
+
+class ScrollInfo(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    y: float
+    height: float = Field(..., description="Full scrollable height of the document.")
+    viewport_height: float = Field(..., alias="viewportHeight")
+
+
+class PathStep(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: str
+    name: str | None = Field(
+        None, description="Accessible name of the ancestor, when it has one."
+    )
+    tag: str
+    repeat_index: int | None = Field(
+        None,
+        alias="repeatIndex",
+        description="Zero-based position among siblings with the same tag and role. Present only when repeatCount is 2 or more.",
+        ge=0,
+    )
+    repeat_count: int | None = Field(
+        None,
+        alias="repeatCount",
+        description="How many siblings share this tag and role.",
+        ge=0,
+    )
+
+
+class Empty(BaseModel):
+    """
+    No fields.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
+class Viewport(BaseModel):
+    """
+    Size of the browser window content area, in CSS pixels.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    width: int = Field(..., ge=0)
+    height: int = Field(..., ge=0)
+
+
+class Rect(BaseModel):
+    """
+    A rectangle in CSS pixels. Inside a RawElement it is relative to that frame's document. Everywhere else it is relative to the top-level page.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class BrowserTarget(BaseModel):
+    """
+    Which browser to run in. The engine passes this to a driver and never interprets it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    browser: str = Field(
+        ...,
+        description="Browser name. Known values: chromium, chrome, msedge, firefox, webkit, safari, cdp, webdriver.",
+    )
+    cdp_endpoint: str | None = Field(
+        None,
+        alias="cdpEndpoint",
+        description="WebSocket or HTTP endpoint of an already running browser. Used with browser = cdp.",
+    )
+    webdriver_url: str | None = Field(
+        None,
+        alias="webdriverUrl",
+        description="URL of a W3C WebDriver server, local or a cloud grid. Used with browser = webdriver.",
+    )
+    webdriver_capabilities: dict[str, Any] | None = Field(
+        None,
+        alias="webdriverCapabilities",
+        description='Capabilities to ask the WebDriver server for, for example { "browserName": "safari" }.',
+    )
+    headless: bool | None = None
+
+
+class BrowserInfo(BaseModel):
+    """
+    What actually ran, as reported by the driver.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    version: str
+
+
+class Warning(BaseModel):
+    """
+    Something that did not stop the run but that the reader should know.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    code: str = Field(
+        ...,
+        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree.",
+    )
+    message: str
+
+
+class ElementState(BaseModel):
+    """
+    State of one element at the moment it was read.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    visible: bool = Field(
+        ...,
+        description="False when the element is hidden by CSS, has no size, or is inside a hidden ancestor.",
+    )
+    enabled: bool
+    in_viewport: bool = Field(..., alias="inViewport")
+    checked: bool | None = None
+    expanded: bool | None = None
+    selected: bool | None = None
+    pressed: bool | None = None
+    readonly: bool | None = None
+    required: bool | None = None
+
+
+class Confidence(str, Enum):
+    """
+    How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).
+    """
+
+    high = "high"
+    low = "low"
+
+
+class RunStatus(str, Enum):
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class DriverHelloParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    protocol_version: int = Field(..., alias="protocolVersion", ge=0)
+    engine_version: str = Field(..., alias="engineVersion")
+
+
+class DriverHelloResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    driver_name: str = Field(..., alias="driverName")
+    driver_version: str = Field(..., alias="driverVersion")
+    protocol_version: int = Field(
+        ...,
+        alias="protocolVersion",
+        description="The version the driver speaks. The engine refuses to continue when it differs from its own.",
+        ge=0,
+    )
+    browsers: list[str] = Field(..., description="Browser names this driver can open.")
+
+
+class Capabilities(BaseModel):
+    """
+    What this browser session can do. The engine adapts to these instead of knowing browser names.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    clip_screenshot: bool = Field(
+        ...,
+        alias="clipScreenshot",
+        description="Can screenshot one rectangle of the page.",
+    )
+    full_page_screenshot: bool = Field(
+        ...,
+        alias="fullPageScreenshot",
+        description="Can screenshot the whole scrollable page.",
+    )
+    eval_all_frames: bool = Field(
+        ...,
+        alias="evalAllFrames",
+        description="Can run a script in every frame, not only the top one.",
+    )
+    cross_origin_frames: bool = Field(
+        ...,
+        alias="crossOriginFrames",
+        description="Can run a script inside frames from another origin.",
+    )
+    parallel_sessions: bool = Field(
+        ...,
+        alias="parallelSessions",
+        description="Can hold more than one session at a time.",
+    )
+    set_viewport: bool = Field(
+        ..., alias="setViewport", description="Can set an exact viewport size."
+    )
+    console_events: bool = Field(..., alias="consoleEvents")
+    network_events: bool = Field(..., alias="networkEvents")
+
+
+class SessionOpenParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    target: BrowserTarget
+    viewport: Viewport
+    locale: str | None = Field(
+        None, description="BCP 47 language tag, for example en-US."
+    )
+
+
+class SessionOpenResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+    browser: BrowserInfo
+    capabilities: Capabilities
+
+
+class SessionCloseParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+
+
+class WaitUntil(str, Enum):
+    """
+    load: the load event fired. settled: load fired and the network and DOM have been quiet for a short time.
+    """
+
+    load = "load"
+    settled = "settled"
+
+
+class PageGotoParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+    url: str
+    wait_until: WaitUntil | None = Field(None, alias="waitUntil")
+    timeout_ms: int | None = Field(None, alias="timeoutMs", ge=0)
+
+
+class PageGotoResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
+    status: int | None = Field(
+        None, description="HTTP status of the main document, when known.", ge=0
+    )
+    title: str
+
+
+class PageEvalParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+    script: str = Field(
+        ...,
+        description="A JavaScript expression that evaluates to a function. The driver calls it with arg and returns its JSON-serialisable result.",
+    )
+    arg: Any | None = Field(None, description="Any JSON value, passed to the function.")
+    all_frames: bool | None = Field(
+        None,
+        alias="allFrames",
+        description="Run in every frame the driver can reach. Default false.",
+    )
+    timeout_ms: int | None = Field(None, alias="timeoutMs", ge=0)
+
+
+class FrameInfo(BaseModel):
+    """
+    One frame of the page. box is where the frame element sits in the top-level page and is absent for the main frame.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(
+        ...,
+        description="'main' for the top frame. Otherwise unique within the session.",
+    )
+    parent_id: str | None = Field(None, alias="parentId")
+    url: str
+    name: str | None = None
+    cross_origin: bool = Field(
+        ...,
+        alias="crossOrigin",
+        description="True when the frame's origin differs from the top page's.",
+    )
+    box: Rect | None = None
+
+
+class FrameEvalResult(BaseModel):
+    """
+    Exactly one of value or error is present.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    frame: FrameInfo
+    value: Any | None = Field(None, description="What the function returned.")
+    error: str | None = Field(
+        None, description="Why the script could not run in this frame."
+    )
+
+
+class PageEvalResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    results: list[FrameEvalResult] = Field(
+        ..., description="One entry per frame, main frame first."
+    )
+
+
+class ScrollTo(str, Enum):
+    top = "top"
+    bottom = "bottom"
+
+
+class PageScrollParams(BaseModel):
+    """
+    Give exactly one of to or byY.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+    to: ScrollTo | None = None
+    by_y: float | None = Field(
+        None, alias="byY", description="Pixels to scroll down. Negative scrolls up."
+    )
+
+
+class PageScrollResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    y: float
+    height: float = Field(..., description="Full scrollable height after the scroll.")
+    at_end: bool = Field(..., alias="atEnd")
+
+
+class PageScreenshotParams(BaseModel):
+    """
+    clip is a rectangle in top-level page coordinates and requires the clipScreenshot capability.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+    path: str = Field(
+        ..., description="Absolute path of the PNG file the driver must write."
+    )
+    full_page: bool | None = Field(
+        None, alias="fullPage", description="Default false: only the current viewport."
+    )
+    clip: Rect | None = None
+
+
+class PageScreenshotResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    path: str
+    width: int = Field(..., description="Image width in device pixels.", ge=0)
+    height: int = Field(..., ge=0)
+
+
+class ActionKind(str, Enum):
+    click = "click"
+    hover = "hover"
+    type = "type"
+    select = "select"
+    press = "press"
+
+
+class ElementTarget(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    selector: str
+    frame_id: str | None = Field(None, alias="frameId", description="Default 'main'.")
+
+
+class PageActParams(BaseModel):
+    """
+    Reserved for the explorer. Component extraction never sends it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., alias="sessionId")
+    action: ActionKind
+    target: ElementTarget
+    value: str | None = Field(
+        None, description="Text to type, option to select, or key to press."
+    )
+
+
+class PageActResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    ok: bool
+
+
+class LogLevel(str, Enum):
+    debug = "debug"
+    info = "info"
+    warn = "warn"
+    error = "error"
+
+
+class DriverLogParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    level: LogLevel
+    message: str
+
+
+class RpcErrorData(BaseModel):
+    """
+    The data field of a JSON-RPC error from a driver or the engine.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: str = Field(
+        ...,
+        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, internal.",
+    )
+    retryable: bool
+
+
+class TargetSummary(BaseModel):
+    """
+    One browser at one viewport.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    dir: str = Field(
+        ...,
+        description="Folder name inside the run folder, for example firefox-1280x800.",
+    )
+    target: BrowserTarget
+    viewport: Viewport
+    browser: BrowserInfo | None = None
+    status: RunStatus
+    component_count: int = Field(..., alias="componentCount", ge=0)
+    instance_count: int = Field(..., alias="instanceCount", ge=0)
+    warning_count: int = Field(..., alias="warningCount", ge=0)
+    duration_ms: int = Field(..., alias="durationMs", ge=0)
+    error: str | None = Field(None, description="Why this target failed, when it did.")
+
+
+class Event(BaseModel):
+    """
+    One line of events.jsonl. The same object is sent live to the caller.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    seq: int = Field(
+        ..., description="Starts at 0 and increases by 1 within a run.", ge=0
+    )
+    ts: str = Field(..., description="RFC 3339 timestamp in UTC.")
+    run_id: str = Field(..., alias="runId")
+    type: str = Field(
+        ...,
+        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.finished, run.finished, error.",
+    )
+    target: str | None = Field(
+        None,
+        description="The target folder name this event belongs to, when it belongs to one.",
+    )
+    message: str = Field(..., description="One human-readable sentence.")
+    data: dict[str, Any] | None = Field(
+        None, description="Extra fields that depend on the event type."
+    )
+
+
+class Instance(BaseModel):
+    """
+    One actual element on the page.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    key: str = Field(
+        ...,
+        description="The component id, a colon, and the instance's position in document order.",
+    )
+    name: str
+    tag: str
+    attrs: dict[str, str]
+    selectors: list[str]
+    box: Rect
+    state: ElementState
+    frame_id: str = Field(..., alias="frameId")
+    in_shadow_dom: bool = Field(..., alias="inShadowDom")
+
+
+class RunStartParams(BaseModel):
+    """
+    The engine runs every target at every viewport.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    feature: str = Field(..., description="Known values: extract.")
+    url: str
+    targets: list[BrowserTarget]
+    viewports: list[Viewport]
+    out_dir: str | None = Field(
+        None,
+        alias="outDir",
+        description="Where to create the run folder. Default ./runs.",
+    )
+    options: ExtractOptions | None = None
+
+
+class RunEventParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., alias="runId")
+    event: Event
+
+
+class InteractiveEvidence(BaseModel):
+    """
+    Why the collector thinks this element can be interacted with.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    confidence: Confidence
+    signals: list[str] = Field(
+        ...,
+        description="Known values: native, role, tabindex, onclick-attr, cursor-pointer, contenteditable.",
+    )
+
+
+class RunManifest(BaseModel):
+    """
+    run.json. Written at the start and rewritten at the end.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., alias="formatVersion", ge=0)
+    run_id: str = Field(..., alias="runId")
+    feature: str = Field(..., description="Known values: extract.")
+    url: str
+    status: RunStatus
+    started_at: str = Field(
+        ..., alias="startedAt", description="RFC 3339 timestamp in UTC."
+    )
+    finished_at: str | None = Field(None, alias="finishedAt")
+    engine_version: str = Field(..., alias="engineVersion")
+    targets: list[TargetSummary]
+
+
+class Component(BaseModel):
+    """
+    One kind of interactive element. Repeated copies are instances of the same component.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(
+        ...,
+        description="The fingerprint: 'c_' followed by 12 hex characters. See spec/fingerprint.md.",
+    )
+    role: str
+    name: str = Field(
+        ...,
+        description="Accessible name. When nameIsTemplate is true the instances have different names and this is '*'.",
+    )
+    name_is_template: bool = Field(..., alias="nameIsTemplate")
+    confidence: Confidence
+    signals: list[str]
+    path: str = Field(
+        ...,
+        description="Readable structural path, for example 'main > list \"Products\" > listitem'.",
+    )
+    crop: str | None = Field(
+        None,
+        description="Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.",
+    )
+    instances: list[Instance]
+
+
+class RunDoneParams(BaseModel):
+    """
+    Sent exactly once per run, after the run folder is complete.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., alias="runId")
+    status: RunStatus
+    manifest: RunManifest
+
+
+class RawElement(BaseModel):
+    """
+    One interactive element exactly as found on the page.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: str = Field(
+        ...,
+        description="ARIA role, explicit or implied by the tag. 'generic' when there is none.",
+    )
+    name: str = Field(
+        ..., description="Accessible name. Empty string when the element has none."
+    )
+    name_source: str | None = Field(
+        None,
+        alias="nameSource",
+        description="Where the name came from. Known values: aria-label, aria-labelledby, label, content, alt, title, placeholder, value.",
+    )
+    tag: str = Field(..., description="Lower-case tag name.")
+    attrs: dict[str, str] = Field(
+        ...,
+        description="A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder.",
+    )
+    text: str | None = Field(
+        None, description="Visible text, trimmed and capped at 200 characters."
+    )
+    selectors: list[str] = Field(
+        ...,
+        description="Ways to find this exact element again, most stable first. Each is a CSS selector inside the element's frame. For an element in shadow DOM the selector has parts joined by ' >>> ': each part is resolved inside the shadow root of the element the previous part matched.",
+    )
+    box: Rect
+    state: ElementState
+    in_shadow_dom: bool = Field(..., alias="inShadowDom")
+    path: list[PathStep] = Field(
+        ...,
+        description="Meaningful ancestors from the document root down to the parent. Only ancestors that have a non-generic role or that repeat among their siblings are listed.",
+    )
+    interactive: InteractiveEvidence
+
+
+class ComponentsFile(BaseModel):
+    """
+    components.json: every interactive component found on one page, in one browser, at one viewport.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., alias="formatVersion", ge=0)
+    fingerprint_version: int = Field(
+        ...,
+        alias="fingerprintVersion",
+        description="Version of the recipe that produced the component ids. Ids from different versions must not be compared.",
+        ge=0,
+    )
+    run_id: str = Field(..., alias="runId")
+    url: str = Field(..., description="URL that was asked for.")
+    final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
+    title: str
+    browser: BrowserInfo
+    viewport: Viewport
+    captured_at: str = Field(
+        ..., alias="capturedAt", description="RFC 3339 timestamp in UTC."
+    )
+    components: list[Component]
+    warnings: list[Warning]
+
+
+class CollectorResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    collector_version: int = Field(..., alias="collectorVersion", ge=0)
+    url: str
+    title: str
+    scroll: ScrollInfo
+    elements: list[RawElement] = Field(
+        ..., description="Interactive elements in document order."
+    )
+    warnings: list[Warning]

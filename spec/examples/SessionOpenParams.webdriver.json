@@ -1,0 +1,14 @@
+{
+  "target": {
+    "browser": "webdriver",
+    "webdriverUrl": "https://hub.example.com/wd/hub",
+    "webdriverCapabilities": {
+      "browserName": "safari",
+      "platformName": "macOS"
+    }
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  }
+}

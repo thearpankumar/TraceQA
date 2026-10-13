@@ -1,0 +1,8 @@
+{
+  "sessionId": "s1",
+  "script": "(arg) => window.__traceqaCollect(arg)",
+  "arg": {
+    "includeHidden": true
+  },
+  "allFrames": true
+}

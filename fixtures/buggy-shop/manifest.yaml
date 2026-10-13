@@ -1,0 +1,82 @@
+# What TraceQA should find on the Buggy Shop home page.
+#
+# The bench compares components.json against this list. Every interactive
+# element of the page is listed here, so anything else TraceQA reports counts
+# as "extra". Keep this file in step with site/ when the shop changes.
+#
+# Fields per component:
+#   case        which hard case it covers (free text, for the report)
+#   role, name  what it is. Use `template: true` when instances have different names.
+#   instances   how many copies exist (default 1)
+#   confidence  high (default) or low
+#   frame       name of the iframe it lives in (default: the main page)
+#   shadow      true when it is inside shadow DOM
+#   hidden      viewports where it is not visible: [desktop], [mobile] or both
+#   disabled    how many instances are disabled (default 0)
+
+viewports:
+  desktop: { width: 1280, height: 800 }
+  mobile: { width: 390, height: 844 }
+
+# Present in the page only after a click. Extraction must NOT report these.
+absent:
+  - { role: button, name: Close size guide }
+
+warnings:
+  - unnamed_interactive_element
+
+components:
+  # Header
+  - { case: plain, role: link, name: Buggy Shop }
+  - { case: mobile viewport, role: button, name: Open menu, hidden: [desktop] }
+  - { case: repeats that stay separate, role: link, name: Home, hidden: [mobile] }
+  - { case: repeats that stay separate, role: link, name: Products, hidden: [mobile] }
+  - { case: repeats that stay separate, role: link, name: Deals, hidden: [mobile] }
+  - { case: repeats that stay separate, role: link, name: Contact, hidden: [mobile] }
+  - { case: plain, role: searchbox, name: Search products }
+  - { case: plain, role: button, name: Search }
+  - { case: icon-only button, role: button, name: "" }
+
+  # Clickable elements with no role
+  - { case: fake button (pointer cursor), role: generic, name: See today's offers, confidence: low }
+  - { case: fake button (onclick), role: generic, name: Dismiss, confidence: low }
+  - { case: fake button (tabindex), role: generic, name: Gift cards, confidence: low }
+
+  # Filters
+  - { case: plain, role: combobox, name: Sort by }
+  - { case: plain, role: checkbox, name: In stock only }
+  - { case: plain, role: checkbox, name: On sale }
+  - { case: repeats that stay separate, role: radio, name: Any }
+  - { case: repeats that stay separate, role: radio, name: Under $25 }
+  - { case: repeats that stay separate, role: radio, name: Over $25 }
+  - { case: disabled control, role: button, name: Apply filters, disabled: 1 }
+  - { case: plain, role: button, name: Shipping info }
+  - { case: content behind a click, role: button, name: Open size guide }
+
+  # Product grid
+  - { case: templated names, role: link, template: true, instances: 12 }
+  - { case: grid of 12 cards, role: button, name: Add to cart, instances: 12, disabled: 1 }
+
+  # Cart preview
+  - { case: shadow DOM, role: button, name: Decrease quantity, shadow: true }
+  - { case: shadow DOM, role: spinbutton, name: Quantity, shadow: true }
+  - { case: shadow DOM, role: button, name: Increase quantity, shadow: true }
+  - { case: hidden control, role: button, name: Clear cart, hidden: [desktop, mobile] }
+  - { case: plain, role: textbox, name: Order notes }
+
+  # Labels that are not English
+  - { case: non-English label, role: button, name: कार्ट देखें }
+  - { case: non-English label, role: link, name: تواصل معنا }
+
+  # Frames
+  - { case: same-origin iframe, role: textbox, name: Email address, frame: newsletter }
+  - { case: same-origin iframe, role: button, name: Subscribe, frame: newsletter }
+  - { case: cross-origin iframe, role: textbox, name: Card number, frame: pay }
+  - { case: cross-origin iframe, role: button, name: Pay now, frame: pay }
+
+  # Lazy list: 3 on load, 9 after scrolling
+  - { case: list that loads on scroll, role: button, name: Helpful, instances: 9 }
+
+  # Footer
+  - { case: plain, role: link, name: Privacy }
+  - { case: plain, role: link, name: Terms }

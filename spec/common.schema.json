@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "title": "TraceQA common types",
+  "description": "Types shared by more than one contract.",
+  "x-traceqa": { "contract": "common", "version": 1 },
+  "$defs": {
+    "Empty": {
+      "description": "No fields.",
+      "type": "object",
+      "properties": {}
+    },
+    "Viewport": {
+      "description": "Size of the browser window content area, in CSS pixels.",
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Rect": {
+      "description": "A rectangle in CSS pixels. Inside a RawElement it is relative to that frame's document. Everywhere else it is relative to the top-level page.",
+      "type": "object",
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number" },
+        "h": { "type": "number" }
+      }
+    },
+    "BrowserTarget": {
+      "description": "Which browser to run in. The engine passes this to a driver and never interprets it.",
+      "type": "object",
+      "required": ["browser"],
+      "properties": {
+        "browser": {
+          "description": "Browser name. Known values: chromium, chrome, msedge, firefox, webkit, safari, cdp, webdriver.",
+          "type": "string"
+        },
+        "cdpEndpoint": {
+          "description": "WebSocket or HTTP endpoint of an already running browser. Used with browser = cdp.",
+          "type": "string"
+        },
+        "webdriverUrl": {
+          "description": "URL of a W3C WebDriver server, local or a cloud grid. Used with browser = webdriver.",
+          "type": "string"
+        },
+        "webdriverCapabilities": {
+          "description": "Capabilities to ask the WebDriver server for, for example { \"browserName\": \"safari\" }.",
+          "type": "object"
+        },
+        "headless": { "type": "boolean" }
+      }
+    },
+    "BrowserInfo": {
+      "description": "What actually ran, as reported by the driver.",
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "Warning": {
+      "description": "Something that did not stop the run but that the reader should know.",
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree.",
+          "type": "string"
+        },
+        "message": { "type": "string" }
+      }
+    },
+    "ElementState": {
+      "description": "State of one element at the moment it was read.",
+      "type": "object",
+      "required": ["visible", "enabled", "inViewport"],
+      "properties": {
+        "visible": {
+          "description": "False when the element is hidden by CSS, has no size, or is inside a hidden ancestor.",
+          "type": "boolean"
+        },
+        "enabled": { "type": "boolean" },
+        "inViewport": { "type": "boolean" },
+        "checked": { "type": "boolean" },
+        "expanded": { "type": "boolean" },
+        "selected": { "type": "boolean" },
+        "pressed": { "type": "boolean" },
+        "readonly": { "type": "boolean" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "Confidence": {
+      "description": "How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).",
+      "type": "string",
+      "enum": ["high", "low"]
+    },
+    "RunStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "cancelled"]
+    }
+  }
+}

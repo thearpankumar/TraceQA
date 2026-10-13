@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buggy Shop</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Buggy Shop</a>
+    <!-- Case: mobile viewport. Shown only below 600px. -->
+    <button id="menu-btn" class="menu-btn" aria-expanded="false" aria-controls="main-nav">Open menu</button>
+    <!-- Case: repeated items that are NOT one component. Hidden below 600px. -->
+    <nav id="main-nav" aria-label="Main">
+      <ul>
+        <li><a href="/">Home</a></li>
+        <li><a href="/#products">Products</a></li>
+        <li><a href="/#deals">Deals</a></li>
+        <li><a href="/#contact">Contact</a></li>
+      </ul>
+    </nav>
+    <form role="search" aria-label="Site search" onsubmit="return false">
+      <input type="search" aria-label="Search products" placeholder="Search">
+      <button type="submit">Search</button>
+    </form>
+    <!-- Case: icon-only button with no label. -->
+    <button id="cart-btn" class="icon-btn" type="button">
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 3h3l2 9h8l2-6H6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <h1>Everything slightly broken</h1>
+
+    <!-- Case: clickable elements with no role. -->
+    <div id="promo" class="promo">See today's offers</div>
+    <p class="notice">Free shipping this week. <span class="dismiss" onclick="this.parentElement.remove()">Dismiss</span></p>
+    <div class="tile" tabindex="0">Gift cards</div>
+
+    <fieldset id="filters">
+      <legend>Filters</legend>
+      <div class="row">
+        <label for="sort">Sort by</label>
+        <select id="sort">
+          <option>Featured</option>
+          <option>Price: low to high</option>
+          <option>Price: high to low</option>
+        </select>
+      </div>
+      <div class="row"><input type="checkbox" id="in-stock"><label for="in-stock">In stock only</label></div>
+      <div class="row"><input type="checkbox" id="on-sale" checked><label for="on-sale">On sale</label></div>
+      <!-- Case: repeated controls that are each their own component. -->
+      <fieldset>
+        <legend>Price</legend>
+        <label><input type="radio" name="price" checked> Any</label>
+        <label><input type="radio" name="price"> Under $25</label>
+        <label><input type="radio" name="price"> Over $25</label>
+      </fieldset>
+      <!-- Case: disabled control. -->
+      <button type="button" disabled>Apply filters</button>
+    </fieldset>
+
+    <details>
+      <summary>Shipping info</summary>
+      <p>Orders ship in two to four days.</p>
+    </details>
+
+    <!-- Case: content behind a click. The dialog is created on click, so only this button exists on load. -->
+    <button id="size-guide-btn" type="button">Open size guide</button>
+
+    <h2 id="products">Products</h2>
+    <!-- Case: grid of 12 cards. Filled by app.js. -->
+    <ul id="grid" class="grid" aria-label="Products"></ul>
+
+    <section aria-label="Cart preview">
+      <h2>Cart preview</h2>
+      <!-- Case: shadow DOM. -->
+      <quantity-stepper></quantity-stepper>
+      <!-- Case: hidden controls. -->
+      <div hidden>
+        <button type="button">Clear cart</button>
+      </div>
+      <div class="notes" contenteditable="true" aria-label="Order notes"></div>
+    </section>
+
+    <!-- Case: labels that are not English. -->
+    <section aria-label="Languages">
+      <button type="button" lang="hi">कार्ट देखें</button>
+      <a href="/#contact" lang="ar" dir="rtl">تواصل معنا</a>
+    </section>
+
+    <!-- Case: same-origin iframe. -->
+    <iframe name="newsletter" title="Newsletter" src="frames/newsletter.html" width="320" height="120"></iframe>
+    <!-- Case: cross-origin iframe. app.js points it at the second port. -->
+    <iframe name="pay" title="Payment" width="320" height="120"></iframe>
+
+    <h2>Reviews</h2>
+    <!-- Case: list that loads more on scroll. Starts with 3, grows to 9. -->
+    <ul id="reviews" aria-label="Reviews"></ul>
+    <div id="reviews-sentinel"></div>
+  </main>
+
+  <footer>
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
