@@ -1,0 +1,154 @@
+"""Drives the real driver process against the Buggy Shop.
+
+WebDriver is one protocol for every browser, so the driver is exercised with
+chromedriver, which is easy to run headless. Set TRACEQA_CHROMEDRIVER or put
+chromedriver on PATH. Without it the test is skipped, unless
+TRACEQA_REQUIRE_CHROMEDRIVER=1, which makes a missing chromedriver a failure.
+The Safari test needs "Allow remote automation" switched on in Safari's
+Developer settings, and runs only when TRACEQA_TEST_SAFARI=1.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+from traceqa_protocol import contracts, models
+from traceqa_protocol.testing import DriverClient, RpcFailure
+
+ROOT = Path(__file__).resolve().parents[3]
+COLLECTOR = (ROOT / "collector" / "collector.js").read_text(encoding="utf-8")
+HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
+VIEWPORT = {"width": 1280, "height": 800}
+CHROMEDRIVER = os.environ.get("TRACEQA_CHROMEDRIVER") or shutil.which("chromedriver")
+
+
+@pytest.fixture(scope="module")
+def chrome_target() -> Iterator[dict[str, Any]]:
+    if not CHROMEDRIVER or not Path(CHROMEDRIVER).is_file():
+        missing = "chromedriver not found: set TRACEQA_CHROMEDRIVER or put it on PATH"
+        # CI sets this, so a machine without chromedriver fails loudly instead of skipping the driver's tests.
+        if os.environ.get("TRACEQA_REQUIRE_CHROMEDRIVER") == "1":
+            pytest.fail(missing)
+        pytest.skip(missing)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = subprocess.Popen([CHROMEDRIVER, f"--port={port}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    url = f"http://127.0.0.1:{port}"
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(f"{url}/status", timeout=1).close()
+            break
+        except OSError:
+            time.sleep(0.1)
+    # --no-sandbox: Chrome's sandbox cannot start on some CI machines, and this only ever opens the demo shop.
+    capabilities = {"browserName": "chrome", "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox"]}}
+    yield {"browser": "webdriver", "webdriverUrl": url, "webdriverCapabilities": capabilities}
+    server.terminate()
+    server.wait(timeout=10)
+
+
+@pytest.fixture
+def driver() -> Iterator[DriverClient]:
+    client = DriverClient([sys.executable, "-m", "traceqa_driver_webdriver"])
+    yield client
+    client.shutdown()
+
+
+def names(result: models.CollectorResult, role: str) -> list[str]:
+    return [element.name for element in result.elements if element.role == role]
+
+
+def collect(driver: DriverClient, session_id: str) -> dict[str, models.FrameEvalResult]:
+    raw = driver.call("page.eval", {"sessionId": session_id, "script": COLLECTOR, "arg": {}, "allFrames": True})
+    results = models.PageEvalResult.model_validate(raw).results
+    return {result.frame.name or result.frame.id: result for result in results}
+
+
+def read_the_shop(driver: DriverClient, target: dict[str, Any], shop_url: str, tmp_path: Path) -> None:
+    assert target["browser"] in driver.call("driver.hello", HELLO)["browsers"]
+    session = driver.call("session.open", {"target": target, "viewport": VIEWPORT})
+    session_id = session["sessionId"]
+    # What the driver cannot do is declared, so the engine never asks for it.
+    assert session["capabilities"]["fullPageScreenshot"] is False
+
+    page = driver.call("page.goto", {"sessionId": session_id, "url": shop_url, "waitUntil": "settled"})
+    assert page["title"] == "Buggy Shop" and page["finalUrl"] == shop_url
+
+    frames = collect(driver, session_id)
+    assert set(frames) == {"main", "newsletter", "pay"}
+    main = models.CollectorResult.model_validate(frames["main"].value)
+    assert names(main, "button").count("Add to cart") == 12
+    assert [element.in_shadow_dom for element in main.elements if element.name == "Increase quantity"] == [True]
+    pay = frames["pay"]
+    assert pay.frame.cross_origin and not frames["newsletter"].frame.cross_origin
+    assert pay.frame.box.w == 320 and pay.frame.box.y > frames["newsletter"].frame.box.y
+    assert names(models.CollectorResult.model_validate(pay.value), "button") == ["Pay now"]
+
+    height = 0
+    for _ in range(10):
+        scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
+        if scrolled["height"] == height:
+            break
+        height = scrolled["height"]
+    assert scrolled["atEnd"]
+    again = collect(driver, session_id)
+    assert names(models.CollectorResult.model_validate(again["main"].value), "button").count("Helpful") == 9
+    # Frames keep their ids from one call to the next.
+    assert {name: result.frame.id for name, result in again.items()} == {
+        name: result.frame.id for name, result in frames.items()
+    }
+
+    shot = driver.call("page.screenshot", {"sessionId": session_id, "path": str(tmp_path / "page.png")})
+    assert (tmp_path / "page.png").stat().st_size > 0 and shot["width"] >= VIEWPORT["width"]
+    with pytest.raises(RpcFailure) as full_page:
+        driver.call("page.screenshot", {"sessionId": session_id, "path": str(tmp_path / "full.png"), "fullPage": True})
+    assert full_page.value.kind == "unsupported"
+
+    driver.call("session.close", {"sessionId": session_id})
+    with pytest.raises(RpcFailure) as closed:
+        driver.call("page.goto", {"sessionId": session_id, "url": shop_url})
+    assert closed.value.kind == "session_not_found"
+
+
+def test_reads_the_shop_through_a_webdriver_server(
+    driver: DriverClient, chrome_target: dict[str, Any], shop_url: str, tmp_path: Path
+) -> None:
+    read_the_shop(driver, chrome_target, shop_url, tmp_path)
+
+
+@pytest.mark.skipif(
+    os.environ.get("TRACEQA_TEST_SAFARI") != "1", reason="set TRACEQA_TEST_SAFARI=1 to drive real Safari"
+)
+def test_reads_the_shop_in_safari(driver: DriverClient, shop_url: str, tmp_path: Path) -> None:
+    read_the_shop(driver, {"browser": "safari"}, shop_url, tmp_path)
+
+
+def test_refuses_what_it_cannot_do(driver: DriverClient) -> None:
+    cases = [
+        ("driver.hello", {"protocolVersion": 999, "engineVersion": "test"}, "version_mismatch"),
+        ("session.open", {"target": {"browser": "firefox"}, "viewport": VIEWPORT}, "unsupported"),
+        ("session.open", {"target": {"browser": "webdriver"}, "viewport": VIEWPORT}, "invalid_params"),
+        # Nothing listens on port 9: the failure is reported, not raised through the pipe.
+        (
+            "session.open",
+            {"target": {"browser": "webdriver", "webdriverUrl": "http://127.0.0.1:9"}, "viewport": VIEWPORT},
+            "internal",
+        ),
+        ("page.act", {"sessionId": "s1", "action": "click", "target": {"selector": "a"}}, "unsupported"),
+    ]
+    for method, params, kind in cases:
+        with pytest.raises(RpcFailure) as failure:
+            driver.call(method, params)
+        assert failure.value.kind == kind, method
+    assert driver.call("driver.hello", HELLO)["driverName"] == "traceqa-driver-webdriver"

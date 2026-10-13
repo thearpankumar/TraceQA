@@ -1,0 +1,18 @@
+[package]
+name = "traceqa-protocol"
+description = "Message and file types generated from spec/, plus the JSON-RPC line format."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+prettyplease = "0.3.0"
+schemars = "0.8"
+serde_json.workspace = true
+syn = "3.0.9"
+typify = "0.8.0"

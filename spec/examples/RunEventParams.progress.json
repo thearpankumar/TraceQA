@@ -1,0 +1,15 @@
+{
+  "runId": "r_20261013_210455_a1b2",
+  "event": {
+    "seq": 3,
+    "ts": "2026-10-13T15:34:53Z",
+    "runId": "r_20261013_210455_a1b2",
+    "type": "elements.collected",
+    "target": "firefox-1280x800",
+    "message": "Found 42 elements in 2 frames",
+    "data": {
+      "elements": 42,
+      "frames": 2
+    }
+  }
+}

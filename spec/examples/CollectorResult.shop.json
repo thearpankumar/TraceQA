@@ -1,0 +1,104 @@
+{
+  "collectorVersion": 1,
+  "url": "https://shop.test/",
+  "title": "Buggy Shop",
+  "scroll": {
+    "y": 0,
+    "height": 2400,
+    "viewportHeight": 800
+  },
+  "elements": [
+    {
+      "role": "button",
+      "name": "Add to cart",
+      "nameSource": "content",
+      "tag": "button",
+      "attrs": {
+        "type": "button",
+        "data-testid": "add-to-cart"
+      },
+      "text": "Add to cart",
+      "selectors": [
+        "#grid > li:nth-of-type(1) > button",
+        "body > main > ul > li:nth-of-type(1) > button"
+      ],
+      "box": {
+        "x": 212,
+        "y": 480,
+        "w": 120,
+        "h": 36
+      },
+      "state": {
+        "visible": true,
+        "enabled": true,
+        "inViewport": true
+      },
+      "inShadowDom": false,
+      "path": [
+        {
+          "role": "main",
+          "tag": "main"
+        },
+        {
+          "role": "list",
+          "name": "Products",
+          "tag": "ul"
+        },
+        {
+          "role": "listitem",
+          "tag": "li",
+          "repeatIndex": 0,
+          "repeatCount": 12
+        }
+      ],
+      "interactive": {
+        "confidence": "high",
+        "signals": [
+          "native"
+        ]
+      }
+    },
+    {
+      "role": "generic",
+      "name": "",
+      "tag": "div",
+      "attrs": {
+        "id": "promo"
+      },
+      "text": "See offers",
+      "selectors": [
+        "#promo"
+      ],
+      "box": {
+        "x": 40,
+        "y": 120.5,
+        "w": 300,
+        "h": 80
+      },
+      "state": {
+        "visible": true,
+        "enabled": true,
+        "inViewport": true
+      },
+      "inShadowDom": false,
+      "path": [
+        {
+          "role": "main",
+          "tag": "main"
+        }
+      ],
+      "interactive": {
+        "confidence": "low",
+        "signals": [
+          "cursor-pointer"
+        ]
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "code": "unnamed_interactive_element",
+      "message": "div#promo looks clickable but has no accessible name"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "sessionId": "s1",
+  "browser": {
+    "name": "firefox",
+    "version": "143.0"
+  },
+  "capabilities": {
+    "clipScreenshot": true,
+    "fullPageScreenshot": true,
+    "evalAllFrames": true,
+    "crossOriginFrames": true,
+    "parallelSessions": true,
+    "setViewport": true,
+    "consoleEvents": true,
+    "networkEvents": true
+  }
+}

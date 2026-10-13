@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "frame": {
+        "id": "main",
+        "url": "https://shop.test/",
+        "crossOrigin": false
+      },
+      "value": {
+        "collectorVersion": 1
+      }
+    },
+    {
+      "frame": {
+        "id": "f1",
+        "parentId": "main",
+        "url": "https://pay.example.com/widget",
+        "name": "pay",
+        "crossOrigin": true,
+        "box": {
+          "x": 800,
+          "y": 300,
+          "w": 320,
+          "h": 200
+        }
+      },
+      "error": "blocked by the frame's content security policy"
+    }
+  ]
+}

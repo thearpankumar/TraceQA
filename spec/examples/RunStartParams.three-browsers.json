@@ -1,0 +1,30 @@
+{
+  "feature": "extract",
+  "url": "https://shop.test",
+  "targets": [
+    {
+      "browser": "chromium"
+    },
+    {
+      "browser": "firefox"
+    },
+    {
+      "browser": "webkit"
+    }
+  ],
+  "viewports": [
+    {
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "options": {
+    "maxScrollSteps": 20,
+    "crops": true,
+    "settleMs": 3000
+  }
+}

@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Style and generated code. These do not depend on the operating system, so they run once.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+
+      - name: Rust format
+        run: cargo fmt --all --check
+      - name: Rust lint
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Python lint
+        run: uv run ruff check .
+      - name: Python format
+        run: uv run ruff format --check .
+      - name: Generated Python types match spec/
+        run: uv run scripts/gen_python_protocol.py --check
+
+  # Everything that runs: the Rust crates, the release binary, both drivers, the SDK and the bench.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # One system failing should not hide what the others do.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: traceqa
+            artifact: traceqa-linux-x86_64
+          - os: macos-latest
+            binary: traceqa
+            artifact: traceqa-macos-arm64
+          - os: windows-latest
+            binary: traceqa.exe
+            artifact: traceqa-windows-x86_64
+    env:
+      # The SDK tests and the bench use the release binary: the same file that is uploaded below.
+      TRACEQA_BIN: ${{ github.workspace }}/target/release/${{ matrix.binary }}
+      # The WebDriver driver is tested against chromedriver. Missing chromedriver is a failure, not a skip.
+      TRACEQA_REQUIRE_CHROMEDRIVER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+
+      # Rust: the protocol, engine, recorder and CLI crates.
+      - name: Rust tests
+        run: cargo test --locked
+
+      # The binary that ships.
+      - name: Build the release binary
+        run: cargo build --release --locked
+      - name: The binary starts
+        shell: bash
+        run: |
+          "$TRACEQA_BIN" --version
+          "$TRACEQA_BIN" extract --help
+
+      # Python: the drivers, the protocol package and the SDK, against real browsers.
+      - name: Install the Python packages
+        run: uv sync --locked
+      - name: Install browsers
+        run: uv run playwright install --with-deps chromium firefox webkit
+      - name: Find chromedriver
+        shell: bash
+        run: |
+          # GitHub's machines ship chromedriver next to a matching Chrome and name its folder here.
+          echo "TRACEQA_CHROMEDRIVER=${CHROMEWEBDRIVER}/chromedriver${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+      - name: Python tests
+        run: uv run pytest
+
+      # End to end: the binary, a driver, three browsers and the collector on the demo site.
+      - name: Bench
+        run: uv run bench/run.py --json bench-scores.json
+
+      - name: Upload the bench scores
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-scores-${{ matrix.os }}
+          path: bench-scores.json
+          if-no-files-found: ignore
+      - name: Upload the binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/release/${{ matrix.binary }}
+          if-no-files-found: error

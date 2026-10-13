@@ -1,0 +1,13 @@
+{
+  "driverName": "traceqa-driver-playwright",
+  "driverVersion": "0.1.0",
+  "protocolVersion": 1,
+  "browsers": [
+    "chromium",
+    "chrome",
+    "msedge",
+    "firefox",
+    "webkit",
+    "cdp"
+  ]
+}

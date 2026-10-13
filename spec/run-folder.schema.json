@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "run-folder.schema.json",
+  "title": "TraceQA run folder",
+  "description": "The files one run writes. Layout: run.json (RunManifest), events.jsonl (one Event per line), and one folder per browser and viewport holding components.json (ComponentsFile), page.png and crops/.",
+  "x-traceqa": { "contract": "run-folder", "version": 1 },
+  "$defs": {
+    "RunManifest": {
+      "description": "run.json. Written at the start and rewritten at the end.",
+      "type": "object",
+      "required": ["formatVersion", "runId", "feature", "url", "status", "startedAt", "engineVersion", "targets"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "runId": { "type": "string" },
+        "feature": { "description": "Known values: extract.", "type": "string" },
+        "url": { "type": "string" },
+        "status": { "$ref": "common.schema.json#/$defs/RunStatus" },
+        "startedAt": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
+        "finishedAt": { "type": "string" },
+        "engineVersion": { "type": "string" },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/TargetSummary" } }
+      }
+    },
+    "TargetSummary": {
+      "description": "One browser at one viewport.",
+      "type": "object",
+      "required": ["dir", "target", "viewport", "status", "componentCount", "instanceCount", "warningCount", "durationMs"],
+      "properties": {
+        "dir": { "description": "Folder name inside the run folder, for example firefox-1280x800.", "type": "string" },
+        "target": { "$ref": "common.schema.json#/$defs/BrowserTarget" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "status": { "$ref": "common.schema.json#/$defs/RunStatus" },
+        "componentCount": { "type": "integer", "minimum": 0 },
+        "instanceCount": { "type": "integer", "minimum": 0 },
+        "warningCount": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "error": { "description": "Why this target failed, when it did.", "type": "string" }
+      }
+    },
+    "Event": {
+      "description": "One line of events.jsonl. The same object is sent live to the caller.",
+      "type": "object",
+      "required": ["seq", "ts", "runId", "type", "message"],
+      "properties": {
+        "seq": { "description": "Starts at 0 and increases by 1 within a run.", "type": "integer", "minimum": 0 },
+        "ts": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
+        "runId": { "type": "string" },
+        "type": {
+          "description": "Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.finished, run.finished, error.",
+          "type": "string"
+        },
+        "target": { "description": "The target folder name this event belongs to, when it belongs to one.", "type": "string" },
+        "message": { "description": "One human-readable sentence.", "type": "string" },
+        "data": { "description": "Extra fields that depend on the event type.", "type": "object" }
+      }
+    },
+    "ComponentsFile": {
+      "description": "components.json: every interactive component found on one page, in one browser, at one viewport.",
+      "type": "object",
+      "required": [
+        "formatVersion",
+        "fingerprintVersion",
+        "runId",
+        "url",
+        "finalUrl",
+        "title",
+        "browser",
+        "viewport",
+        "capturedAt",
+        "components",
+        "warnings"
+      ],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "fingerprintVersion": {
+          "description": "Version of the recipe that produced the component ids. Ids from different versions must not be compared.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "runId": { "type": "string" },
+        "url": { "description": "URL that was asked for.", "type": "string" },
+        "finalUrl": { "description": "URL after redirects.", "type": "string" },
+        "title": { "type": "string" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "capturedAt": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
+        "components": { "type": "array", "items": { "$ref": "#/$defs/Component" } },
+        "warnings": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/Warning" } }
+      }
+    },
+    "Component": {
+      "description": "One kind of interactive element. Repeated copies are instances of the same component.",
+      "type": "object",
+      "required": ["id", "role", "name", "nameIsTemplate", "confidence", "signals", "path", "instances"],
+      "properties": {
+        "id": { "description": "The fingerprint: 'c_' followed by 12 hex characters. See spec/fingerprint.md.", "type": "string" },
+        "role": { "type": "string" },
+        "name": {
+          "description": "Accessible name. When nameIsTemplate is true the instances have different names and this is '*'.",
+          "type": "string"
+        },
+        "nameIsTemplate": { "type": "boolean" },
+        "confidence": { "$ref": "common.schema.json#/$defs/Confidence" },
+        "signals": { "type": "array", "items": { "type": "string" } },
+        "path": {
+          "description": "Readable structural path, for example 'main > list \"Products\" > listitem'.",
+          "type": "string"
+        },
+        "crop": { "description": "Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.", "type": "string" },
+        "instances": { "type": "array", "items": { "$ref": "#/$defs/Instance" } }
+      }
+    },
+    "Instance": {
+      "description": "One actual element on the page.",
+      "type": "object",
+      "required": ["key", "name", "tag", "attrs", "selectors", "box", "state", "frameId", "inShadowDom"],
+      "properties": {
+        "key": { "description": "The component id, a colon, and the instance's position in document order.", "type": "string" },
+        "name": { "type": "string" },
+        "tag": { "type": "string" },
+        "attrs": { "type": "object", "additionalProperties": { "type": "string" } },
+        "selectors": { "type": "array", "items": { "type": "string" } },
+        "box": { "$ref": "common.schema.json#/$defs/Rect" },
+        "state": { "$ref": "common.schema.json#/$defs/ElementState" },
+        "frameId": { "type": "string" },
+        "inShadowDom": { "type": "boolean" }
+      }
+    }
+  }
+}

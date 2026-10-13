@@ -1,0 +1,18 @@
+[package]
+name = "traceqa-engine"
+description = "The TraceQA engine: all logic lives here. A library, so the CLI, the server and the MCP server can share it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.11.1"
+traceqa-protocol.workspace = true
+traceqa-recorder = { version = "0.1.0", path = "../traceqa-recorder" }
+unicode-normalization = "0.1.25"
+
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
