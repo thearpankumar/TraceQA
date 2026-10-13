@@ -43,7 +43,9 @@ See [architecture.md](architecture.md) for how the parts fit together and
 | The engine is a library crate. The CLI is a thin crate on top. | The server and MCP crates can reuse the engine without depending on the CLI. |
 | The engine picks a driver by asking each one which browsers it opens. | The engine contains no browser names. |
 | Crops are cut from screenshots taken while scrolling through the page. | A single full-page screenshot misses content that animates in or is pinned while scrolling. It also needs no special ability from the browser. |
-| The engine uses threads and blocking pipes, not an async runtime. | Each run talks to one driver at a time. Nothing here needs more yet. |
+| The engine uses threads and blocking pipes, not an async runtime. | Each worker talks to one driver at a time. Nothing here needs more yet. |
+| Browsers run in parallel, each worker with its own driver processes. | A run takes about as long as its slowest browsers. A driver that hangs takes only its own target with it. |
+| Pictures are off unless asked for. Without them the page is only scrolled, then read once. | Nothing in the engine reads the pictures, and they cost most of the time on a long page. The features that come next work on the data. |
 
 ## Feature 1: component extraction
 
@@ -131,6 +133,28 @@ Limits these sites showed that are still there:
   means ids are comparable across browsers, not always across viewports.
 - **Time.** Long pages take up to a minute per browser and viewport.
 
+### Speed
+
+Measured on one machine (Apple silicon, 4 browsers at a time), three browsers at
+two viewports. The default is in parallel without pictures. "One at a time" is
+`--parallel 1`.
+
+| Page | Pictures, one at a time | Pictures, in parallel | Default: no pictures, in parallel |
+|---|---|---|---|
+| Demo shop | 24 s | 8 s | 7 s |
+| `www.avqentra.in` | 94 s | 34 s | 26 s |
+| `t3works.vercel.app` | not measured | 53 s | 34 s |
+| `portfolio-theta-lyart-35.vercel.app` | about 250 s, on an earlier build | 86 s | 27 s |
+| `prabhav.avqentra.in`, with `--settle-ms 6000` | not measured | 22 s | not measured |
+
+Components and ids were the same in every mode. `--timings` shows that on a long
+page most of the time is scrolling and waiting after each scroll, and on a short
+one most of it is the page load.
+
+One parallel run of `prabhav.avqentra.in` had page loads of 24 seconds and one
+timeout, where a later run had loads of 8 seconds. That led to the retry for
+targets that time out beside others.
+
 ### Not done or not verified
 
 - **Real Safari.** The WebDriver driver is written and passes its tests against
@@ -156,7 +180,12 @@ Limits these sites showed that are still there:
 - **Fingerprint freeze.** The recipe is stable on the shop and on four real
   sites, after one change. See `spec/fingerprint.md`.
 - **`page.act`.** Reserved in the driver protocol. No driver implements it.
-- **One target at a time.** Browsers run one after another, not in parallel.
+- **Slow content at the end of a page.** After each scroll the engine waits for
+  the page height to stop changing. Content that takes longer than that to
+  arrive when the bottom is reached is missed.
+- **Parallel runs on heavy pages.** Several browsers rendering a heavy page at
+  once can make its loads slow. A browser that times out is retried alone, but
+  one that is merely slow is not.
 - **Virtualised lists.** A list that removes rows as you scroll is read as it
   stands after the last scroll.
 

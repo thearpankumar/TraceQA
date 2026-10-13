@@ -45,6 +45,11 @@
           "description": "Browser names this driver can open.",
           "type": "array",
           "items": { "type": "string" }
+        },
+        "exclusiveBrowsers": {
+          "description": "Browsers of which only one session can exist on the machine at a time, whichever process opens it. The engine never runs two of these at once.",
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },
@@ -168,6 +173,11 @@
       }
     },
     "ScrollTo": { "type": "string", "enum": ["top", "bottom"] },
+    "ScrollWait": {
+      "description": "What to wait for after scrolling. animations: the page height is stable and animations that end have ended. height: only that the page height is stable, which is quicker and enough when no picture is taken.",
+      "type": "string",
+      "enum": ["animations", "height"]
+    },
     "PageScrollParams": {
       "description": "Give exactly one of to or byY.",
       "type": "object",
@@ -175,7 +185,8 @@
       "properties": {
         "sessionId": { "type": "string" },
         "to": { "$ref": "#/$defs/ScrollTo" },
-        "byY": { "description": "Pixels to scroll down. Negative scrolls up.", "type": "number" }
+        "byY": { "description": "Pixels to scroll down. Negative scrolls up.", "type": "number" },
+        "waitFor": { "$ref": "#/$defs/ScrollWait" }
       }
     },
     "PageScrollResult": {

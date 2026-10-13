@@ -124,9 +124,9 @@ def fit_viewport(webdriver: WebDriverSession, width: int, height: int) -> tuple[
     return inner
 
 
-def settle(webdriver: WebDriverSession, limit_s: float) -> None:
-    """Wait until the page has stopped growing and its animations have ended."""
-    wait_until_settled(lambda: webdriver.execute(f"return {PAGE_STATE};"), time.sleep, limit_s)
+def settle(webdriver: WebDriverSession, limit_s: float, *, animations: bool = True) -> None:
+    """Wait until the page has stopped growing and, unless told otherwise, its animations have ended."""
+    wait_until_settled(lambda: webdriver.execute(f"return {PAGE_STATE};"), time.sleep, limit_s, animations=animations)
 
 
 class WebDriverDriver:
@@ -166,6 +166,8 @@ class WebDriverDriver:
             driver_version=VERSION,
             protocol_version=contracts.DRIVER_PROTOCOL_VERSION,
             browsers=[SAFARI, REMOTE],
+            # Safari allows one automated session on the whole machine.
+            exclusive_browsers=[SAFARI],
         )
 
     def shutdown(self, _params: models.Empty) -> models.Empty:
@@ -334,7 +336,7 @@ class WebDriverDriver:
                 webdriver.execute("window.scrollTo(0, document.documentElement.scrollHeight);")
             else:
                 webdriver.execute("window.scrollBy(0, arguments[0]);", params.by_y)
-            settle(webdriver, SETTLE_AFTER_SCROLL_S)
+            settle(webdriver, SETTLE_AFTER_SCROLL_S, animations=params.wait_for != models.ScrollWait.height)
             state = webdriver.execute(SCROLL_STATE)
         except WebDriverError as error:
             raise RpcError("internal", f"scroll failed: {error.message}") from error

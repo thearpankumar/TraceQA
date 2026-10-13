@@ -18,7 +18,12 @@ pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine f
 def test_extract_returns_what_the_engine_wrote(shop_url: str, tmp_path: Path) -> None:
     events: list[models.Event] = []
     result = traceqa.extract(
-        shop_url, binary=BINARY, out_dir=tmp_path, viewports=[(1280, 800), (390, 844)], on_event=events.append
+        shop_url,
+        binary=BINARY,
+        out_dir=tmp_path,
+        viewports=[(1280, 800), (390, 844)],
+        crops=True,
+        on_event=events.append,
     )
 
     assert result.status == models.RunStatus.completed
@@ -55,12 +60,15 @@ def test_one_engine_serves_several_calls_and_reports_refusals(shop_url: str, tmp
         assert failed.status == models.RunStatus.failed
         assert "no driver can open" in failed.targets[0].error
 
-        fine = engine.extract(shop_url, out_dir=tmp_path, crops=False, max_scroll_steps=0)
+        # Pictures are off unless asked for.
+        fine = engine.extract(shop_url, out_dir=tmp_path, max_scroll_steps=0)
         assert fine.status == models.RunStatus.completed
         components = fine.components().components
         # Without scrolling, only the first three reviews have loaded.
         assert len(next(c for c in components if c.name == "Helpful").instances) == 3
         assert all(c.crop is None for c in components)
+        target_dir = fine.run_folder / fine.targets[0].dir
+        assert sorted(path.name for path in target_dir.iterdir()) == ["components.json"]
     assert list(tmp_path.iterdir())
 
 

@@ -51,7 +51,8 @@ class ExtractOptions(BaseModel):
         ge=0,
     )
     crops: bool | None = Field(
-        None, description="Save one screenshot crop per component. Default true."
+        None,
+        description="Also save pictures: a screenshot of the page and one crop per component. Slower, because the page is then read and photographed one screen at a time. Default false.",
     )
     include_hidden: bool | None = Field(
         None,
@@ -263,6 +264,11 @@ class DriverHelloResult(BaseModel):
         ge=0,
     )
     browsers: list[str] = Field(..., description="Browser names this driver can open.")
+    exclusive_browsers: list[str] | None = Field(
+        None,
+        alias="exclusiveBrowsers",
+        description="Browsers of which only one session can exist on the machine at a time, whichever process opens it. The engine never runs two of these at once.",
+    )
 
 
 class Capabilities(BaseModel):
@@ -432,6 +438,15 @@ class ScrollTo(str, Enum):
     bottom = "bottom"
 
 
+class ScrollWait(str, Enum):
+    """
+    What to wait for after scrolling. animations: the page height is stable and animations that end have ended. height: only that the page height is stable, which is quicker and enough when no picture is taken.
+    """
+
+    animations = "animations"
+    height = "height"
+
+
 class PageScrollParams(BaseModel):
     """
     Give exactly one of to or byY.
@@ -445,6 +460,7 @@ class PageScrollParams(BaseModel):
     by_y: float | None = Field(
         None, alias="byY", description="Pixels to scroll down. Negative scrolls up."
     )
+    wait_for: ScrollWait | None = Field(None, alias="waitFor")
 
 
 class PageScrollResult(BaseModel):
@@ -552,27 +568,50 @@ class RpcErrorData(BaseModel):
     retryable: bool
 
 
-class TargetSummary(BaseModel):
+class Timings(BaseModel):
     """
-    One browser at one viewport.
+    Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    dir: str = Field(
+    open_ms: int = Field(
         ...,
-        description="Folder name inside the run folder, for example firefox-1280x800.",
+        alias="openMs",
+        description="Starting the driver if needed, and opening the browser.",
+        ge=0,
     )
-    target: BrowserTarget
-    viewport: Viewport
-    browser: BrowserInfo | None = None
-    status: RunStatus
-    component_count: int = Field(..., alias="componentCount", ge=0)
-    instance_count: int = Field(..., alias="instanceCount", ge=0)
-    warning_count: int = Field(..., alias="warningCount", ge=0)
-    duration_ms: int = Field(..., alias="durationMs", ge=0)
-    error: str | None = Field(None, description="Why this target failed, when it did.")
+    load_ms: int = Field(
+        ...,
+        alias="loadMs",
+        description="Loading the page and waiting for it to settle, including any settle time asked for.",
+        ge=0,
+    )
+    read_ms: int = Field(
+        ...,
+        alias="readMs",
+        description="Running the collector, over all the times it ran.",
+        ge=0,
+    )
+    scroll_ms: int = Field(
+        ...,
+        alias="scrollMs",
+        description="Scrolling and waiting for the page to settle after each scroll.",
+        ge=0,
+    )
+    screenshot_ms: int = Field(
+        ..., alias="screenshotMs", description="Taking screenshots.", ge=0
+    )
+    crop_ms: int = Field(
+        ...,
+        alias="cropMs",
+        description="Cutting the crops out of the screenshots.",
+        ge=0,
+    )
+    screens: int | None = Field(
+        None, description="How many screens the page was read in.", ge=0
+    )
 
 
 class Event(BaseModel):
@@ -590,7 +629,7 @@ class Event(BaseModel):
     run_id: str = Field(..., alias="runId")
     type: str = Field(
         ...,
-        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.finished, run.finished, error.",
+        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.finished, run.finished, error.",
     )
     target: str | None = Field(
         None,
@@ -641,6 +680,11 @@ class RunStartParams(BaseModel):
         alias="outDir",
         description="Where to create the run folder. Default ./runs.",
     )
+    parallel: int | None = Field(
+        None,
+        description="How many browsers to run at the same time. 1 runs them one after another. 0 or absent lets the engine choose from the machine's cores.",
+        ge=0,
+    )
     options: ExtractOptions | None = None
 
 
@@ -667,25 +711,28 @@ class InteractiveEvidence(BaseModel):
     )
 
 
-class RunManifest(BaseModel):
+class TargetSummary(BaseModel):
     """
-    run.json. Written at the start and rewritten at the end.
+    One browser at one viewport.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    format_version: int = Field(..., alias="formatVersion", ge=0)
-    run_id: str = Field(..., alias="runId")
-    feature: str = Field(..., description="Known values: extract.")
-    url: str
-    status: RunStatus
-    started_at: str = Field(
-        ..., alias="startedAt", description="RFC 3339 timestamp in UTC."
+    dir: str = Field(
+        ...,
+        description="Folder name inside the run folder, for example firefox-1280x800.",
     )
-    finished_at: str | None = Field(None, alias="finishedAt")
-    engine_version: str = Field(..., alias="engineVersion")
-    targets: list[TargetSummary]
+    target: BrowserTarget
+    viewport: Viewport
+    browser: BrowserInfo | None = None
+    status: RunStatus
+    component_count: int = Field(..., alias="componentCount", ge=0)
+    instance_count: int = Field(..., alias="instanceCount", ge=0)
+    warning_count: int = Field(..., alias="warningCount", ge=0)
+    duration_ms: int = Field(..., alias="durationMs", ge=0)
+    timings: Timings | None = None
+    error: str | None = Field(None, description="Why this target failed, when it did.")
 
 
 class Component(BaseModel):
@@ -717,19 +764,6 @@ class Component(BaseModel):
         description="Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.",
     )
     instances: list[Instance]
-
-
-class RunDoneParams(BaseModel):
-    """
-    Sent exactly once per run, after the run folder is complete.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    run_id: str = Field(..., alias="runId")
-    status: RunStatus
-    manifest: RunManifest
 
 
 class RawElement(BaseModel):
@@ -774,6 +808,27 @@ class RawElement(BaseModel):
     interactive: InteractiveEvidence
 
 
+class RunManifest(BaseModel):
+    """
+    run.json. Written at the start and rewritten at the end.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., alias="formatVersion", ge=0)
+    run_id: str = Field(..., alias="runId")
+    feature: str = Field(..., description="Known values: extract.")
+    url: str
+    status: RunStatus
+    started_at: str = Field(
+        ..., alias="startedAt", description="RFC 3339 timestamp in UTC."
+    )
+    finished_at: str | None = Field(None, alias="finishedAt")
+    engine_version: str = Field(..., alias="engineVersion")
+    targets: list[TargetSummary]
+
+
 class ComponentsFile(BaseModel):
     """
     components.json: every interactive component found on one page, in one browser, at one viewport.
@@ -800,6 +855,19 @@ class ComponentsFile(BaseModel):
     )
     components: list[Component]
     warnings: list[Warning]
+
+
+class RunDoneParams(BaseModel):
+    """
+    Sent exactly once per run, after the run folder is complete.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., alias="runId")
+    status: RunStatus
+    manifest: RunManifest
 
 
 class CollectorResult(BaseModel):

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "run-folder.schema.json",
   "title": "TraceQA run folder",
-  "description": "The files one run writes. Layout: run.json (RunManifest), events.jsonl (one Event per line), and one folder per browser and viewport holding components.json (ComponentsFile), page.png and crops/.",
+  "description": "The files one run writes. Layout: run.json (RunManifest), events.jsonl (one Event per line), and one folder per browser and viewport holding components.json (ComponentsFile) and, when pictures were asked for, page.png and crops/.",
   "x-traceqa": { "contract": "run-folder", "version": 1 },
   "$defs": {
     "RunManifest": {
@@ -35,7 +35,22 @@
         "instanceCount": { "type": "integer", "minimum": 0 },
         "warningCount": { "type": "integer", "minimum": 0 },
         "durationMs": { "type": "integer", "minimum": 0 },
+        "timings": { "$ref": "#/$defs/Timings" },
         "error": { "description": "Why this target failed, when it did.", "type": "string" }
+      }
+    },
+    "Timings": {
+      "description": "Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.",
+      "type": "object",
+      "required": ["openMs", "loadMs", "readMs", "scrollMs", "screenshotMs", "cropMs"],
+      "properties": {
+        "openMs": { "description": "Starting the driver if needed, and opening the browser.", "type": "integer", "minimum": 0 },
+        "loadMs": { "description": "Loading the page and waiting for it to settle, including any settle time asked for.", "type": "integer", "minimum": 0 },
+        "readMs": { "description": "Running the collector, over all the times it ran.", "type": "integer", "minimum": 0 },
+        "scrollMs": { "description": "Scrolling and waiting for the page to settle after each scroll.", "type": "integer", "minimum": 0 },
+        "screenshotMs": { "description": "Taking screenshots.", "type": "integer", "minimum": 0 },
+        "cropMs": { "description": "Cutting the crops out of the screenshots.", "type": "integer", "minimum": 0 },
+        "screens": { "description": "How many screens the page was read in.", "type": "integer", "minimum": 0 }
       }
     },
     "Event": {
@@ -47,7 +62,7 @@
         "ts": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
         "runId": { "type": "string" },
         "type": {
-          "description": "Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.finished, run.finished, error.",
+          "description": "Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.finished, run.finished, error.",
           "type": "string"
         },
         "target": { "description": "The target folder name this event belongs to, when it belongs to one.", "type": "string" },

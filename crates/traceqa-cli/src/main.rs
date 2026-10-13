@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 
 use clap::{Args, Parser, Subcommand};
 use traceqa_engine::driver::Drivers;
-use traceqa_engine::{driver_commands, serve, Run};
+use traceqa_engine::{driver_commands, serve, Execution, Run};
 use traceqa_protocol::types::{BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, Viewport};
 
 #[derive(Parser)]
@@ -23,7 +23,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List every interactive component on a page as data and as screenshot crops.
+    /// List every interactive component on a page.
     Extract(ExtractArgs),
     /// Speak the client protocol on stdin and stdout. This is what SDKs start.
     Serve(DriverArgs),
@@ -54,9 +54,10 @@ struct ExtractArgs {
     /// Show the browser windows.
     #[arg(long)]
     headed: bool,
-    /// Do not save screenshots.
+    /// Also save pictures: a screenshot of the page and one crop per component. Slower,
+    /// because the page is then read and photographed one screen at a time.
     #[arg(long)]
-    no_crops: bool,
+    crops: bool,
     /// Leave out elements that are not visible.
     #[arg(long)]
     visible_only: bool,
@@ -69,6 +70,13 @@ struct ExtractArgs {
     /// Extra time to wait after the page has loaded, for pages with a timed intro or splash screen.
     #[arg(long, value_name = "MS")]
     settle_ms: Option<u64>,
+    /// How many browsers to run at the same time. 1 runs them one after another.
+    /// Default: chosen from the machine's cores, at most 4.
+    #[arg(long, value_name = "N")]
+    parallel: Option<u64>,
+    /// Also print where each browser's time went.
+    #[arg(long)]
+    timings: bool,
     /// Print the run manifest as JSON instead of a table.
     #[arg(long)]
     json: bool,
@@ -132,11 +140,12 @@ fn extract(args: ExtractArgs) -> ExitCode {
         targets,
         viewports: args.viewport,
         out_dir: Some(args.out),
+        parallel: args.parallel,
         options: Some(ExtractOptions {
             max_scroll_steps: args.max_scroll_steps,
             timeout_ms: args.timeout_ms,
             settle_ms: args.settle_ms,
-            crops: Some(!args.no_crops),
+            crops: Some(args.crops),
             include_hidden: Some(!args.visible_only),
         }),
     };
@@ -149,9 +158,17 @@ fn extract(args: ExtractArgs) -> ExitCode {
     };
     let folder = run.folder().to_path_buf();
 
-    let mut drivers = Drivers::new(driver_commands(&args.drivers.drivers));
-    let mut show_progress = |event: &Event| eprintln!("{}", event.message);
-    let manifest = run.execute(&mut drivers, &mut show_progress, &AtomicBool::new(false));
+    let commands = driver_commands(&args.drivers.drivers);
+    let execution = Execution {
+        drivers: &|| Drivers::new(commands.clone()),
+        cancel: &AtomicBool::new(false),
+    };
+    // Browsers run side by side, so each line says which one it is about.
+    let mut show_progress = |event: &Event| match &event.target {
+        Some(target) => eprintln!("[{target}] {}", event.message),
+        None => eprintln!("{}", event.message),
+    };
+    let manifest = run.execute(&execution, &mut show_progress);
 
     if args.json {
         println!(
@@ -160,6 +177,9 @@ fn extract(args: ExtractArgs) -> ExitCode {
         );
     } else {
         print_summary(&manifest);
+        if args.timings {
+            print_timings(&manifest);
+        }
         println!("\nRun folder: {}", folder.display());
     }
     if manifest.status == RunStatus::Completed {
@@ -187,6 +207,29 @@ fn print_summary(manifest: &RunManifest) {
         if let Some(error) = &target.error {
             println!("  {error}");
         }
+    }
+}
+
+/// Where each target's time went, in seconds.
+fn print_timings(manifest: &RunManifest) {
+    println!(
+        "\n{:<24} {:>7} {:>6} {:>6} {:>6} {:>7} {:>6} {:>6}",
+        "TARGET", "SCREENS", "OPEN", "LOAD", "READ", "SCROLL", "SHOTS", "CROPS"
+    );
+    for target in &manifest.targets {
+        let Some(timings) = &target.timings else { continue };
+        let seconds = |ms: u64| ms as f64 / 1000.0;
+        println!(
+            "{:<24} {:>7} {:>5.1}s {:>5.1}s {:>5.1}s {:>6.1}s {:>5.1}s {:>5.1}s",
+            target.dir,
+            timings.screens.unwrap_or(0),
+            seconds(timings.open_ms),
+            seconds(timings.load_ms),
+            seconds(timings.read_ms),
+            seconds(timings.scroll_ms),
+            seconds(timings.screenshot_ms),
+            seconds(timings.crop_ms),
+        );
     }
 }
 

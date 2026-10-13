@@ -11,7 +11,7 @@ pub mod group;
 pub mod run;
 pub mod serve;
 
-pub use run::{driver_commands, EngineError, Run};
+pub use run::{driver_commands, EngineError, Execution, Run};
 
 /// Version reported to clients and drivers, and written into run folders.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

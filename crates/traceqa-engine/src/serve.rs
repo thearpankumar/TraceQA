@@ -21,7 +21,7 @@ use traceqa_protocol::types::{
 };
 
 use crate::driver::{DriverCommand, Drivers};
-use crate::run::{Run, FEATURES};
+use crate::run::{Execution, Run, FEATURES};
 
 type Output = Arc<Mutex<Box<dyn Write + Send>>>;
 
@@ -197,7 +197,11 @@ fn start_run(
                 };
                 notify(&output, notification::RUN_EVENT, &params);
             };
-            let manifest = run.execute(&mut Drivers::new(commands), &mut on_event, &cancel);
+            let execution = Execution {
+                drivers: &|| Drivers::new(commands.clone()),
+                cancel: &cancel,
+            };
+            let manifest = run.execute(&execution, &mut on_event);
             let done = RunDoneParams {
                 run_id: run_id.clone(),
                 status: manifest.status,

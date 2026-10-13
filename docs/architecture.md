@@ -138,19 +138,29 @@ For each browser at each viewport:
 1. The engine selects a driver and opens a session.
 2. It loads the URL and waits for the page to settle: the load event, a quiet
    network, a stable page height, and no intro animation still running.
-3. It goes through the page one screen at a time, the way a person scrolls. At
-   each screen it runs the collector in the main page and every frame, and
-   takes a screenshot. Scrolling loads lazy content and plays the animations
-   that reveal sections.
-4. Back at the top, it runs the collector once more. This reading is the list
-   of elements.
+3. It scrolls through the page a screen at a time, which loads content that
+   only appears on scroll.
+4. Back at the top, it runs the collector in the main page and every frame.
+   This reading is the list of elements.
 5. It merges the frames. Elements in a frame are placed in page coordinates
    using the frame's position. A frame that cannot be read becomes a warning.
 6. It groups elements into components and computes identifiers.
-7. It cuts one crop per component from the screen that showed the most of it.
-8. It writes `components.json` and `page.png`, and closes the session.
+7. It writes `components.json` and closes the session.
 
-A target that fails does not stop the others. The session is closed whether or
+When pictures are asked for, step 3 does more. At every screen the engine also
+runs the collector and takes a screenshot, and it waits for the animations that
+reveal sections. Afterwards it cuts one crop per component from the screen that
+showed the most of it, and saves an overview as `page.png`.
+
+Targets run side by side. The engine starts a few workers, each with its own
+driver processes, and they take targets from a shared list. All of them write
+events through one lock, so `events.jsonl` and the live stream hold one ordered
+sequence, and the manifest lists targets in the order they were asked for. A
+driver may name browsers that allow only one session on the machine, as Safari
+does, and the engine never opens two of those at once.
+
+A target that fails does not stop the others. One that times out while others
+are running is tried again on its own. The session is closed whether or
 not the extraction succeeded.
 
 ## The collector
@@ -203,10 +213,11 @@ folder and do not call back into the engine. The formats are described in
 | Messages are JSON-RPC 2.0, one per line, over standard streams. | Every language can start a process and read and write lines. |
 | JSON Schemas are the source of truth and types are generated. | The languages cannot disagree about a message. |
 | The engine selects drivers by asking what they open. | The engine contains no browser names. |
-| The engine works on structured data. Screenshots are evidence. | Data is small, exact and comparable across browsers. |
+| The engine works on structured data. Screenshots are evidence, and off unless asked for. | Data is small, exact and comparable across browsers. Pictures cost most of the time on a long page, and nothing in the engine reads them. |
 | Crops are cut from screenshots taken while scrolling through the page. | A single full-page screenshot misses content that animates in, or is pinned, as the page scrolls. It also needs no special ability from the browser. |
 | The engine is a library crate with a thin CLI crate. | Other front ends can reuse the engine without depending on the CLI. |
-| The engine uses threads and blocking pipes. | A run talks to one driver at a time, which needs no asynchronous runtime. |
+| The engine uses threads and blocking pipes. | Each worker talks to one driver at a time, which needs no asynchronous runtime. |
+| Each parallel worker has its own driver processes. | A driver serves one request at a time, and one that crashes or hangs takes only its own target with it. |
 
 ## Changing a contract
 

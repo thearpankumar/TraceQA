@@ -73,10 +73,13 @@ def png_size(path: Path) -> tuple[int, int]:
     return struct.unpack(">II", header[16:24])
 
 
-def settle(page: Page, limit_s: float) -> None:
-    """Wait until the page has stopped growing and its animations have ended."""
+def settle(page: Page, limit_s: float, *, animations: bool = True) -> None:
+    """Wait until the page has stopped growing and, unless told otherwise, its animations have ended."""
     wait_until_settled(
-        lambda: page.evaluate(PAGE_STATE), lambda seconds: page.wait_for_timeout(seconds * 1000), limit_s
+        lambda: page.evaluate(PAGE_STATE),
+        lambda seconds: page.wait_for_timeout(seconds * 1000),
+        limit_s,
+        animations=animations,
     )
 
 
@@ -261,7 +264,7 @@ class PlaywrightDriver:
             page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
         else:
             page.evaluate("(dy) => window.scrollBy(0, dy)", params.by_y)
-        settle(page, SETTLE_AFTER_SCROLL_S)
+        settle(page, SETTLE_AFTER_SCROLL_S, animations=params.wait_for != models.ScrollWait.height)
         state = page.evaluate(SCROLL_STATE)
         return models.PageScrollResult(
             y=state["y"],

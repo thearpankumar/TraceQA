@@ -26,5 +26,6 @@
     "maxScrollSteps": 20,
     "crops": true,
     "settleMs": 3000
-  }
+  },
+  "parallel": 3
 }

@@ -4,42 +4,94 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use traceqa_protocol::types::{
     BrowserInfo, BrowserTarget, CollectorResult, Component, ComponentsFile, Event, FrameInfo, PageEvalParams,
-    PageGotoParams, PageScreenshotParams, PageScrollParams, Rect, ScrollInfo, ScrollTo, SessionOpenParams,
-    SessionOpenResult, Viewport, WaitUntil, Warning,
+    PageGotoParams, PageScreenshotParams, PageScrollParams, Rect, ScrollInfo, ScrollTo, ScrollWait, SessionOpenParams,
+    SessionOpenResult, Timings, Viewport, WaitUntil, Warning,
 };
 use traceqa_recorder::{now_rfc3339, save_crops, CropRequest, PageImage, RunWriter};
 
 use crate::driver::{Driver, Drivers, DEFAULT_TIMEOUT_MS};
 use crate::group::{group, Located};
-use crate::run::RUN_FOLDER_VERSION;
+use crate::run::{Exclusive, RUN_FOLDER_VERSION};
 use crate::{fingerprint, EngineError, COLLECTOR};
 
 /// How many screens the engine scrolls through before it stops reading a very long page.
 const DEFAULT_SCROLL_STEPS: u64 = 50;
 
-/// Records events in the run folder and passes them to whoever is listening live.
-pub(crate) struct Progress<'a> {
-    pub writer: &'a mut RunWriter,
-    pub listener: &'a mut dyn FnMut(&Event),
+/// The run folder's writer and the live listener. Every target of a run shares them.
+pub(crate) struct Sink<'a> {
+    pub writer: RunWriter,
+    pub listener: &'a mut (dyn FnMut(&Event) + Send),
 }
 
-impl Progress<'_> {
-    pub fn emit(&mut self, kind: &str, target: Option<&str>, message: String, data: Value) {
-        match self.writer.event(kind, target, message, data) {
-            Ok(event) => (self.listener)(&event),
+/// Records events in the run folder and passes them to whoever is listening live. Targets
+/// running side by side each hold a copy, and an event is written and delivered as one step,
+/// so the listener sees events in the order they have in `events.jsonl`.
+#[derive(Clone, Copy)]
+pub(crate) struct Progress<'a, 'b> {
+    pub sink: &'a Mutex<Sink<'b>>,
+}
+
+impl Progress<'_, '_> {
+    pub fn emit(&self, kind: &str, target: Option<&str>, message: String, data: Value) {
+        let mut guard = self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let sink = &mut *guard;
+        match sink.writer.event(kind, target, message, data) {
+            Ok(event) => (sink.listener)(&event),
             Err(error) => eprintln!("traceqa: could not write events.jsonl: {error}"),
+        }
+    }
+
+    /// Uses the run folder's writer for something other than an event.
+    pub fn with_writer<T>(&self, work: impl FnOnce(&RunWriter) -> T) -> T {
+        work(&self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).writer)
+    }
+}
+
+/// Where the time of one extraction went.
+#[derive(Default)]
+struct Clock {
+    open: Duration,
+    load: Duration,
+    read: Duration,
+    scroll: Duration,
+    screenshot: Duration,
+    crop: Duration,
+    screens: u64,
+}
+
+impl Clock {
+    fn timings(&self) -> Timings {
+        let ms = |spent: Duration| spent.as_millis() as u64;
+        Timings {
+            open_ms: ms(self.open),
+            load_ms: ms(self.load),
+            read_ms: ms(self.read),
+            scroll_ms: ms(self.scroll),
+            screenshot_ms: ms(self.screenshot),
+            crop_ms: ms(self.crop),
+            screens: Some(self.screens),
         }
     }
 }
 
+/// Does `work` and adds the time it took to `spent`.
+fn timed<T>(spent: &mut Duration, work: impl FnOnce() -> T) -> T {
+    let started = Instant::now();
+    let done = work();
+    *spent += started.elapsed();
+    done
+}
+
 /// Everything that identifies one extraction.
 pub(crate) struct Job<'a> {
+    pub run_id: &'a str,
     pub url: &'a str,
     pub target: &'a BrowserTarget,
     pub viewport: &'a Viewport,
@@ -52,6 +104,8 @@ pub(crate) struct Job<'a> {
     /// Name of the target's folder, which also labels its events.
     pub name: &'a str,
     pub dir: &'a Path,
+    /// Shared by every target of the run, for browsers that allow one session at a time.
+    pub exclusive: &'a Exclusive,
     pub cancel: &'a AtomicBool,
 }
 
@@ -66,22 +120,30 @@ fn warning(code: &str, message: String) -> Warning {
 pub(crate) fn extract_target(
     drivers: &mut Drivers,
     job: &Job,
-    progress: &mut Progress,
-) -> Result<(ComponentsFile, BrowserInfo), EngineError> {
+    progress: Progress,
+) -> Result<(ComponentsFile, BrowserInfo, Timings), EngineError> {
+    let mut clock = Clock::default();
+    let opening = Instant::now();
     let driver = drivers.for_browser(&job.target.browser)?;
+    // Held until this function returns, so no other target opens the same browser meanwhile.
+    let _only_session = driver
+        .is_exclusive(&job.target.browser)
+        .then(|| job.exclusive.hold(&job.target.browser));
     let session = driver.open_session(&SessionOpenParams {
         target: job.target.clone(),
         viewport: job.viewport.clone(),
         locale: None,
     })?;
-    let result = read_page(driver, &session, job, progress);
+    clock.open = opening.elapsed();
+
+    let result = read_page(driver, &session, job, progress, &mut clock);
     // A driver that stopped answering cannot close anything. It is replaced before its next use.
     if !driver.is_lost() {
         if let Err(error) = driver.close_session(&session.session_id) {
             eprintln!("traceqa: could not close the {} session: {error}", job.target.browser);
         }
     }
-    result.map(|file| (file, session.browser))
+    result.map(|file| (file, session.browser, clock.timings()))
 }
 
 fn check_cancelled(job: &Job) -> Result<(), EngineError> {
@@ -196,13 +258,142 @@ impl Screen {
     }
 }
 
+/// True when the page is scrolled as far down as it goes.
+fn at_end(scroll: &ScrollInfo) -> bool {
+    scroll.y + scroll.viewport_height >= scroll.height - 1.0
+}
+
+/// What going through the page produced.
+struct Walk {
+    /// The reading taken at the last position, when the walk took readings.
+    reading: Option<Reading>,
+    screens: Vec<Screen>,
+    /// How many times the page was scrolled.
+    steps: u64,
+    /// Whether the bottom was reached. `None` when the walk could not tell.
+    reached_end: Option<bool>,
+}
+
+/// Goes through the page one screen at a time, the way a person scrolls, reading it and
+/// taking a picture at each screen. That loads lazy content, lets reveal animations play,
+/// and gives a picture of every part as it really looked.
+fn walk_with_pictures(
+    driver: &mut Driver,
+    session: &SessionOpenResult,
+    job: &Job,
+    clock: &mut Clock,
+    screens_dir: &Path,
+    max_steps: u64,
+    screenshot_warning: &mut Option<Warning>,
+) -> Result<Walk, EngineError> {
+    fs::create_dir_all(screens_dir)?;
+    let mut screens: Vec<Screen> = Vec::new();
+    let mut steps = 0;
+    loop {
+        check_cancelled(job)?;
+        let reading = timed(&mut clock.read, || read_frames(driver, session, job))?;
+        let scroll = &reading.scroll;
+        let image = screens_dir.join(format!("{steps}.png"));
+        let captured = timed(&mut clock.screenshot, || {
+            screenshot(driver, &session.session_id, &image, false, screenshot_warning)
+        })?;
+        if captured {
+            let shown = reading
+                .elements
+                .iter()
+                .filter(|located| located.element.state.visible)
+                .filter_map(|located| {
+                    let key = element_key(&located.frame_id, &located.element.selectors);
+                    Some((key, located.page_box.clone()?))
+                })
+                .collect();
+            screens.push(Screen {
+                image,
+                top: scroll.y,
+                height: scroll.viewport_height,
+                shown,
+            });
+        }
+
+        let reached_end = at_end(scroll);
+        if reached_end || steps >= max_steps {
+            return Ok(Walk {
+                reading: Some(reading),
+                screens,
+                steps,
+                reached_end: Some(reached_end),
+            });
+        }
+        // A little less than a full screen, so nothing falls into the gap between two screens.
+        let before = scroll.y;
+        let scrolled = timed(&mut clock.scroll, || {
+            driver.scroll(&PageScrollParams {
+                session_id: session.session_id.clone(),
+                to: None,
+                by_y: Some(scroll.viewport_height * 0.9),
+                wait_for: Some(ScrollWait::Animations),
+            })
+        })?;
+        steps += 1;
+        if scrolled.y <= before {
+            // The page did not move: it scrolls inside a container, or not at all.
+            return Ok(Walk {
+                reading: Some(reading),
+                screens,
+                steps,
+                reached_end: Some(true),
+            });
+        }
+    }
+}
+
+/// Goes through the page without looking at it: only scrolls, so that content which loads
+/// on scroll gets loaded. With no picture to take there is nothing to read on the way and no
+/// animation worth waiting for, which makes this several times quicker.
+fn walk_quickly(
+    driver: &mut Driver,
+    session: &SessionOpenResult,
+    job: &Job,
+    clock: &mut Clock,
+    max_steps: u64,
+) -> Result<Walk, EngineError> {
+    let mut walk = Walk {
+        reading: None,
+        screens: Vec::new(),
+        steps: 0,
+        reached_end: None,
+    };
+    let mut y = 0.0;
+    while walk.steps < max_steps {
+        check_cancelled(job)?;
+        let scrolled = timed(&mut clock.scroll, || {
+            driver.scroll(&PageScrollParams {
+                session_id: session.session_id.clone(),
+                to: None,
+                by_y: Some(job.viewport.height as f64),
+                wait_for: Some(ScrollWait::Height),
+            })
+        })?;
+        walk.steps += 1;
+        if scrolled.at_end || scrolled.y <= y {
+            walk.reached_end = Some(true);
+            return Ok(walk);
+        }
+        y = scrolled.y;
+    }
+    // Out of steps. Whether that was the bottom is settled by the reading taken afterwards.
+    Ok(walk)
+}
+
 fn read_page(
     driver: &mut Driver,
     session: &SessionOpenResult,
     job: &Job,
-    progress: &mut Progress,
+    progress: Progress,
+    clock: &mut Clock,
 ) -> Result<ComponentsFile, EngineError> {
     let session_id = &session.session_id;
+    let loading = Instant::now();
     let page = driver.goto(&PageGotoParams {
         session_id: session_id.clone(),
         url: job.url.to_string(),
@@ -227,65 +418,57 @@ fn read_page(
         thread::sleep(Duration::from_millis(pause));
         waited += pause;
     }
+    clock.load = loading.elapsed();
 
-    // Go through the page one screen at a time, the way a person scrolls. That loads lazy
-    // content, plays reveal animations, and gives a picture of every part as it really looked.
     let screens_dir = job.dir.join("screens");
-    if job.crops {
-        fs::create_dir_all(&screens_dir)?;
-    }
     let max_steps = job.max_scroll_steps.unwrap_or(DEFAULT_SCROLL_STEPS);
-    let mut screens: Vec<Screen> = Vec::new();
     let mut screenshot_warning = None;
-    let mut steps = 0;
-    let (mut reading, reached_end) = loop {
-        check_cancelled(job)?;
-        let reading = read_frames(driver, session, job)?;
-        let scroll = &reading.scroll;
-        let image = screens_dir.join(format!("{steps}.png"));
-        if job.crops && screenshot(driver, session_id, &image, false, &mut screenshot_warning)? {
-            let shown = reading
-                .elements
-                .iter()
-                .filter(|located| located.element.state.visible)
-                .filter_map(|located| {
-                    let key = element_key(&located.frame_id, &located.element.selectors);
-                    Some((key, located.page_box.clone()?))
-                })
-                .collect();
-            screens.push(Screen {
-                image,
-                top: scroll.y,
-                height: scroll.viewport_height,
-                shown,
-            });
-        }
+    let walk = if job.crops {
+        walk_with_pictures(
+            driver,
+            session,
+            job,
+            clock,
+            &screens_dir,
+            max_steps,
+            &mut screenshot_warning,
+        )?
+    } else {
+        walk_quickly(driver, session, job, clock, max_steps)?
+    };
+    let Walk {
+        reading,
+        screens,
+        steps,
+        reached_end,
+    } = walk;
+    clock.screens = steps + 1;
 
-        let at_end = scroll.y + scroll.viewport_height >= scroll.height - 1.0;
-        if at_end || steps >= max_steps {
-            break (reading, at_end);
-        }
-        // A little less than a full screen, so nothing falls into the gap between two screens.
-        let before = scroll.y;
-        let scrolled = driver.scroll(&PageScrollParams {
-            session_id: session_id.clone(),
-            to: None,
-            by_y: Some(scroll.viewport_height * 0.9),
-        })?;
-        steps += 1;
-        if scrolled.y <= before {
-            // The page did not move: it scrolls inside a container, or not at all.
-            break (reading, true);
+    // The list of elements is read with the page at the top, so positions do not depend on
+    // where scrolling stopped. A walk that never scrolled has that reading already.
+    let reading = match reading {
+        Some(reading) if steps == 0 => reading,
+        _ => {
+            if steps > 0 {
+                let wait_for = if job.crops {
+                    ScrollWait::Animations
+                } else {
+                    ScrollWait::Height
+                };
+                timed(&mut clock.scroll, || {
+                    driver.scroll(&PageScrollParams {
+                        session_id: session_id.clone(),
+                        to: Some(ScrollTo::Top),
+                        by_y: None,
+                        wait_for: Some(wait_for),
+                    })
+                })?;
+            }
+            timed(&mut clock.read, || read_frames(driver, session, job))?
         }
     };
+    let reached_end = reached_end.unwrap_or_else(|| steps == 0 && at_end(&reading.scroll));
     if steps > 0 {
-        // Read the final list with the page back at the top, so positions do not depend on where scrolling stopped.
-        driver.scroll(&PageScrollParams {
-            session_id: session_id.clone(),
-            to: Some(ScrollTo::Top),
-            by_y: None,
-        })?;
-        reading = read_frames(driver, session, job)?;
         progress.emit(
             "page.scrolled",
             Some(job.name),
@@ -325,7 +508,9 @@ fn read_page(
 
     if job.crops {
         check_cancelled(job)?;
-        let saved = save_component_crops(&mut components, &screens, job.viewport.width as f64, job.dir)?;
+        let saved = timed(&mut clock.crop, || {
+            save_component_crops(&mut components, &screens, job.viewport.width as f64, job.dir)
+        })?;
         progress.emit(
             "crop.saved",
             Some(job.name),
@@ -336,7 +521,9 @@ fn read_page(
         // page.png is an overview: the whole page when the browser can capture that, else the first screen.
         let page_png = job.dir.join("page.png");
         let whole_page = session.capabilities.full_page_screenshot
-            && screenshot(driver, session_id, &page_png, true, &mut screenshot_warning)?;
+            && timed(&mut clock.screenshot, || {
+                screenshot(driver, session_id, &page_png, true, &mut screenshot_warning)
+            })?;
         if !whole_page {
             if let Some(first) = screens.first() {
                 fs::copy(&first.image, &page_png)?;
@@ -358,7 +545,7 @@ fn read_page(
     Ok(ComponentsFile {
         format_version: RUN_FOLDER_VERSION,
         fingerprint_version: fingerprint::VERSION,
-        run_id: progress.writer.run_id().to_string(),
+        run_id: job.run_id.to_string(),
         url: job.url.to_string(),
         final_url: page.final_url,
         title,

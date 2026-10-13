@@ -36,8 +36,8 @@ runs/<runId>/
   events.jsonl              one Event per line
   <browser>-<width>x<height>/
     components.json         ComponentsFile
-    page.png                full-page screenshot
-    crops/<componentId>.png one crop per component
+    page.png                screenshot of the page    (only with pictures)
+    crops/<componentId>.png one crop per component    (only with pictures)
 ```
 
 ## Rules for changing a contract

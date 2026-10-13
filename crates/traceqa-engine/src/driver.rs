@@ -293,6 +293,11 @@ impl Driver {
         self.info.browsers.iter().any(|name| name == browser)
     }
 
+    /// True when only one session of `browser` can exist on the machine at a time.
+    pub fn is_exclusive(&self, browser: &str) -> bool {
+        self.info.exclusive_browsers.iter().any(|name| name == browser)
+    }
+
     pub fn open_session(&mut self, params: &SessionOpenParams) -> Result<SessionOpenResult, DriverError> {
         self.request(method::SESSION_OPEN, params, SLOW)
     }
@@ -338,9 +343,13 @@ fn request<P: Serialize, R: DeserializeOwned>(
     })
 }
 
-/// The configured drivers. Each is started the first time a browser might need it.
+/// Starts one driver and completes the handshake with it.
+pub type Starter = Box<dyn Fn() -> Result<Driver, DriverError> + Send>;
+
+/// The configured drivers. Each is started the first time a browser might need it, and
+/// started again if it stops answering.
 pub struct Drivers {
-    slots: Vec<(DriverCommand, Slot)>,
+    slots: Vec<(Starter, Slot)>,
 }
 
 enum Slot {
@@ -350,26 +359,20 @@ enum Slot {
 }
 
 impl Drivers {
+    /// Drivers that are separate programs, started with these commands.
     pub fn new(commands: Vec<DriverCommand>) -> Self {
-        Self {
-            slots: commands
-                .into_iter()
-                .map(|command| (command, Slot::NotStarted))
-                .collect(),
-        }
+        let starters = commands.into_iter().map(|command| {
+            let start =
+                move || ProcessTransport::spawn(&command).and_then(|transport| Driver::connect(Box::new(transport)));
+            Box::new(start) as Starter
+        });
+        Self::starting_with(starters.collect())
     }
 
-    /// For tests: drivers that are already connected.
-    pub fn connected(drivers: Vec<Driver>) -> Self {
-        let command = DriverCommand {
-            program: "(connected)".into(),
-            args: vec![],
-        };
+    /// Drivers that are started some other way. Tests use this to supply scripted drivers.
+    pub fn starting_with(starters: Vec<Starter>) -> Self {
         Self {
-            slots: drivers
-                .into_iter()
-                .map(|driver| (command.clone(), Slot::Running(driver)))
-                .collect(),
+            slots: starters.into_iter().map(|start| (start, Slot::NotStarted)).collect(),
         }
     }
 
@@ -378,14 +381,12 @@ impl Drivers {
     pub fn for_browser(&mut self, browser: &str) -> Result<&mut Driver, DriverError> {
         let mut tried = Vec::new();
         let mut found = None;
-        for (index, (command, slot)) in self.slots.iter_mut().enumerate() {
+        for (index, (start, slot)) in self.slots.iter_mut().enumerate() {
             if matches!(slot, Slot::Running(driver) if driver.is_lost()) {
                 *slot = Slot::NotStarted;
             }
             if matches!(slot, Slot::NotStarted) {
-                let started =
-                    ProcessTransport::spawn(command).and_then(|transport| Driver::connect(Box::new(transport)));
-                *slot = match started {
+                *slot = match start() {
                     Ok(driver) => Slot::Running(driver),
                     Err(error) => Slot::Failed(error.message),
                 };
