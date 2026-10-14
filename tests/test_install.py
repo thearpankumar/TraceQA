@@ -39,7 +39,7 @@ def traceqa(*args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]
     return subprocess.run([str(BINARY), *args], env=env, capture_output=True, text=True, encoding="utf-8", timeout=600)
 
 
-def test_install_then_doctor_then_extract(shop_url: str, tmp_path: Path) -> None:
+def test_install_then_doctor_then_extract(shop_url: str, tmp_path: Path, run_folder_checker) -> None:
     home = tmp_path / "traceqa-home"
     env = without_workspace_drivers(home)
 
@@ -58,6 +58,8 @@ def test_install_then_doctor_then_extract(shop_url: str, tmp_path: Path) -> None
     run = traceqa("extract", shop_url, "--out", str(tmp_path / "runs"), "--json", env=env)
     assert run.returncode == 0, run.stderr
     assert '"status": "completed"' in run.stdout
+    (folder,) = (tmp_path / "runs").iterdir()
+    run_folder_checker(folder)
 
 
 def test_install_refuses_what_it_cannot_do(tmp_path: Path) -> None:

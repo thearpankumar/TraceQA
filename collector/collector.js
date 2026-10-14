@@ -268,6 +268,12 @@
 
   function stateOf(el, rect, style) {
     var visible = rect.width > 0 && rect.height > 0 && style.visibility === "visible";
+    // The browser's own answer also covers what size and visibility miss: the content of a
+    // closed <details>, other content-visibility: hidden content, and opacity 0. Browsers
+    // from before 2024 do not have it and keep the answer above.
+    if (visible && typeof el.checkVisibility === "function") {
+      visible = el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    }
     var state = {
       visible: visible,
       enabled: !el.matches(":disabled") && ariaFlag(el, "aria-disabled") !== true,

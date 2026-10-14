@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: states</title>
+<style>body { font: 14px sans-serif; } div { margin: 6px 0; }</style>
+<body>
+<h1>States</h1>
+
+<div><button id="state-enabled" data-expect="enabled=true">Enabled</button></div>
+<div><button id="state-disabled" disabled data-expect="enabled=false">Disabled</button></div>
+<div><button id="state-aria-disabled" aria-disabled="true" data-expect="enabled=false">ARIA disabled</button></div>
+<fieldset disabled><legend>Locked</legend>
+  <button id="state-disabled-fieldset" data-expect="enabled=false">Inside a disabled fieldset</button></fieldset>
+<div><a id="state-disabled-link" href="#x" aria-disabled="true" data-expect="role=link; enabled=false">Disabled link</a></div>
+
+<div><input id="state-checked" type="checkbox" checked aria-label="On" data-expect="checked=true"></div>
+<div><input id="state-unchecked" type="checkbox" aria-label="Off" data-expect="checked=false"></div>
+<div><input id="state-radio-checked" type="radio" name="size" checked aria-label="Small" data-expect="role=radio; checked=true"></div>
+<div><div id="state-switch" role="switch" tabindex="0" aria-checked="true" data-expect="role=switch; checked=true">Wi-Fi</div></div>
+
+<div><button id="state-expanded" aria-expanded="true" data-expect="expanded=true">Open menu</button></div>
+<div><button id="state-collapsed" aria-expanded="false" data-expect="expanded=false">Closed menu</button></div>
+<details open><summary id="state-details-open" data-expect="expanded=true">Open details</summary>Text</details>
+<details><summary id="state-details-closed" data-expect="expanded=false">Closed details</summary>Text</details>
+
+<div><button id="state-pressed" aria-pressed="true" data-expect="pressed=true">Bold</button></div>
+<div role="tablist"><div id="state-selected-tab" role="tab" tabindex="0" aria-selected="true"
+  data-expect="role=tab; selected=true">First tab</div></div>
+
+<div><input id="state-readonly" readonly value="Fixed" aria-label="Order number" data-expect="readonly=true"></div>
+<div><div id="state-aria-readonly" role="textbox" tabindex="0" aria-readonly="true" aria-label="Summary"
+  data-expect="role=textbox; readonly=true"></div></div>
+<div><input id="state-required" required aria-label="Name" data-expect="required=true"></div>
+<div><input id="state-not-required" aria-label="Nickname" data-expect="required=false; readonly=false"></div>
+</body>
+</html>

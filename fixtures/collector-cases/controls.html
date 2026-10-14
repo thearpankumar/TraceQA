@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: controls</title>
+<style>body { font: 14px sans-serif; } div { margin: 6px 0; }</style>
+<body>
+<h1>The role of each kind of control</h1>
+
+<div><input id="ctl-text" aria-label="Text" data-expect="role=textbox; tag=input"></div>
+<div><input id="ctl-email" type="email" aria-label="Email" data-expect="role=textbox"></div>
+<div><input id="ctl-password" type="password" aria-label="Password" data-expect="role=textbox"></div>
+<div><input id="ctl-search" type="search" aria-label="Find" data-expect="role=searchbox"></div>
+<div><input id="ctl-number" type="number" aria-label="Quantity" data-expect="role=spinbutton"></div>
+<div><input id="ctl-range" type="range" aria-label="Volume" data-expect="role=slider"></div>
+<div><input id="ctl-with-list" list="ctl-fruits" aria-label="Fruit" data-expect="role=combobox"></div>
+<datalist id="ctl-fruits"><option value="Apple"></option></datalist>
+<div><select id="ctl-select" aria-label="Sort" data-expect="role=combobox; tag=select"><option>Price</option></select></div>
+<div><select id="ctl-select-multiple" multiple aria-label="Tags" data-expect="role=listbox"><option>New</option></select></div>
+<div><select id="ctl-select-size" size="3" aria-label="Colours" data-expect="role=listbox"><option>Red</option></select></div>
+<div><select id="ctl-options" aria-label="Options" data-expect="role=combobox"><option id="ctl-option" data-expect="absent">An option</option></select></div>
+<div><textarea id="ctl-textarea" aria-label="Message" data-expect="role=textbox; tag=textarea"></textarea></div>
+<div><input id="ctl-reset" type="reset" value="Clear" data-expect="role=button"></div>
+<div><a id="ctl-link" href="#page" data-expect="role=link; signals=native">A link</a></div>
+
+<div><div id="ctl-role-listbox" role="listbox" aria-label="Choices" data-expect="role=listbox; name=Choices"><div id="ctl-role-option" role="option" aria-selected="true"
+  data-expect="role=option; selected=true; name=One">One</div></div></div>
+
+<dialog open><button id="ctl-in-dialog" data-expect="role=button; visible=true">OK</button></dialog>
+
+<div><my-toggle id="ctl-custom-element" role="switch" tabindex="0" aria-checked="false"
+  data-expect="role=switch; checked=false; name=Dark mode">Dark mode</my-toggle></div>
+</body>
+</html>
