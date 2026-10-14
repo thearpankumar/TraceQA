@@ -12,5 +12,6 @@ repository = "https://github.com/thearpankumar/TraceQA"
 traceqa-protocol = { path = "crates/traceqa-protocol" }
 traceqa-engine = { path = "crates/traceqa-engine" }
 traceqa-recorder = { path = "crates/traceqa-recorder" }
+traceqa-mcp = { path = "crates/traceqa-mcp" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -20,8 +20,8 @@ pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_protocol::contracts::run_fold
 /// Features this engine can run.
 pub const FEATURES: [&str; 1] = ["extract"];
 
-/// Drivers looked for on PATH when none are configured.
-const DEFAULT_DRIVERS: [&str; 2] = ["traceqa-driver-playwright", "traceqa-driver-webdriver"];
+/// Drivers used when none are configured: from PATH, else the copies `traceqa install` made.
+pub const DEFAULT_DRIVERS: [&str; 2] = ["traceqa-driver-playwright", "traceqa-driver-webdriver"];
 
 /// Environment variable holding driver command lines separated by `;`.
 pub const DRIVERS_ENV: &str = "TRACEQA_DRIVERS";
@@ -83,9 +83,22 @@ pub fn driver_commands(explicit: &[String]) -> Vec<DriverCommand> {
     } else if !from_env.trim().is_empty() {
         from_env.split(';').collect()
     } else {
-        DEFAULT_DRIVERS.to_vec()
+        return DEFAULT_DRIVERS.iter().map(|name| default_driver(name)).collect();
     };
     lines.into_iter().filter_map(DriverCommand::parse).collect()
+}
+
+/// A default driver: the one on PATH, else the installed one. When there is neither, the bare
+/// name is kept, so the error that follows names the driver that is missing.
+pub fn default_driver(name: &str) -> DriverCommand {
+    let program = match crate::home::on_path(name) {
+        Some(_) => name.to_string(),
+        None => crate::home::installed(name).map_or_else(|| name.to_string(), |path| path.display().to_string()),
+    };
+    DriverCommand {
+        program,
+        args: Vec::new(),
+    }
 }
 
 /// A run that has been accepted and has its folder, but has not started.

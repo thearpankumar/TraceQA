@@ -1,7 +1,10 @@
 //! The `traceqa` command. Thin on purpose: it turns arguments into the same
 //! request every other client sends, and hands it to the engine.
 
+mod install;
+
 use std::io::{self, BufReader};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 
@@ -27,6 +30,24 @@ enum Command {
     Extract(ExtractArgs),
     /// Speak the client protocol on stdin and stdout. This is what SDKs start.
     Serve(DriverArgs),
+    /// Let AI tools such as Claude Code run TraceQA (an MCP server).
+    ///
+    /// Speaks the Model Context Protocol on stdin and stdout. Add it to Claude Code with:
+    /// claude mcp add traceqa -- traceqa mcp
+    Mcp(McpArgs),
+    /// Install the browser drivers and browsers into TraceQA's own folder (~/.traceqa).
+    Install(install::InstallArgs),
+    /// Check the setup: where the drivers are, whether they start, and which browsers they open.
+    Doctor(DriverArgs),
+}
+
+#[derive(Args)]
+struct McpArgs {
+    /// Where runs are written and read.
+    #[arg(long, default_value = "runs")]
+    out: String,
+    #[command(flatten)]
+    drivers: DriverArgs,
 }
 
 #[derive(Args)]
@@ -85,32 +106,11 @@ struct ExtractArgs {
 }
 
 fn parse_viewport(text: &str) -> Result<Viewport, String> {
-    let size = text
-        .split_once('x')
-        .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
-    match size {
-        Some((width, height)) if width > 0 && height > 0 => Ok(Viewport { width, height }),
-        _ => Err(format!("expected WIDTHxHEIGHT such as 1280x800, got {text:?}")),
-    }
+    Viewport::parse(text)
 }
 
 fn parse_browser(text: &str) -> Result<BrowserTarget, String> {
-    let (browser, endpoint) = match text.split_once('=') {
-        Some((browser, endpoint)) => (browser, Some(endpoint.to_string())),
-        None => (text, None),
-    };
-    if browser.is_empty() || endpoint.as_deref() == Some("") {
-        return Err(format!(
-            "expected a browser name, cdp=ENDPOINT or webdriver=URL, got {text:?}"
-        ));
-    }
-    let mut target = BrowserTarget::named(browser);
-    if browser == "webdriver" {
-        target.webdriver_url = endpoint;
-    } else {
-        target.cdp_endpoint = endpoint;
-    }
-    Ok(target)
+    BrowserTarget::parse(text)
 }
 
 fn main() -> ExitCode {
@@ -125,6 +125,31 @@ fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
+        }
+        Command::Mcp(args) => mcp(args),
+        Command::Install(args) => install::install(args),
+        Command::Doctor(args) => install::doctor(&args.drivers),
+    }
+}
+
+fn mcp(args: McpArgs) -> ExitCode {
+    let runs_dir = match std::path::absolute(Path::new(&args.out)) {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("traceqa: {}: {error}", args.out);
+            return ExitCode::from(2);
+        }
+    };
+    let config = traceqa_mcp::Config {
+        runs_dir,
+        drivers: driver_commands(&args.drivers.drivers),
+    };
+    // Stdout belongs to the protocol. Everything for people goes to stderr, which hosts log.
+    match traceqa_mcp::serve(BufReader::new(io::stdin()), Box::new(io::stdout()), config) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("traceqa: {error}");
+            ExitCode::FAILURE
         }
     }
 }
@@ -230,41 +255,5 @@ fn print_timings(manifest: &RunManifest) {
             seconds(timings.screenshot_ms),
             seconds(timings.crop_ms),
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn viewport_needs_two_positive_numbers() {
-        assert_eq!(
-            parse_viewport("390x844"),
-            Ok(Viewport {
-                width: 390,
-                height: 844
-            })
-        );
-        for bad in ["1280", "0x800", "ax b", "1280x", ""] {
-            assert!(parse_viewport(bad).is_err(), "{bad:?} should be rejected");
-        }
-    }
-
-    #[test]
-    fn browser_may_carry_a_cdp_endpoint() {
-        assert_eq!(parse_browser("firefox").unwrap().cdp_endpoint, None);
-        let attached = parse_browser("cdp=ws://127.0.0.1:9222/devtools/browser/abc?x=1").unwrap();
-        assert_eq!(attached.browser, "cdp");
-        assert_eq!(
-            attached.cdp_endpoint.as_deref(),
-            Some("ws://127.0.0.1:9222/devtools/browser/abc?x=1")
-        );
-        let remote = parse_browser("webdriver=http://127.0.0.1:9515").unwrap();
-        assert_eq!(
-            (remote.cdp_endpoint, remote.webdriver_url.as_deref()),
-            (None, Some("http://127.0.0.1:9515"))
-        );
-        assert!(parse_browser("cdp=").is_err() && parse_browser("=ws://x").is_err());
     }
 }

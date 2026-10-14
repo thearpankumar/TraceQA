@@ -1,0 +1,13 @@
+[package]
+name = "traceqa-mcp"
+description = "The TraceQA MCP server: lets AI tools run the engine and read its results."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+traceqa-engine.workspace = true
+traceqa-protocol.workspace = true
