@@ -194,6 +194,7 @@ fn run_reaching(
             settle_ms: None,
             timeout_ms: None,
         }),
+        storage_state: None,
     };
     let run = Run::prepare(request).unwrap();
     let folder = run.folder().to_path_buf();
@@ -404,6 +405,7 @@ fn run_six_targets_with(
         ),
         parallel: Some(parallel),
         options: None,
+        storage_state: None,
     };
     let run = Run::prepare(request).unwrap();
     let folder = run.folder().to_path_buf();

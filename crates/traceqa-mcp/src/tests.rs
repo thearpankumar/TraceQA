@@ -176,6 +176,9 @@ fn reads_a_run_back() {
 #[test]
 fn mistakes_come_back_as_tool_errors_the_ai_can_read() {
     let runs = runs_folder("mistakes");
+    // A state file must never be echoed back: it holds session keys.
+    let bad_state = runs.join("bad-state.json");
+    fs::write(&bad_state, r#"{"token": "secret-token-123"}"#).unwrap();
     let mut host = Host::start(runs.clone());
     let failing = [
         ("get_components", json!({ "run_id": "../../etc" }), "plain name"),
@@ -202,12 +205,26 @@ fn mistakes_come_back_as_tool_errors_the_ai_can_read() {
             "WIDTHxHEIGHT",
         ),
         ("extract", json!({ "url": "not-a-url" }), "not-a-url"),
+        (
+            "extract",
+            json!({ "url": "https://x.test", "storage_state": "/no/such/state.json" }),
+            "could not read the state file",
+        ),
+        (
+            "extract",
+            json!({ "url": "https://x.test", "storage_state": bad_state.display().to_string() }),
+            "is not a storage state file",
+        ),
     ];
     for (tool, arguments, expected) in failing {
         let result = host.call(tool, arguments.clone());
         let text = result["content"][0]["text"].as_str().unwrap();
         assert_eq!(result["isError"], true, "{tool} {arguments}");
         assert!(text.contains(expected), "{tool} {arguments}: {text}");
+        assert!(
+            !text.contains("secret-token-123"),
+            "a state file's contents were shown: {text}"
+        );
     }
     host.stop();
     fs::remove_dir_all(runs).unwrap();

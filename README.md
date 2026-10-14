@@ -176,6 +176,13 @@ Each run writes a self-contained run folder under `./runs`, holding a summary,
 an event log, and the components found for each browser and screen size. The
 formats are described in [docs/usage.md](docs/usage.md#output-files).
 
+For pages behind a sign-in, sign in once and reuse the saved state:
+
+```sh
+traceqa login https://app.example.com --save state.json
+traceqa extract https://app.example.com/dashboard --storage-state state.json
+```
+
 To try TraceQA without a site of your own, serve the bundled demo shop from the
 repository and extract it:
 
@@ -357,6 +364,8 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
 | `fixtures/buggy-shop/` | Demo site with a manifest of its expected components. |
 | `fixtures/collector-cases/` | Small pages that test the collector one behaviour at a time. |
+| `fixtures/patterns/` | Pages built like real sites (menus, carousels, forms, grids, tables, dialogs) that test the whole engine. |
+| `fixtures/trouble/` | A site that fails on purpose, for the failure tests. |
 | `bench/` | Scores extraction against the demo site. |
 | `tests/` | End-to-end tests of the MCP server and the installer. |
 | `scripts/` | Code generation and transcript recording. |

@@ -61,6 +61,14 @@ class WebDriverSession:
     def navigate(self, url: str) -> None:
         self._request("POST", "/url", {"url": url})
 
+    def add_cookie(self, cookie: dict[str, Any]) -> None:
+        """Set a cookie for the site the browser is on. WebDriver allows no other."""
+        self._request("POST", "/cookie", {"cookie": cookie})
+
+    def cookies(self) -> list[dict[str, Any]]:
+        """The cookies of the site the browser is on."""
+        return self._request("GET", "/cookie")
+
     def set_timeouts(self, page_load_ms: int, script_ms: int) -> None:
         self._request("POST", "/timeouts", {"pageLoad": page_load_ms, "script": script_ms})
 

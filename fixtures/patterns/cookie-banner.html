@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: cookie banner</title>
+<style>
+  body { font: 14px sans-serif; margin: 0; }
+  main { padding: 16px; }
+  #cookies { position: fixed; left: 0; right: 0; bottom: 0; height: 160px; background: #222; color: #fff;
+             padding: 16px; z-index: 10; }
+  .low { position: fixed; bottom: 40px; left: 16px; }
+</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "link", "name": "Home", "instances": 1},
+  {"role": "button", "name": "Subscribe", "instances": 1},
+  {"role": "button", "name": "Accept all", "instances": 1},
+  {"role": "button", "name": "Reject all", "instances": 1},
+  {"role": "link", "name": "Cookie settings", "instances": 1}
+]
+</script>
+<body>
+<main>
+  <a id="ck-home" href="/" data-expect="covered=false">Home</a>
+  <button id="ck-subscribe" class="low" data-expect="covered=true; coveredby=#cookies; visible=true">Subscribe</button>
+</main>
+<div id="cookies" role="dialog" aria-label="Cookies">
+  We use cookies to improve the site.
+  <button id="ck-accept" data-expect="covered=false">Accept all</button>
+  <button id="ck-reject" data-expect="covered=false">Reject all</button>
+  <a id="ck-settings" href="/cookies" data-expect="covered=false">Cookie settings</a>
+</div>
+</body>
+</html>

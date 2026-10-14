@@ -284,7 +284,7 @@ TRACEQA_TEST_SAFARI=1 uv run pytest drivers/webdriver-py collector
 | 2 | Failure cases against `fixtures/trouble/`, a site that fails on purpose: 404, 500, a redirect, a load that never finishes, an endless page, plain text, an address nothing answers, a driver that crashes, and Ctrl-C. | Done |
 | 2 | Command-line tests: every exit code, `--json` equals `run.json`, refusals with reasons, help for every command. | Done |
 | 2 | Golden ids: the 37 ids of the Buggy Shop are saved in `fixtures/buggy-shop/golden-ids.json` and every run must reproduce them. | Done |
-| 3 | Real-world pattern pages | Planned |
+| 3 | Pattern pages in `fixtures/patterns/`: mega menu, carousel, cookie banner, login form, product grid, tabs, accordion, modal dialog, data table. The whole engine runs on each in three browsers; every component, every element's state and every id is checked. | Done |
 | 4 | Nightly: language versions, comparison with the browser's accessibility tree | Planned |
 
 What phase 1 found:
@@ -322,6 +322,41 @@ What phase 2 found:
 | Names that change, such as a countdown | The page is read before and after the walk, at least a second apart. A name that differs at the same place is left out of the id, and the component has `nameChanges`. Other ids are unchanged. | A countdown keeps its id across runs, in both modes; a unit test; none of the four real sites has a false alarm, and each finds the same components as before |
 
 The case pages have no known gaps left.
+
+What phase 3 found:
+
+- **A table's rows were not grouped.** The select box of each row, named after
+  the row, became one component per row, where a card's title in a grid is one
+  templated component. Cards were looked for at the innermost repeated level,
+  which in a table is the cell. Cells are now passed over, so the row is the
+  item. The Buggy Shop's ids and those of the four real sites are unchanged.
+  Looking further out in general was not done: it would merge footer columns of
+  different links again, the first thing the real sites showed.
+
+## Pages behind a sign-in
+
+Found on a clinic app whose every page showed its welcome screen until a stored
+value said the visitor had gone past it. Extraction starts every browser empty,
+so it read the welcome screen, 4 components, at every address.
+
+| Piece | Status |
+|---|---|
+| `storageState` in the client and driver protocols, Playwright's format | Done |
+| `traceqa extract --storage-state FILE`, `storage_state` in the Python SDK, `storageState` in the TypeScript SDK, `storage_state` in the MCP tool | Done |
+| Playwright driver: a new context starts with it; an attached browser gets the cookies and the values before the site's scripts run | Done |
+| WebDriver driver, so Safari: visits each site once to set them, as WebDriver allows only the site it is on | Done, checked in Safari |
+| `traceqa login URL --save FILE`, through the new `session.storage` driver method; the file is readable only by its owner | Done |
+| `session_not_accepted` when a run with a state still lands on a sign-in page | Done |
+| Never in a run folder, an event or an error message | Done, and tested |
+
+With a guest state, the clinic app's seven pages gave 16 to 29 components each,
+the same in Chromium, Firefox and WebKit at both viewports, with no warnings.
+The forms on two of them gave every field a name from its label, and the
+sidebar's controls kept one id on every page.
+
+Not done: a `--header` option for sites that take an API token instead of a
+cookie, and detecting an expired session on a sign-in page with neither a
+sign-in address nor a password field.
 
 ## What comes next
 

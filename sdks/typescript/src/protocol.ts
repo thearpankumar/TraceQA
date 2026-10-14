@@ -36,6 +36,10 @@ Viewport?: Viewport
 Rect?: Rect
 BrowserTarget?: BrowserTarget
 BrowserInfo?: BrowserInfo
+StorageState?: StorageState1
+StorageCookie?: StorageCookie
+StorageOrigin?: StorageOrigin
+StorageItem?: StorageItem
 Warning?: Warning
 ElementState?: ElementState
 Confidence?: Confidence
@@ -44,6 +48,7 @@ DriverHelloParams?: DriverHelloParams
 DriverHelloResult?: DriverHelloResult
 Capabilities?: Capabilities
 SessionOpenParams?: SessionOpenParams
+SessionStorageParams?: SessionStorageParams
 SessionOpenResult?: SessionOpenResult
 SessionCloseParams?: SessionCloseParams
 WaitUntil?: WaitUntil
@@ -129,6 +134,7 @@ outDir?: string
  */
 parallel?: number
 options?: ExtractOptions
+storageState?: StorageState
 }
 /**
  * Which browser to run in. The engine passes this to a driver and never interprets it.
@@ -160,6 +166,43 @@ headless?: boolean
 export interface Viewport {
 width: number
 height: number
+}
+/**
+ * Start every browser with these cookies and stored values, for pages behind a sign-in or a first screen. Never written to the run folder.
+ */
+export interface StorageState {
+cookies: StorageCookie[]
+/**
+ * Values in each site's localStorage.
+ */
+origins: StorageOrigin[]
+}
+export interface StorageCookie {
+name: string
+value: string
+/**
+ * For example example.com, or .example.com for its subdomains too.
+ */
+domain: string
+path: string
+/**
+ * Unix time in seconds. -1 or absent for a cookie that lasts until the browser closes.
+ */
+expires?: number
+httpOnly?: boolean
+secure?: boolean
+sameSite?: ("Strict" | "Lax" | "None")
+}
+export interface StorageOrigin {
+/**
+ * Scheme, host and port, for example https://app.example.com.
+ */
+origin: string
+localStorage: StorageItem[]
+}
+export interface StorageItem {
+name: string
+value: string
 }
 /**
  * Returned as soon as the run is accepted. Progress and the result arrive as notifications.
@@ -427,7 +470,7 @@ signals: string[]
  */
 export interface Warning {
 /**
- * Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling.
+ * Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted.
  */
 code: string
 message: string
@@ -437,6 +480,16 @@ message: string
  */
 export interface Empty {
 
+}
+/**
+ * Cookies and stored values to start a browser with, so it is already signed in or past a site's first screen. The same format as Playwright's storageState, so a file made by Playwright can be used. It holds session keys: treat it as a password. The engine never writes it to a run folder or an event.
+ */
+export interface StorageState1 {
+cookies: StorageCookie[]
+/**
+ * Values in each site's localStorage.
+ */
+origins: StorageOrigin[]
 }
 export interface DriverHelloParams {
 protocolVersion: number
@@ -496,6 +549,23 @@ viewport: Viewport
  * BCP 47 language tag, for example en-US.
  */
 locale?: string
+storageState?: StorageState2
+}
+/**
+ * Cookies and stored values to put in place before the first page is loaded.
+ */
+export interface StorageState2 {
+cookies: StorageCookie[]
+/**
+ * Values in each site's localStorage.
+ */
+origins: StorageOrigin[]
+}
+/**
+ * Asks for the session's cookies and stored values, to save them after someone has signed in.
+ */
+export interface SessionStorageParams {
+sessionId: string
 }
 export interface SessionOpenResult {
 sessionId: string
@@ -802,6 +872,10 @@ export const DRIVER_PROTOCOL_METHODS = {
   "session.close": {
     "params": "SessionCloseParams",
     "result": "Empty"
+  },
+  "session.storage": {
+    "params": "SessionStorageParams",
+    "result": "StorageState"
   },
   "page.goto": {
     "params": "PageGotoParams",

@@ -67,6 +67,27 @@ def _target(browser: Browser) -> models.BrowserTarget:
     return models.BrowserTarget(browser=name, cdp_endpoint=endpoint)
 
 
+def _storage_state(
+    state: str | os.PathLike[str] | dict[str, Any] | models.StorageState | None,
+) -> models.StorageState | None:
+    """A state file's path, the state as a dict, or the state itself. Errors never show its contents."""
+    if state is None or isinstance(state, models.StorageState):
+        return state
+    if isinstance(state, dict):
+        raw = state
+    else:
+        try:
+            raw = json.loads(Path(state).read_text(encoding="utf-8"))
+        except OSError as error:
+            raise TraceQAError(f"could not read {state}: {error.strerror}") from None
+        except ValueError:
+            raise TraceQAError(f"{state} is not a storage state file") from None
+    try:
+        return models.StorageState.model_validate(raw)
+    except ValueError:
+        raise TraceQAError("not a storage state: expected cookies and origins, as `traceqa login` saves") from None
+
+
 def _find_binary(binary: str | os.PathLike[str] | None) -> str:
     candidate = binary or os.environ.get(BINARY_ENV) or shutil.which("traceqa")
     if not candidate:
@@ -157,6 +178,7 @@ class Engine:
         timeout_ms: int | None = None,
         settle_ms: int | None = None,
         parallel: int | None = None,
+        storage_state: str | os.PathLike[str] | dict[str, Any] | models.StorageState | None = None,
         on_event: EventHandler | None = None,
     ) -> ExtractResult:
         """List every interactive component on `url`, in every browser at every viewport.
@@ -165,6 +187,8 @@ class Engine:
         `parallel` is how many browsers run at the same time. Leave it out to let the engine choose.
         `crops=True` also saves a screenshot of the page and a picture of each component. It is
         several times slower on long pages, because the page is then gone through a screen at a time.
+        `storage_state` starts every browser signed in: a state file saved by `traceqa login`, or
+        the state itself. It holds session keys, so keep it out of version control.
 
         Blocks until the run is finished. A browser that fails does not raise: look at
         `result.status` and at each target's `status` and `error`.
@@ -187,6 +211,7 @@ class Engine:
                 timeout_ms=timeout_ms,
                 settle_ms=settle_ms,
             ),
+            storage_state=_storage_state(storage_state),
         )
         accepted = models.RunStartResult.model_validate(self._call("run.start", request))
         # Stays set if anything below raises, so that close() cancels the run.

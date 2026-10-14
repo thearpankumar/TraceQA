@@ -108,6 +108,51 @@ def stop_server(server: subprocess.Popen[bytes] | None) -> None:
         server.wait()
 
 
+def give_state(webdriver: WebDriverSession, state: models.StorageState) -> None:
+    """Puts cookies and stored values in place. WebDriver only sets them for the site the browser
+    is on, so the browser visits each site once, then leaves for a blank page."""
+    for origin in state.origins:
+        webdriver.navigate(origin.origin)
+        for item in origin.local_storage:
+            webdriver.execute("localStorage.setItem(arguments[0], arguments[1]);", item.name, item.value)
+    by_domain: dict[str, list[models.StorageCookie]] = {}
+    for cookie in state.cookies:
+        by_domain.setdefault(cookie.domain.lstrip("."), []).append(cookie)
+    for domain, cookies in by_domain.items():
+        known = [o.origin for o in state.origins if o.origin.split("://", 1)[-1].split(":")[0].endswith(domain)]
+        webdriver.navigate(known[0] if known else f"https://{domain}/")
+        for cookie in cookies:
+            webdriver.add_cookie(webdriver_cookie(cookie))
+    if state.origins or state.cookies:
+        webdriver.navigate("about:blank")
+
+
+def webdriver_cookie(cookie: models.StorageCookie) -> dict[str, Any]:
+    out: dict[str, Any] = {"name": cookie.name, "value": cookie.value, "path": cookie.path, "domain": cookie.domain}
+    if cookie.expires is not None and cookie.expires >= 0:
+        out["expiry"] = int(cookie.expires)
+    if cookie.secure is not None:
+        out["secure"] = cookie.secure
+    if cookie.http_only is not None:
+        out["httpOnly"] = cookie.http_only
+    if cookie.same_site is not None:
+        out["sameSite"] = cookie.same_site.value
+    return out
+
+
+def storage_cookie(cookie: dict[str, Any]) -> models.StorageCookie:
+    return models.StorageCookie(
+        name=cookie["name"],
+        value=cookie["value"],
+        domain=cookie.get("domain", ""),
+        path=cookie.get("path", "/"),
+        expires=cookie.get("expiry", -1),
+        http_only=cookie.get("httpOnly"),
+        secure=cookie.get("secure"),
+        same_site=cookie.get("sameSite"),
+    )
+
+
 def fit_viewport(webdriver: WebDriverSession, width: int, height: int) -> tuple[int, int]:
     """Resize the window until the page area has the requested size. Returns the size reached."""
 
@@ -141,6 +186,7 @@ class WebDriverDriver:
             "driver.shutdown": self.shutdown,
             "session.open": self.session_open,
             "session.close": self.session_close,
+            "session.storage": self.session_storage,
             "page.goto": self.page_goto,
             "page.eval": self.page_eval,
             "page.scroll": self.page_scroll,
@@ -214,6 +260,13 @@ class WebDriverDriver:
                 f"asked for a {params.viewport.width}x{params.viewport.height} viewport, the browser gave {reached[0]}x{reached[1]}",
             )
 
+        if params.storage_state is not None:
+            try:
+                give_state(webdriver, params.storage_state)
+            except WebDriverError as error:
+                self._close(session_id)
+                raise RpcError("internal", f"could not put the stored session in place: {error.message}") from error
+
         name = str(webdriver.capabilities.get("browserName") or target.browser)
         version = str(webdriver.capabilities.get("browserVersion") or "unknown")
         self._channel.log("info", f"opened {name} {version}")
@@ -223,6 +276,23 @@ class WebDriverDriver:
             capabilities=CAPABILITIES,
             viewport=unreached,
         )
+
+    def session_storage(self, params: models.SessionStorageParams) -> models.StorageState:
+        """The cookies and stored values of the site the browser is on. WebDriver shows no other."""
+        webdriver = self._session(params.session_id).webdriver
+        try:
+            webdriver.switch_to_frame(None)
+            origin = webdriver.execute("return location.origin;")
+            values = webdriver.execute(
+                "var out = []; for (var i = 0; i < localStorage.length; i++) {"
+                " var key = localStorage.key(i); out.push({name: key, value: localStorage.getItem(key)}); }"
+                " return out;"
+            )
+            cookies = [storage_cookie(cookie) for cookie in webdriver.cookies()]
+        except WebDriverError as error:
+            raise RpcError("internal", f"could not read the session's state: {error.message}") from error
+        origins = [models.StorageOrigin(origin=origin, local_storage=values)] if origin and origin != "null" else []
+        return models.StorageState(cookies=cookies, origins=origins)
 
     def session_close(self, params: models.SessionCloseParams) -> models.Empty:
         self._session(params.session_id)

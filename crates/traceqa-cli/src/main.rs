@@ -2,16 +2,19 @@
 //! request every other client sends, and hands it to the engine.
 
 mod install;
+mod login;
 
 use std::io::{self, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::{Args, Parser, Subcommand};
 use traceqa_engine::driver::Drivers;
 use traceqa_engine::{driver_commands, serve, Execution, Run};
-use traceqa_protocol::types::{BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, Viewport};
+use traceqa_protocol::types::{
+    BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState, Viewport,
+};
 
 #[derive(Parser)]
 #[command(
@@ -39,6 +42,10 @@ enum Command {
     Install(install::InstallArgs),
     /// Check the setup: where the drivers are, whether they start, and which browsers they open.
     Doctor(DriverArgs),
+    /// Sign in once in a browser window and save its state, for pages behind a sign-in.
+    ///
+    /// Then run: traceqa extract URL --storage-state FILE
+    Login(login::LoginArgs),
 }
 
 #[derive(Args)]
@@ -101,6 +108,10 @@ struct ExtractArgs {
     /// Print the run manifest as JSON instead of a table.
     #[arg(long)]
     json: bool,
+    /// Start every browser with the cookies and stored values in FILE, for pages behind a
+    /// sign-in. Make one with `traceqa login`. The file is a secret: keep it out of git.
+    #[arg(long, value_name = "FILE")]
+    storage_state: Option<PathBuf>,
     #[command(flatten)]
     drivers: DriverArgs,
 }
@@ -129,6 +140,7 @@ fn main() -> ExitCode {
         Command::Mcp(args) => mcp(args),
         Command::Install(args) => install::install(args),
         Command::Doctor(args) => install::doctor(&args.drivers),
+        Command::Login(args) => login::login(args),
     }
 }
 
@@ -159,6 +171,13 @@ fn extract(args: ExtractArgs) -> ExitCode {
     for target in &mut targets {
         target.headless = Some(!args.headed);
     }
+    let storage_state = match args.storage_state.as_deref().map(read_storage_state).transpose() {
+        Ok(state) => state,
+        Err(why) => {
+            eprintln!("traceqa: {why}");
+            return ExitCode::from(2);
+        }
+    };
     let request = RunStartParams {
         feature: "extract".to_string(),
         url: args.url,
@@ -173,6 +192,7 @@ fn extract(args: ExtractArgs) -> ExitCode {
             crops: Some(args.crops),
             include_hidden: Some(!args.visible_only),
         }),
+        storage_state,
     };
     let run = match Run::prepare(request) {
         Ok(run) => run,
@@ -213,6 +233,17 @@ fn extract(args: ExtractArgs) -> ExitCode {
         RunStatus::Cancelled => ExitCode::from(INTERRUPTED),
         _ => ExitCode::FAILURE,
     }
+}
+
+/// Reads a state file. It holds session keys, so an error names the file, never what is in it.
+fn read_storage_state(path: &Path) -> Result<StorageState, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|_| {
+        format!(
+            "{} is not a storage state file: expected cookies and origins, as `traceqa login` saves",
+            path.display()
+        )
+    })
 }
 
 /// Set by the first Ctrl-C. The run then stops at the next step, closes its browsers and

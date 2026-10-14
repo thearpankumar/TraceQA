@@ -53,6 +53,11 @@ at least 3 different names across the cards. Two names are not enough: eleven
 No card is looked for under an ancestor with the role `navigation`, `menu`,
 `menubar`, `tablist` or `toolbar`.
 
+In a table the item is the row. Its cells repeat too, but they are its columns,
+so a step with the role `cell`, `gridcell`, `columnheader` or `rowheader` is
+passed over when looking for the repeated item. The select box of each row of a
+table is then one templated component, as the title of each card of a grid is.
+
 A second templated slot in the same card (a title link and a brand link) gets
 `*#1`, then `*#2`, so the slots stay separate components.
 

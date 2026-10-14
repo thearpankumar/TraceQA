@@ -368,6 +368,7 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
                 dir: &dir,
                 exclusive: shared.exclusive,
                 cancel: shared.cancel,
+                storage_state: shared.params.storage_state.as_ref(),
             };
             let (file, browser, timings) = extract_target(drivers, &extraction, progress)?;
             progress.with_writer(|writer| writer.write_components(name, &file))?;
@@ -533,6 +534,7 @@ mod tests {
             ),
             parallel: None,
             options: None,
+            storage_state: None,
         }
     }
 
