@@ -160,7 +160,7 @@ says how to install it.
 | Option | Meaning |
 |---|---|
 | `--from FOLDER` | Install the drivers from a TraceQA checkout instead of GitHub. |
-| `--ref REF` | Branch, tag or commit on GitHub. Default `master`. |
+| `--ref REF` | Branch, tag or commit on GitHub. Default: the binary's own release tag, such as `v0.1.0`, so the binary and its drivers match. |
 | `--with-deps` | Also install the system libraries the browsers need. Linux only, may ask for `sudo`. |
 
 Running it again updates the drivers. The engine finds the installed drivers

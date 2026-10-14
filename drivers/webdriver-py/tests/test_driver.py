@@ -84,17 +84,29 @@ def collect(driver: DriverClient, session_id: str) -> dict[str, models.FrameEval
     return {result.frame.name or result.frame.id: result for result in results}
 
 
-def scroll_to_the_end(driver: DriverClient, session_id: str) -> dict[str, Any]:
-    """Scroll to the bottom until the page stops growing. Lazy content can arrive just after a
-    scroll has settled on a slow machine, so the height must stay the same twice in a row."""
-    height, unchanged = 0, 0
-    for _ in range(20):
-        scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
-        unchanged = unchanged + 1 if scrolled["height"] == height else 0
-        if unchanged == 2:
+LAZY_REVIEWS = 9
+
+
+def scroll_until_the_reviews_load(
+    driver: DriverClient, session_id: str, limit_s: float = 20.0
+) -> tuple[dict[str, Any], dict[str, models.FrameEvalResult]]:
+    """Scroll to the bottom and read the page until every lazy review has loaded, or time runs out.
+
+    The reviews load when the browser sees the end of the list, which it only checks when it
+    draws the page. Chrome under chromedriver on a CI machine can draw seldom, so the last
+    batch may arrive seconds later. Waiting for the result, not for a number of scrolls,
+    makes the test as strict on a slow machine as on a fast one.
+    """
+    deadline = time.monotonic() + limit_s
+    while True:
+        driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
+        frames = collect(driver, session_id)
+        main = models.CollectorResult.model_validate(frames["main"].value)
+        if names(main, "button").count("Helpful") >= LAZY_REVIEWS or time.monotonic() > deadline:
             break
-        height = scrolled["height"]
-    return scrolled
+        time.sleep(0.25)
+    # The last reviews made the page longer, so scroll once more to stand at its new end.
+    return driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"}), frames
 
 
 def read_the_shop(driver: DriverClient, target: dict[str, Any], shop_url: str, tmp_path: Path) -> None:
@@ -117,10 +129,9 @@ def read_the_shop(driver: DriverClient, target: dict[str, Any], shop_url: str, t
     assert pay.frame.box.w == 320 and pay.frame.box.y > frames["newsletter"].frame.box.y
     assert names(models.CollectorResult.model_validate(pay.value), "button") == ["Pay now"]
 
-    scrolled = scroll_to_the_end(driver, session_id)
+    scrolled, again = scroll_until_the_reviews_load(driver, session_id)
     assert scrolled["atEnd"]
-    again = collect(driver, session_id)
-    assert names(models.CollectorResult.model_validate(again["main"].value), "button").count("Helpful") == 9
+    assert names(models.CollectorResult.model_validate(again["main"].value), "button").count("Helpful") == LAZY_REVIEWS
     # Frames keep their ids from one call to the next.
     assert {name: result.frame.id for name, result in again.items()} == {
         name: result.frame.id for name, result in frames.items()

@@ -58,7 +58,7 @@ impl types::Viewport {
             .split_once('x')
             .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
         match size {
-            Some((width, height)) if width > 0 && height > 0 => Ok(Self { width, height }),
+            Some((width, height)) if width > 0 && height > 0 => Ok(Self { height, width }),
             _ => Err(format!("expected WIDTHxHEIGHT such as 1280x800, got {text:?}")),
         }
     }

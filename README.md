@@ -99,7 +99,17 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ### Step 1: Install the traceqa binary
 
-Prebuilt binaries are not yet published. Build and install from source:
+Each tagged version publishes binaries for macOS, Windows and Linux on the
+repository's [Releases](https://github.com/thearpankumar/TraceQA/releases)
+page. Download the archive for your system, extract it, and put `traceqa` on
+your `PATH`. Then run `traceqa install chromium firefox webkit` and skip to
+step 3.
+
+The binaries are not yet code-signed. On macOS, allow a downloaded binary with
+`xattr -d com.apple.quarantine traceqa`. On Windows, SmartScreen may ask for
+confirmation the first time it runs.
+
+Until the first release, or to build the latest code, install from source:
 
 ```sh
 git clone https://github.com/thearpankumar/TraceQA.git
@@ -379,8 +389,13 @@ Continuous integration runs on every pull request:
 
 | Job | Platforms | Checks |
 |---|---|---|
-| Lint | Linux | Formatting and lint for Rust and Python, the TypeScript type check, and that generated types match `spec/`. |
-| Test | Linux, macOS, Windows | All Rust, Python and TypeScript tests against the release binary and real browsers, and the bench. |
+| Changes | Linux | Decides whether the change touches code. A change to documentation only skips Lint and Test. |
+| Lint | Linux | Formatting and lint for Rust and Python, the TypeScript type check, that generated types match `spec/`, and that every package has the same version. |
+| Test | Linux, macOS, Windows | All Rust, Python and TypeScript tests against the built binary and real browsers, and the bench. |
+| CI | Linux | One result for the whole run: passes when every job passed or was skipped for a documentation change. |
+
+Pushing a version tag runs the release workflow, which builds and publishes the
+binaries. See [docs/releasing.md](docs/releasing.md).
 
 After changing a schema in `spec/`, regenerate the types:
 
@@ -399,7 +414,8 @@ The Rust types regenerate on build.
 | Component extraction | Inventory of every interactive element, with stable identifiers | Available |
 | SDKs and MCP server | Python, TypeScript and AI agent integration | Available |
 | One-command setup | `traceqa install` and `traceqa doctor` | Available |
-| Releases | Prebuilt binaries, a GitHub Action, and packages on PyPI and npm | Planned |
+| Releases | Prebuilt binaries for every tagged version | Available |
+| Distribution | A GitHub Action, and packages on PyPI and npm | Planned |
 | Explorer | Interacts with components and follows links to map the application | Planned |
 | Check mode | Tests one feature and reports what breaks | Planned |
 | Sweep mode | Tests the whole application and reports every issue | Planned |
@@ -411,6 +427,7 @@ The Rust types regenerate on build.
 | [docs/usage.md](docs/usage.md) | Every command and option, the SDKs, the MCP tools, output files, warnings and exit codes. |
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
+| [docs/releasing.md](docs/releasing.md) | Version numbers and how to publish a release. |
 | [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
 | [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
 | [docs/PLAN.md](docs/PLAN.md) | Project plan, decisions and current status. |
