@@ -15,6 +15,7 @@ dev = [
     "pytest>=8",
     "pyyaml>=6",
     "ruff>=0.6",
+    "mcp>=1.9",
 ]
 
 [tool.uv]
@@ -30,7 +31,7 @@ traceqa-driver-webdriver = { workspace = true }
 traceqa = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["python", "drivers", "sdks"]
+testpaths = ["python", "drivers", "sdks", "tests"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]

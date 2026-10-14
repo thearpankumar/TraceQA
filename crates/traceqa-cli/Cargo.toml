@@ -14,4 +14,5 @@ path = "src/main.rs"
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json.workspace = true
 traceqa-engine.workspace = true
+traceqa-mcp.workspace = true
 traceqa-protocol.workspace = true

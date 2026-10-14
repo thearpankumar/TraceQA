@@ -10,6 +10,7 @@ flowchart TB
         cli["CLI<br/>traceqa extract"]
         py["Python SDK<br/>traceqa.extract()"]
         ts["TypeScript SDK<br/>extract()"]
+        ai["AI tools over MCP<br/>traceqa mcp"]
         other["Any other language"]
     end
 
@@ -37,6 +38,7 @@ flowchart TB
     out[("Run folder<br/>run.json, events.jsonl,<br/>components.json, crops")]
 
     cli -->|direct call| run
+    ai -->|direct call| run
     py -->|JSON-RPC over stdio| serve
     ts -->|JSON-RPC over stdio| serve
     other -->|JSON-RPC over stdio| serve
@@ -55,7 +57,8 @@ flowchart TB
 | Component | Language | Responsibility |
 |---|---|---|
 | Engine | Rust | Orchestration, grouping, identifiers, output. The only component that decides anything. |
-| CLI | Rust | Turns arguments into a request and prints the result. Compiled into the same binary as the engine. |
+| CLI | Rust | Turns arguments into a request and prints the result. Compiled into the same binary as the engine. Also sets up the drivers (`install`, `doctor`). |
+| MCP server | Rust | Offers the engine to AI tools as MCP tools. Compiled into the same binary. |
 | Drivers | Python | Control browsers. Each does what it is asked and reports what happened. |
 | Collector | JavaScript | Runs inside the page and reports facts about its interactive elements. |
 | SDKs | Any | Start the engine and exchange messages with it. They contain no logic. |
@@ -105,8 +108,35 @@ Between a caller and the engine. The caller starts `traceqa serve`.
 it with `run.cancel` or start another while it executes. Each run executes on
 its own thread.
 
-The CLI does not use this protocol. It is compiled into the same binary and
-calls the engine directly.
+The CLI and the MCP server do not use this protocol. They are compiled into the
+same binary and call the engine directly.
+
+## MCP server
+
+`traceqa mcp` speaks the Model Context Protocol: JSON-RPC 2.0, one message per
+line, over standard input and output, like the client protocol. The AI tool is
+the client.
+
+| Step | Direction | Message |
+|---|---|---|
+| 1 | AI tool to server | `initialize`, with the MCP version it wants. The server answers with that version if it knows it, else its newest. |
+| 2 | AI tool to server | `tools/list`. The server answers with four tools and a JSON Schema for each one's arguments. |
+| 3 | AI tool to server | `tools/call`, for example `extract` with a URL. It runs on its own thread, so the AI tool can ping or cancel meanwhile. |
+| 4 | server to AI tool | `notifications/progress`, one per engine event, when the AI tool asked for progress. |
+| 5 | server to AI tool | The answer: text holding JSON, or a picture as base64. |
+
+A tool that fails, for example because a run id does not exist, answers with
+`isError` and a sentence saying what was wrong, so the AI can correct itself.
+Only a call the server cannot make sense of, such as an unknown tool, is a
+JSON-RPC error. Run and target names from the AI are checked to be plain
+folder names, so a tool can never read outside the runs folder.
+
+## Installing drivers
+
+`traceqa install` uses uv to create a Python environment in `~/.traceqa/env`
+and install the two drivers into it, then has Playwright download the
+browsers. When no driver is configured, the engine looks on `PATH` first and
+then in that environment, so an installed TraceQA needs no further setup.
 
 ## Driver protocol
 

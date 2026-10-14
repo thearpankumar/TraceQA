@@ -546,6 +546,7 @@ dependencies = [
  "clap",
  "serde_json",
  "traceqa-engine",
+ "traceqa-mcp",
  "traceqa-protocol",
 ]
 
@@ -560,6 +561,16 @@ dependencies = [
  "traceqa-protocol",
  "traceqa-recorder",
  "unicode-normalization",
+]
+
+[[package]]
+name = "traceqa-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "traceqa-engine",
+ "traceqa-protocol",
 ]
 
 [[package]]

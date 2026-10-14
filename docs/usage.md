@@ -2,7 +2,20 @@
 
 ## Setup
 
-Requirements: Rust (stable) and [uv](https://docs.astral.sh/uv/).
+### With the `traceqa` binary
+
+Requirement: [uv](https://docs.astral.sh/uv/), which installs the drivers.
+
+```sh
+traceqa install chromium firefox webkit
+traceqa doctor
+```
+
+See [`traceqa install`](#traceqa-install).
+
+### From the repository
+
+Requirements: Rust (stable) and uv.
 
 ```sh
 cargo build
@@ -21,6 +34,7 @@ order:
 1. `--driver COMMAND`, which may be repeated.
 2. The `TRACEQA_DRIVERS` environment variable: command lines separated by `;`.
 3. `traceqa-driver-playwright` and `traceqa-driver-webdriver` on `PATH`.
+4. The same two drivers where `traceqa install` put them.
 
 Inside the repository, `uv run` puts both drivers on `PATH`:
 
@@ -95,6 +109,82 @@ traceqa serve [--driver COMMAND]...
 
 Speaks the client protocol on standard input and output. SDKs start the engine
 this way. See [architecture.md](architecture.md#client-protocol).
+
+## `traceqa mcp`
+
+```
+traceqa mcp [--out DIR] [--driver COMMAND]...
+```
+
+An MCP server: it lets AI tools such as Claude Code, Claude Desktop and Cursor
+run TraceQA. The AI tool starts it and talks to it over standard input and
+output. Runs are written to and read from `--out` (default `runs`, relative to
+the folder the AI tool starts it in).
+
+Add it to Claude Code:
+
+```sh
+claude mcp add traceqa -- traceqa mcp
+```
+
+Other AI tools take the same command in their MCP settings: the program
+`traceqa` with the argument `mcp`.
+
+| Tool | What it does |
+|---|---|
+| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`. Answers with the run id and a summary per target. |
+| `list_runs` | The runs in the runs folder, newest first. |
+| `get_components` | The components of one run and target: a short line each, filtered by `role` or `name`, or one component in full with `component_id`. |
+| `get_crop` | The picture of one component, for runs made with `crops`. |
+
+A mistake in the arguments is answered as a tool error that says what was
+wrong, so the AI can correct itself. Progress is reported while an extraction
+runs, and the AI tool can cancel it.
+
+## `traceqa install`
+
+```
+traceqa install [BROWSERS]... [--from FOLDER] [--ref REF] [--with-deps]
+```
+
+Installs the browser drivers and browsers, so the binary is all a user needs
+to download. Needs [uv](https://docs.astral.sh/uv/); without it, the command
+says how to install it.
+
+| Step | What happens |
+|---|---|
+| 1 | Creates a Python environment in `~/.traceqa/env` (or `$TRACEQA_HOME/env`), away from the user's other Python projects. |
+| 2 | Installs the two drivers into it: from GitHub, or from a checkout with `--from`. From a checkout, the versions come from its `uv.lock`. |
+| 3 | Downloads the browsers asked for. Default `chromium`. Known values: `chromium`, `chrome`, `msedge`, `firefox`, `webkit`, `safari` (nothing to download). |
+
+| Option | Meaning |
+|---|---|
+| `--from FOLDER` | Install the drivers from a TraceQA checkout instead of GitHub. |
+| `--ref REF` | Branch, tag or commit on GitHub. Default `master`. |
+| `--with-deps` | Also install the system libraries the browsers need. Linux only, may ask for `sudo`. |
+
+Running it again updates the drivers. The engine finds the installed drivers
+by itself; see [Drivers](#drivers).
+
+## `traceqa doctor`
+
+Checks the setup and says what is missing: TraceQA's folder, uv, and for each
+driver where it was found, whether it starts, and which browsers it opens.
+Exits with 1 when no driver works.
+
+```
+TraceQA 0.1.0
+Home:    /Users/me/.traceqa (drivers installed here)
+uv:      /opt/homebrew/bin/uv
+
+Drivers:
+  /Users/me/.traceqa/env/bin/traceqa-driver-playwright
+    installed: /Users/me/.traceqa/env/bin/traceqa-driver-playwright
+    works: traceqa-driver-playwright 0.1.0, opens chromium, chrome, msedge, firefox, webkit, cdp
+  ...
+
+Ready. Browsers available: cdp, chrome, chromium, firefox, msedge, safari, webdriver, webkit
+```
 
 ## Python SDK
 

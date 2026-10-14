@@ -8,10 +8,11 @@ pub mod driver;
 mod extract;
 pub mod fingerprint;
 pub mod group;
+pub mod home;
 pub mod run;
 pub mod serve;
 
-pub use run::{driver_commands, EngineError, Execution, Run};
+pub use run::{driver_commands, EngineError, Execution, Run, DEFAULT_DRIVERS};
 
 /// Version reported to clients and drivers, and written into run folders.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

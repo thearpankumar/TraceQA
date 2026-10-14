@@ -1,103 +1,196 @@
 # TraceQA
 
-Discover bugs. Forge deterministic tests. Prevent regressions.
+**Discover bugs. Forge deterministic tests. Prevent regressions.**
 
-TraceQA is a browser-agnostic QA engine. Its first capability is **component
-extraction**: given a URL, it returns every interactive element on the page as
-structured data and as a screenshot crop, with identifiers that stay the same
-across browsers, viewports and runs.
+TraceQA is a browser-agnostic, agentic quality assurance engine for web
+applications. It reads a web page in real browsers, understands every
+interactive element on it, and produces structured, comparable results that
+people, test suites and AI agents can act on.
 
-**Status:** early release. Verified on macOS with Chromium, Firefox and WebKit.
+> **Status:** early release. The first capability, component extraction, is
+> complete and tested on macOS, Windows and Linux. Exploration, check mode and
+> sweep mode are on the [roadmap](#roadmap).
 
 ## Contents
 
-- [What it does](#what-it-does)
+- [What is TraceQA](#what-is-traceqa)
+- [Key capabilities](#key-capabilities)
+- [Supported platforms and browsers](#supported-platforms-and-browsers)
+- [Installation](#installation)
 - [Quick start](#quick-start)
-- [Command line](#command-line)
-- [Python](#python)
-- [TypeScript](#typescript)
-- [Output](#output)
-- [Browsers](#browsers)
+- [Ways to use TraceQA](#ways-to-use-traceqa)
 - [Architecture](#architecture)
 - [Repository layout](#repository-layout)
-- [Development](#development)
-- [Testing](#testing)
+- [Development and testing](#development-and-testing)
+- [Roadmap](#roadmap)
 - [Documentation](#documentation)
 - [License](#license)
 
-## What it does
+## What is TraceQA
 
-- **Finds every interactive element.** Buttons, links, inputs, selects,
-  editable regions, and elements that only look clickable.
-- **Reads the whole page.** Open shadow DOM, same-origin and cross-origin
-  iframes, and content that loads on scroll.
-- **Groups repeats into components.** Twelve "Add to cart" buttons are one
-  component with twelve instances.
-- **Assigns stable identifiers.** A component has the same id in every browser,
-  at every viewport, on every run.
-- **Records state and evidence.** Role, accessible name, selectors, position,
-  visibility and enabled state. With `--crops`, a cropped screenshot per
-  component too.
-- **Runs the same way everywhere.** One in-page collector is used for every
-  browser, so results are directly comparable.
-- **Runs browsers side by side.** A run takes about as long as its slowest
-  browsers, and reports where each one spent its time.
-- **Works from any language.** The engine is a standalone program that speaks a
-  documented JSON protocol. Python and TypeScript SDKs are included, and
-  [a guide](docs/clients.md) covers writing one for any other language.
+Testing a web application across browsers and screen sizes is slow, manual and
+inconsistent. Each browser behaves a little differently, and test scripts break
+whenever the page changes.
 
-Extraction reads the page in its current state. It does not click, type or
-navigate, and it makes no network calls of its own beyond loading the page.
+TraceQA approaches this from the page itself. Given a URL, it opens the page in
+every requested browser at every requested screen size, and builds a precise
+inventory of what a user can interact with: every button, link, input and
+control, with its role, accessible name, state, position and a picture of it.
+
+Every element receives an **identifier that stays the same across browsers,
+screen sizes and runs**. That makes results directly comparable. The same
+"Add to cart" button in Chrome on a desktop and in Safari on a phone is
+recognised as the same component, so differences between them are real
+differences on the page.
+
+This inventory is the foundation for the rest of the product. An explorer will
+interact with these components, and check and sweep modes will turn what it
+finds into bug reports and deterministic tests.
+
+## Key capabilities
+
+| Capability | Description |
+|---|---|
+| Complete element discovery | Buttons, links, inputs, selects, editable regions, and elements that only look clickable. |
+| Whole-page coverage | Open shadow DOM, same-origin and cross-origin iframes, and content that loads as the page scrolls. |
+| Stable identifiers | The same component has the same id in every browser, at every screen size, on every run. |
+| Component grouping | Repeated elements, such as twelve "Add to cart" buttons in a product grid, become one component with twelve instances. |
+| Evidence | Role, accessible name, selectors, position, visibility and state for each element, and an optional cropped screenshot. |
+| Parallel execution | Browsers and screen sizes run side by side, with a time breakdown for each. |
+| Consistent results | One in-page collector runs in every browser, so results are measured the same way everywhere. |
+| AI agent ready | A built-in MCP server lets AI tools such as Claude Code and Cursor run TraceQA and inspect its results. |
+| Any language | A documented protocol, with Python and TypeScript SDKs and a guide for others. |
+| Non-invasive | Extraction reads the page as it is. It does not click, type or navigate. |
+
+## Supported platforms and browsers
+
+**Operating systems:** macOS, Windows and Linux, from a single codebase. Every
+change is tested on all three in continuous integration.
+
+| Browser | How it is driven |
+|---|---|
+| Chromium, Google Chrome, Microsoft Edge | Playwright |
+| Firefox | Playwright |
+| WebKit | Playwright |
+| Safari | WebDriver, through `safaridriver` on macOS |
+| Agent and cloud browsers | Chrome DevTools Protocol endpoint (`cdp=ENDPOINT`) |
+| Selenium grids and cloud device farms | Any W3C WebDriver server (`webdriver=URL`) |
+
+## Installation
+
+### Prerequisites
+
+| Requirement | Needed for |
+|---|---|
+| [Rust](https://rustup.rs), stable | Building the `traceqa` binary |
+| [uv](https://docs.astral.sh/uv/) | Installing the browser drivers |
+| [Git](https://git-scm.com) | Getting the source |
+| [Node.js](https://nodejs.org) 18 or later | Only for the TypeScript SDK |
+
+Install uv if it is not already present:
+
+```sh
+# macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### Step 1: Install the traceqa binary
+
+Prebuilt binaries are not yet published. Build and install from source:
+
+```sh
+git clone https://github.com/thearpankumar/TraceQA.git
+cd TraceQA
+cargo install --locked --path crates/traceqa-cli
+```
+
+This places `traceqa` in Cargo's binary folder (`~/.cargo/bin`), which rustup
+adds to `PATH`.
+
+### Step 2: Install the drivers and browsers
+
+From the same folder:
+
+```sh
+traceqa install --from . chromium firefox webkit
+```
+
+This creates a private Python environment in `~/.traceqa`, installs the browser
+drivers into it at the versions the repository was tested with, and downloads
+the browsers. It does not affect other Python projects on the machine.
+
+On Linux, add `--with-deps` to also install the system libraries the browsers
+need. Safari needs no download; enable "Allow remote automation" in Safari's
+Developer settings instead.
+
+### Step 3: Verify the installation
+
+```sh
+traceqa doctor
+```
+
+This reports where each driver was found, whether it starts, and which browsers
+it can open.
+
+### SDKs and AI tools
+
+| Integration | Setup |
+|---|---|
+| Python SDK | Not yet on PyPI. Use it from the repository: see [docs/usage.md](docs/usage.md#python-sdk). |
+| TypeScript SDK | Not yet on npm. Use it from the repository: see [sdks/typescript](sdks/typescript/README.md). |
+| Claude Code | `claude mcp add traceqa -- traceqa mcp` |
+| Other MCP hosts | Add the command `traceqa` with the argument `mcp` in the host's MCP settings. |
 
 ## Quick start
 
-Requirements: [Rust](https://rustup.rs) (stable) and
-[uv](https://docs.astral.sh/uv/).
+Extract the components of a page in Chromium at the default screen size:
 
 ```sh
-cargo build
-uv sync
-uv run playwright install chromium firefox webkit
+traceqa extract https://example.com
 ```
 
-Run it against the bundled demo site:
-
-```sh
-# Terminal 1
-uv run python fixtures/buggy-shop/serve.py
-
-# Terminal 2
-uv run cargo run -- extract http://127.0.0.1:4173/ --browser chromium,firefox,webkit
-```
-
-`uv run` places the browser drivers on `PATH`, which is where the engine looks
-for them.
-
-## Command line
+Compare three browsers at a desktop and a phone size, with a picture of each
+component:
 
 ```sh
 traceqa extract https://example.com \
     --browser chromium,firefox,webkit \
-    --viewport 1280x800,390x844
+    --viewport 1280x800,390x844 \
+    --crops
 ```
 
+Each run writes a self-contained run folder under `./runs`, holding a summary,
+an event log, and the components found for each browser and screen size. The
+formats are described in [docs/usage.md](docs/usage.md#output-files).
+
+To try TraceQA without a site of your own, serve the bundled demo shop from the
+repository and extract it:
+
+```sh
+uv run python fixtures/buggy-shop/serve.py
+traceqa extract http://127.0.0.1:4173/
 ```
-TARGET                   STATUS     COMPONENTS INSTANCES WARNINGS    TIME
-chromium-1280x800        completed          37        67        1    3.8s
-chromium-390x844         completed          37        67        1    2.7s
-firefox-1280x800         completed          37        67        1    4.8s
-firefox-390x844          completed          37        67        1    4.1s
-webkit-1280x800          completed          37        67        1    4.0s
-webkit-390x844           completed          37        67        1    3.0s
 
-Run folder: runs/r_20261013_162841_e4f0
-```
+## Ways to use TraceQA
 
-Every browser is run at every viewport, several at a time. Add `--crops` to
-also save a picture of each component. See [docs/usage.md](docs/usage.md) for
-all options.
+| Interface | Best for | Entry point |
+|---|---|---|
+| Command line | Local checks, scripts and CI pipelines | `traceqa extract` |
+| Python SDK | Python test suites and tooling | `traceqa.extract()` |
+| TypeScript SDK | Node.js test suites and tooling | `extract()` |
+| MCP server | AI agents and assistants | `traceqa mcp` |
+| Client protocol | Any other language | `traceqa serve`, see [docs/clients.md](docs/clients.md) |
 
-## Python
+### Command line
+
+Exit codes make it suitable for CI: `0` when every browser completed, `1` when
+any failed, `2` for invalid input. `--json` prints a machine-readable summary.
+All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
+
+### Python
 
 ```python
 import traceqa
@@ -106,18 +199,11 @@ result = traceqa.extract(
     "https://example.com",
     browsers=["chromium", "firefox"],
     viewports=[(1280, 800), (390, 844)],
-    on_event=lambda event: print(event.message),
 )
-
-for target in result.targets:
-    for component in result.components(target.dir).components:
-        print(component.id, component.role, component.name, len(component.instances))
+components = result.components("chromium-1280x800").components
 ```
 
-The SDK contains no logic. It starts the engine, exchanges messages with it and
-returns typed results.
-
-## TypeScript
+### TypeScript
 
 ```ts
 import { extract } from "traceqa";
@@ -128,84 +214,37 @@ const result = await extract("https://example.com", {
     [1280, 800],
     [390, 844],
   ],
-  onEvent: (event) => console.log(event.message),
 });
-
-for (const target of result.targets) {
-  for (const component of (await result.components(target.dir)).components) {
-    console.log(component.id, component.role, component.name, component.instances.length);
-  }
-}
+const { components } = await result.components("chromium-1280x800");
 ```
 
-Node 18 or later, with no runtime dependencies. It works like the Python SDK,
-and also accepts an `AbortSignal` to cancel a run.
+### AI agents (MCP)
 
-## Output
+`traceqa mcp` implements the Model Context Protocol. Once connected, an AI tool
+can be asked in plain language, for example "check the buttons on example.com in
+Chrome and Firefox and tell me if any are missing a name", and it calls these
+tools itself:
 
-Each run writes one folder:
-
-```
-runs/<runId>/
-  run.json                   summary of the run and of each target
-  events.jsonl               one event per line, in order
-  <browser>-<width>x<height>/
-    components.json          every component found
-    page.png                 screenshot of the page    (with --crops)
-    crops/<componentId>.png  one crop per component    (with --crops)
-```
-
-A component in `components.json`:
-
-```json
-{
-  "id": "c_54751a251306",
-  "role": "button",
-  "name": "Add to cart",
-  "nameIsTemplate": false,
-  "confidence": "high",
-  "signals": ["native"],
-  "path": "main > list \"Products\" > listitem",
-  "crop": "crops/c_54751a251306.png",
-  "instances": [
-    {
-      "key": "c_54751a251306:0",
-      "name": "Add to cart",
-      "tag": "button",
-      "attrs": { "type": "button" },
-      "selectors": ["#grid > li:nth-of-type(1) > button"],
-      "box": { "x": 119.0, "y": 682.5, "w": 232.0, "h": 18.0 },
-      "state": { "visible": true, "enabled": true, "inViewport": true },
-      "frameId": "main",
-      "inShadowDom": false
-    }
-  ]
-}
-```
-
-The formats are defined in [spec/](spec/README.md).
-
-## Browsers
-
-| `--browser` value | Driver | Notes |
-|---|---|---|
-| `chromium`, `chrome`, `msedge`, `firefox`, `webkit` | Playwright | Launched by the driver. |
-| `cdp=ENDPOINT` | Playwright | Attaches to a running browser that exposes the Chrome DevTools Protocol, such as an agent or cloud browser. |
-| `safari` | WebDriver | Real Safari on macOS through `safaridriver`. Requires "Allow remote automation" in Safari's Developer settings. |
-| `webdriver=URL` | WebDriver | Any W3C WebDriver server or cloud grid. |
-
-The engine contains no browser names. It asks each configured driver which
-browsers it can open, and adapts to the capabilities the driver reports. A new
-browser is supported by adding a driver.
+| Tool | Purpose |
+|---|---|
+| `extract` | Run an extraction and return a summary per browser and screen size. |
+| `list_runs` | List earlier runs. |
+| `get_components` | Read the components of a run, filtered by role or name, or one component in full. |
+| `get_crop` | Return the picture of a component, so the AI can see it. |
 
 ## Architecture
+
+TraceQA is a small set of programs that exchange messages. One of them, the
+engine, makes every decision. The others request work from it or carry out its
+instructions.
 
 ```mermaid
 flowchart TB
     subgraph callers["Callers"]
         cli["CLI<br/>traceqa extract"]
-        py["Python SDK<br/>traceqa.extract()"]
-        ts["TypeScript SDK<br/>extract()"]
+        ai["AI tools over MCP<br/>traceqa mcp"]
+        py["Python SDK"]
+        ts["TypeScript SDK"]
         other["Any other language"]
     end
 
@@ -230,9 +269,10 @@ flowchart TB
     end
 
     spec[("spec/<br/>JSON Schemas")]
-    out[("Run folder<br/>run.json, events.jsonl,<br/>components.json, crops")]
+    out[("Run folder")]
 
     cli -->|direct call| run
+    ai -->|direct call| run
     py -->|JSON-RPC over stdio| serve
     ts -->|JSON-RPC over stdio| serve
     other -->|JSON-RPC over stdio| serve
@@ -246,42 +286,103 @@ flowchart TB
     spec -.->|types generated from| drivers
 ```
 
-- **Engine.** One Rust binary that holds all logic: orchestration, grouping,
-  identifiers and output.
-- **Drivers.** Separate programs that control browsers and make no decisions.
-- **Collector.** A single JavaScript file evaluated inside the page. It reports
-  facts about elements and nothing else.
-- **Contracts.** JSON Schemas in `spec/` define every message and file format.
-  The Rust and Python types are generated from them.
+### Components
 
-See [docs/architecture.md](docs/architecture.md) for the message flow and the
-design decisions.
+| Component | Language | Responsibility |
+|---|---|---|
+| Engine | Rust | Orchestration, grouping, identifiers and output. The only component that makes decisions. |
+| Command line and MCP server | Rust | Front ends compiled into the same `traceqa` binary as the engine. |
+| Drivers | Python | Control browsers. They carry out instructions and report results, and hold no logic. |
+| Collector | JavaScript | A single script evaluated inside the page that reports facts about its interactive elements. |
+| SDKs | Python, TypeScript | Start the engine and exchange messages with it. They hold no logic. |
+| Contracts | JSON Schema | Define every message and file format. All language bindings are generated from them. |
+
+### How an extraction works
+
+1. The engine selects a driver that can open the requested browser and opens a
+   session at the requested screen size.
+2. It loads the page and waits for it to settle: the load event, a quiet
+   network, a stable page height, and no intro animation still running.
+3. It scrolls through the page, which loads content that only appears on
+   scroll, and optionally captures a screenshot of each screen.
+4. It runs the collector in the main page and in every frame, and merges the
+   results into page coordinates.
+5. It groups elements into components and computes their stable identifiers.
+6. It writes the results to the run folder and reports each step as a live
+   event.
+
+Every browser and screen size runs side by side. A failure in one does not
+affect the others.
+
+### Design principles
+
+| Principle | Benefit |
+|---|---|
+| All logic lives in one engine | Every interface and every browser behaves identically. |
+| Browsers are reached through separate driver programs | Supporting a new browser never changes the engine. |
+| One in-page collector for every browser | Results are measured the same way and are directly comparable. |
+| Programs communicate in JSON-RPC over standard streams | Any language that can start a process can integrate. |
+| JSON Schemas are the single source of truth | Rust, Python and TypeScript types are generated and cannot drift apart. |
+| Results are files on disk | Every run can be inspected, compared and reported on later. |
+
+The full design, including the message flow and the reasoning behind each
+decision, is in [docs/architecture.md](docs/architecture.md).
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `spec/` | Contracts: protocols, file formats, the identifier recipe, examples, and recorded client conversations in `spec/transcripts/`. |
-| `collector/` | The in-page script. |
-| `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
 | `crates/traceqa-engine/` | The engine library. |
+| `crates/traceqa-cli/` | The `traceqa` command, including `install` and `doctor`. |
+| `crates/traceqa-mcp/` | The MCP server behind `traceqa mcp`. |
+| `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
 | `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
-| `crates/traceqa-cli/` | The `traceqa` command. |
-| `crates/traceqa-replay/` | A stand-in engine that plays back `spec/transcripts/`, for testing clients. |
-| `drivers/playwright-py/` | Driver for Chromium, Edge, Firefox, WebKit and CDP endpoints. |
+| `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |
+| `drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |
 | `drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
-| `python/traceqa-protocol/` | Python types generated from `spec/`, and the driver request loop. |
-| `sdks/python/` | The `traceqa` Python package. |
-| `sdks/typescript/` | The `traceqa` TypeScript package. |
+| `collector/` | The in-page script. |
+| `sdks/python/` | The Python SDK. |
+| `sdks/typescript/` | The TypeScript SDK. |
+| `python/traceqa-protocol/` | Python types generated from `spec/`, shared by the drivers and the SDK. |
+| `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
 | `fixtures/buggy-shop/` | Demo site with a manifest of its expected components. |
 | `bench/` | Scores extraction against the demo site. |
-| `scripts/` | Code generation, and recording the transcripts. |
-| `docs/` | Architecture, usage and project plan. |
+| `tests/` | End-to-end tests of the MCP server and the installer. |
+| `scripts/` | Code generation and transcript recording. |
+| `docs/` | Usage, architecture, client guide and project plan. |
 
-## Development
+## Development and testing
 
-After editing a schema in `spec/`, regenerate the types. The Rust types
-regenerate on build.
+Set up a development environment from the repository root:
+
+```sh
+cargo build
+uv sync
+uv run playwright install chromium firefox webkit
+```
+
+Run the test suites:
+
+```sh
+cargo test                                          # Rust crates
+uv run pytest                                       # drivers, SDKs, MCP server, installer
+(cd sdks/typescript && npm ci && uv run npm test)   # TypeScript SDK
+uv run bench/run.py                                 # end to end on the demo site
+```
+
+Every part of the repository has tests, from unit tests of each crate to
+end-to-end runs in real browsers. The MCP server is tested with the official
+MCP client library, and both SDKs replay the same recorded conversations so
+they are proven to send identical messages.
+
+Continuous integration runs on every pull request:
+
+| Job | Platforms | Checks |
+|---|---|---|
+| Lint | Linux | Formatting and lint for Rust and Python, the TypeScript type check, and that generated types match `spec/`. |
+| Test | Linux, macOS, Windows | All Rust, Python and TypeScript tests against the release binary and real browsers, and the bench. |
+
+After changing a schema in `spec/`, regenerate the types:
 
 ```sh
 uv run scripts/gen_python_protocol.py      # Python
@@ -289,71 +390,30 @@ uv run scripts/gen_python_protocol.py      # Python
 uv run scripts/record_transcripts.py       # after a client protocol change
 ```
 
-## Testing
+The Rust types regenerate on build.
 
-```sh
-cargo test                # the Rust crates, and the transcripts against the schemas
-uv run pytest             # the drivers, the protocol package and the Python SDK
-uv run bench/run.py       # the whole tool, end to end, on the demo site
+## Roadmap
 
-cd sdks/typescript && npm ci && uv run npm test    # the TypeScript SDK
-```
-
-Every part of the repository has tests:
-
-| Part | How it is tested | Run with |
+| Stage | Description | Status |
 |---|---|---|
-| `crates/traceqa-protocol` | Every example in `spec/examples/` must parse as its type and survive a round trip. Message encoding and decoding. | `cargo test` |
-| `crates/traceqa-engine` | Grouping, identifiers, driver command parsing and the client server as unit tests. Whole runs against a scripted driver, including a failed page load, a driver that stops answering, a failed screenshot and a cancelled run. | `cargo test` |
-| `crates/traceqa-recorder` | Event log, timestamps, run ids and crop geometry. | `cargo test` |
-| `crates/traceqa-cli` | Argument parsing as unit tests. The built binary is run by the SDK tests and the bench. | `cargo test`, `uv run pytest` |
-| `crates/traceqa-replay` | Matching rules, id mapping, and that every transcript loads. | `cargo test` |
-| `spec/transcripts` | Every message must be valid for its method in the client protocol. Both SDKs replay every transcript and must send exactly the recorded messages. | `cargo test`, `uv run pytest`, `npm test` |
-| `python/traceqa-protocol` | The same `spec/examples/` check as the Rust crate, so both languages read the contracts the same way. The driver request loop. | `uv run pytest` |
-| `drivers/playwright-py` | The real driver process against the demo site in Chromium, Firefox and WebKit, and attached to a running browser over CDP. | `uv run pytest` |
-| `drivers/webdriver-py` | The real driver process against the demo site through chromedriver. A Safari test runs when `TRACEQA_TEST_SAFARI=1`. | `uv run pytest` |
-| `sdks/python` | The SDK through the real binary and a real browser, including cancelling a run part-way. The recorded transcripts. | `uv run pytest` |
-| `sdks/typescript` | The same tests as the Python SDK, plus two runs at once on one engine and cancelling with an `AbortSignal`. The recorded transcripts. | `uv run npm test` |
-| `collector/collector.js` | Runs inside real browsers in the driver tests and the bench, which compare what it finds with the demo site's manifest. | `uv run pytest`, `uv run bench/run.py` |
-| `fixtures/buggy-shop` | Its manifest is the bench's answer key. | `uv run bench/run.py` |
-
-The WebDriver test needs chromedriver: put it on `PATH` or set
-`TRACEQA_CHROMEDRIVER`. Without it that test is skipped locally.
-
-### Continuous integration
-
-`.github/workflows/ci.yml` runs on every pull request and on pushes to `master`.
-
-| Job | Runs on | What it does |
-|---|---|---|
-| Lint | Linux | `cargo fmt --check`, `cargo clippy`, `ruff check`, `ruff format --check`, the TypeScript type check, and checks that the generated Python and TypeScript types match `spec/`. |
-| Test | Linux, macOS and Windows | `cargo test`, builds the release binaries and starts them, installs the browsers, runs `uv run pytest`, the TypeScript tests and the bench against that binary. |
-
-Each Test job uploads the release binary it built (`traceqa-linux-x86_64`,
-`traceqa-macos-arm64`, `traceqa-windows-x86_64`) and its bench scores as
-artifacts of the run.
-
-The same checks, locally:
-
-```sh
-cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
-uv run ruff check .
-uv run ruff format --check .
-uv run scripts/gen_python_protocol.py --check
-(cd sdks/typescript && npm run gen:check && npm run typecheck)
-```
+| Component extraction | Inventory of every interactive element, with stable identifiers | Available |
+| SDKs and MCP server | Python, TypeScript and AI agent integration | Available |
+| One-command setup | `traceqa install` and `traceqa doctor` | Available |
+| Releases | Prebuilt binaries, a GitHub Action, and packages on PyPI and npm | Planned |
+| Explorer | Interacts with components and follows links to map the application | Planned |
+| Check mode | Tests one feature and reports what breaks | Planned |
+| Sweep mode | Tests the whole application and reports every issue | Planned |
 
 ## Documentation
 
-- [docs/usage.md](docs/usage.md): command-line options, the Python and TypeScript
-  SDKs, output files, warnings and exit codes.
-- [docs/clients.md](docs/clients.md): writing a client in another language.
-- [docs/architecture.md](docs/architecture.md): components, message flow and
-  design decisions.
-- [spec/README.md](spec/README.md): the contracts and the rules for changing them.
-- [spec/fingerprint.md](spec/fingerprint.md): how component identifiers are built.
-- [docs/PLAN.md](docs/PLAN.md): project plan and status.
+| Document | Contents |
+|---|---|
+| [docs/usage.md](docs/usage.md) | Every command and option, the SDKs, the MCP tools, output files, warnings and exit codes. |
+| [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
+| [docs/clients.md](docs/clients.md) | Writing a client in another language. |
+| [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
+| [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
+| [docs/PLAN.md](docs/PLAN.md) | Project plan, decisions and current status. |
 
 ## License
 

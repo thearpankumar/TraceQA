@@ -26,7 +26,8 @@ See [architecture.md](architecture.md) for how the parts fit together and
 | TypeScript SDK | Built: `extract` and `Engine`, Node 18 or later, no runtime dependencies. |
 | Any other language | The protocol is built (`traceqa serve`). [clients.md](clients.md) says how to write a client, and the recorded transcripts test it. |
 | CI action | Not started. The command line already works in CI through its exit code and `--json`. |
-| MCP server | Not started. |
+| MCP server | Built: `traceqa mcp`, with the tools `extract`, `list_runs`, `get_components` and `get_crop`. |
+| Setup | Built: `traceqa install` and `traceqa doctor`. |
 | Web dashboard | Not started. It needs the hosted service. |
 
 ## Decisions
@@ -177,8 +178,6 @@ targets that time out beside others.
   close their browsers, but `run.json` is left saying `running`.
 - **Viewport reached.** When a WebDriver browser cannot reach the requested
   viewport, the driver logs it, but `components.json` records the size asked for.
-- **Setup command.** Installing the drivers and browsers is still manual (see the
-  README). A `traceqa install` command does not exist.
 - **Fingerprint freeze.** The recipe is stable on the shop and on four real
   sites, after one change. See `spec/fingerprint.md`.
 - **`page.act`.** Reserved in the driver protocol. No driver implements it.
@@ -207,6 +206,29 @@ targets that time out beside others.
 Only macOS has run any of this. On Windows the TypeScript tests depend on
 `npm` and the workspace's `python` being found on `PATH`, which CI sets up.
 
+## MCP server and setup
+
+| Piece | Status |
+|---|---|
+| `traceqa mcp`, crate `crates/traceqa-mcp` | Done. Speaks the four MCP versions that use the `initialize` handshake (2024-11-05 to 2025-11-25). Clients that first try the newer `server/discover` handshake of MCP 2026-07-28 fall back to it, which the tests check. |
+| Tools | `extract` with progress and cancelling, `list_runs`, `get_components` with filters, `get_crop` returning the picture. |
+| `traceqa install` | Done. Creates `~/.traceqa/env` with uv, installs the drivers from GitHub or from a checkout (pinned to its `uv.lock`), downloads browsers. |
+| `traceqa doctor` | Done. Shows where each driver was found and which browsers it opens. |
+| Engine finds installed drivers | Done. `PATH` first, then `~/.traceqa/env`. |
+| Tests | Rust unit tests for every MCP message. End to end, with the official MCP client library and a real browser, and from an empty folder through install to an extraction. |
+
+Not done:
+
+- **uv is not installed for the user.** `install` says how to install it. Fetching
+  and running an installer script for the user was left out on purpose.
+- **Installing from GitHub is not tested in CI.** The tests install from the
+  checkout, which is what they can prove. The GitHub path is the same command with
+  a different source.
+- **MCP 2026-07-28.** Its `server/discover` handshake is not spoken yet. Clients fall back to `initialize`.
+- **The MCP server has not been tried in Claude Code by hand.** The tests use the
+  official MCP client library for Python, which speaks the same protocol, but a
+  manual check in a real AI tool is still worth doing.
+
 ## What comes next
 
 1. Run extraction on sites of other kinds (a shop, a form-heavy app, a login page) before freezing the fingerprint.
@@ -224,7 +246,8 @@ crates/
   traceqa-protocol/        generated types and the JSON-RPC line format
   traceqa-engine/          all logic (library)
   traceqa-recorder/        run folder, events, crops
-  traceqa-cli/             the traceqa command
+  traceqa-cli/             the traceqa command, install and doctor
+  traceqa-mcp/             the MCP server
   traceqa-replay/          stand-in engine for testing clients
 python/
   traceqa-protocol/        generated Python types, the driver request loop
@@ -235,8 +258,9 @@ sdks/python/               the traceqa Python package
 sdks/typescript/           the traceqa TypeScript package
 fixtures/buggy-shop/       demo site and its manifest
 bench/                     scoring
+tests/                     end-to-end tests of mcp and install
 scripts/                   code generation, transcript recording
 ```
 
 Added by later features: `crates/traceqa-models/`, `crates/traceqa-server/`,
-`crates/traceqa-mcp/`, `apps/dashboard/`.
+`apps/dashboard/`.
