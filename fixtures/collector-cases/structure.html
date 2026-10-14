@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: structure</title>
+<style>body { font: 14px sans-serif; } div { margin: 6px 0; }</style>
+<body>
+<h1>Shadow DOM and slots</h1>
+
+<div><button id="struct-light" data-expect="shadow=false">In the page</button></div>
+
+<div id="struct-open-host"><template shadowrootmode="open">
+  <button id="struct-in-open-shadow" data-expect="shadow=true; name=In an open shadow root">In an open shadow root</button>
+</template></div>
+
+<div id="struct-outer-host"><template shadowrootmode="open">
+  <div id="struct-inner-host"><template shadowrootmode="open">
+    <button id="struct-in-nested-shadow" data-expect="shadow=true">Two shadow roots deep</button>
+  </template></div>
+</template></div>
+
+<div id="struct-closed-host"><template shadowrootmode="closed">
+  <button id="struct-in-closed-shadow" data-expect="absent">In a closed shadow root</button>
+</template></div>
+
+<div id="struct-slot-host"><template shadowrootmode="open"><p>Before the slot</p><slot></slot></template>
+  <button id="struct-slotted" data-expect="shadow=false; visible=true">Slotted into a shadow root</button></div>
+</body>
+</html>

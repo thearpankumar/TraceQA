@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: clickable</title>
+<style>body { font: 14px sans-serif; } div, span { margin: 6px 0; }</style>
+<body>
+<h1>Elements that can be clicked without being buttons</h1>
+
+<div id="click-onclick" onclick="void 0"
+  data-expect="role=generic; name=Open; confidence=low; signals=onclick-attr">Open</div>
+
+<div id="click-role-button" role="button" tabindex="0"
+  data-expect="role=button; name=Menu; confidence=high; signals=role,tabindex">Menu</div>
+
+<div><span id="click-pointer" style="cursor: pointer"
+  data-expect="name=Details; confidence=low; signals=cursor-pointer">Details</span></div>
+
+<div id="click-tabindex" tabindex="0" data-expect="confidence=low; signals=tabindex">Focusable</div>
+
+<div id="click-tabindex-negative" tabindex="-1" data-expect="absent">Focusable by script only</div>
+
+<div id="click-plain-div" data-expect="absent">Plain text</div>
+
+<div><a id="click-anchor-without-href" data-expect="absent">An anchor without a link</a></div>
+
+<div id="click-pointer-parent" style="cursor: pointer" data-expect="confidence=low; signals=cursor-pointer">
+  <span id="click-pointer-child" data-expect="absent">Inherits the pointer</span></div>
+
+<div id="click-card" onclick="void 0" data-expect="confidence=low; signals=onclick-attr">
+  Product card <button id="click-button-in-card" data-expect="role=button; name=Buy; confidence=high; signals=native">Buy</button></div>
+
+<div><label id="click-label" for="click-label-input" style="cursor: pointer" data-expect="absent">I agree</label>
+  <input id="click-label-input" type="checkbox" data-expect="role=checkbox; name=I agree"></div>
+
+<div id="click-editable" contenteditable="true" aria-label="Notes"
+  data-expect="role=textbox; name=Notes; confidence=high; signals=contenteditable"></div>
+
+<div id="click-editable-false" contenteditable="false" data-expect="absent">Not editable</div>
+
+<div><span id="click-role-link" role="link" tabindex="0" data-expect="role=link; name=Terms">Terms</span></div>
+
+<div><button id="click-presentation" role="presentation" data-expect="role=button; signals=native">Kept</button></div>
+
+<div><a id="click-none-link" href="#x" role="none" data-expect="role=link">Still a link</a></div>
+
+<div><span id="click-none-labelled" role="none" tabindex="0" aria-label="Labelled"
+  data-expect="role=generic; name=Labelled; signals=tabindex">Has a label, so ARIA keeps it; it has no role of its own</span></div>
+
+<ul role="presentation"><li id="click-presentation-plain" role="presentation" data-expect="absent">Plain list item, presentation applies</li></ul>
+</body>
+</html>

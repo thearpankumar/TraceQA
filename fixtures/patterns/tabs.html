@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: tabs</title>
+<style>body { font: 14px sans-serif; }</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "tab", "name": "Overview", "instances": 1},
+  {"role": "tab", "name": "Specs", "instances": 1},
+  {"role": "tab", "name": "Reviews", "instances": 1},
+  {"role": "button", "name": "Download brochure", "instances": 1},
+  {"role": "link", "name": "Full specification", "instances": 1},
+  {"role": "button", "name": "Write a review", "instances": 1}
+]
+</script>
+<body>
+<main>
+  <div role="tablist" aria-label="Product details">
+    <button id="tab-overview" role="tab" aria-selected="true" aria-controls="panel-overview"
+      data-expect="role=tab; name=Overview; selected=true">Overview</button>
+    <button id="tab-specs" role="tab" aria-selected="false" tabindex="-1" data-expect="role=tab; selected=false">Specs</button>
+    <button role="tab" aria-selected="false" tabindex="-1">Reviews</button>
+  </div>
+  <div id="panel-overview" role="tabpanel" aria-label="Overview">
+    <button id="tab-brochure" data-expect="name=Download brochure; visible=true">Download brochure</button></div>
+  <div role="tabpanel" aria-label="Specs" hidden>
+    <a id="tab-spec-link" href="/specs" data-expect="name=Full specification; visible=false">Full specification</a></div>
+  <div role="tabpanel" aria-label="Reviews" hidden>
+    <button id="tab-review" data-expect="visible=false">Write a review</button></div>
+</main>
+</body>
+</html>

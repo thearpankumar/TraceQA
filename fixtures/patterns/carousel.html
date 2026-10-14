@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: carousel</title>
+<style>
+  body { font: 14px sans-serif; }
+  .slides { position: relative; height: 200px; overflow: hidden; }
+  .slide { position: absolute; inset: 0; }
+  .slide[aria-hidden="true"] { visibility: hidden; }
+</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "button", "name": "Previous slide", "instances": 1},
+  {"role": "button", "name": "Next slide", "instances": 1},
+  {"role": "link", "name": "Shop now", "instances": 3},
+  {"role": "button", "name": "Go to slide 1", "instances": 1},
+  {"role": "button", "name": "Go to slide 2", "instances": 1},
+  {"role": "button", "name": "Go to slide 3", "instances": 1}
+]
+</script>
+<body>
+<section aria-label="Featured" aria-roledescription="carousel">
+  <button id="car-prev" aria-label="Previous slide" data-expect="name=Previous slide">&lt;</button>
+  <button id="car-next" aria-label="Next slide" data-expect="name=Next slide">&gt;</button>
+  <div class="slides">
+    <div class="slide" role="group" aria-roledescription="slide" aria-label="1 of 3">
+      <h2>Summer sale</h2><a id="car-shop-1" href="/sale" data-expect="name=Shop now; visible=true; instances=3">Shop now</a></div>
+    <div class="slide" role="group" aria-roledescription="slide" aria-label="2 of 3" aria-hidden="true">
+      <h2>New arrivals</h2><a id="car-shop-2" href="/new" data-expect="visible=false">Shop now</a></div>
+    <div class="slide" role="group" aria-roledescription="slide" aria-label="3 of 3" aria-hidden="true">
+      <h2>Gift cards</h2><a href="/gifts">Shop now</a></div>
+  </div>
+  <div role="group" aria-label="Choose a slide">
+    <button id="car-dot-1" aria-label="Go to slide 1" aria-pressed="true" data-expect="pressed=true">.</button>
+    <button aria-label="Go to slide 2" aria-pressed="false">.</button>
+    <button aria-label="Go to slide 3" aria-pressed="false">.</button>
+  </div>
+</section>
+</body>
+</html>

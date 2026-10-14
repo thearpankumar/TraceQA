@@ -1,0 +1,19 @@
+[package]
+name = "traceqa-cli"
+description = "The traceqa command."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "traceqa"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+ctrlc = "3.5.2"
+serde_json.workspace = true
+traceqa-engine.workspace = true
+traceqa-mcp.workspace = true
+traceqa-protocol.workspace = true

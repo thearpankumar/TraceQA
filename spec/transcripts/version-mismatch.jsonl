@@ -1,0 +1,3 @@
+{"note": "A newer engine refuses the client's protocol version. Written by hand: no released engine speaks version 2."}
+{"client": {"jsonrpc": "2.0", "id": 1, "method": "engine.hello", "params": {"protocolVersion": 1, "clientName": "<any>", "clientVersion": "<any>"}}}
+{"engine": {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "engine speaks client protocol 2, client asked for 1", "data": {"kind": "version_mismatch", "retryable": false}}}}

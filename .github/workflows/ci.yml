@@ -1,0 +1,208 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Decides whether the push changes anything that can break. A change to documentation only
+  # (Markdown files, docs/, the licence) skips the jobs below, and the CI job still reports.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # A new branch, a force push or a missing commit: test everything rather than guess.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+              || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "Cannot tell what changed; testing everything."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base" HEAD)"
+          echo "Changed files:"; echo "$changed"
+          # A here-string, not a pipe: with pipefail, grep -q stopping early can fail a pipe.
+          if grep -qvE '(\.md$|^docs/|^LICENSE$)' <<< "$changed"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Documentation only; the tests are skipped."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Style and generated code. These do not depend on the operating system, so they run once.
+  lint:
+    name: Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+      - name: Install the TypeScript tools
+        working-directory: sdks/typescript
+        run: npm ci
+
+      - name: Every package has the same version
+        run: python3 scripts/check_version.py
+      - name: Rust format
+        run: cargo fmt --all --check
+      - name: Rust lint
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Python lint
+        run: uv run ruff check .
+      - name: Python format
+        run: uv run ruff format --check .
+      - name: Generated Python types match spec/
+        run: uv run scripts/gen_python_protocol.py --check
+      - name: Generated TypeScript types match spec/
+        working-directory: sdks/typescript
+        run: npm run gen:check
+      - name: TypeScript type check
+        working-directory: sdks/typescript
+        run: npm run typecheck
+
+  # Everything that runs: the Rust crates, the binary, both drivers, both SDKs, the MCP server,
+  # the installer and the bench. Built once, in debug, which keeps Rust's overflow and sanity
+  # checks on. Release binaries are built by the release workflow when a version is tagged.
+  test:
+    name: Test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # One system failing should not hide what the others do.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # The SDK tests, the end-to-end tests and the bench use this binary.
+      TRACEQA_BIN: ${{ github.workspace }}/target/debug/traceqa${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      # The stand-in engine that plays back spec/transcripts/ to both SDKs.
+      TRACEQA_REPLAY_BIN: ${{ github.workspace }}/target/debug/traceqa-replay${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      # The WebDriver driver is tested against chromedriver. Missing chromedriver is a failure, not a skip.
+      TRACEQA_REQUIRE_CHROMEDRIVER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      # Rust: every crate's tests, then the binaries, which reuse what the tests compiled.
+      - name: Rust tests
+        run: cargo test --locked
+      - name: Build the binaries
+        run: cargo build --locked
+      - name: The binaries start
+        shell: bash
+        run: |
+          "$TRACEQA_BIN" --version
+          "$TRACEQA_BIN" extract --help
+          test -f "$TRACEQA_REPLAY_BIN"
+
+      # Python: the drivers, the protocol package, the SDK, MCP and install, against real browsers.
+      - name: Install the Python packages
+        run: uv sync --locked
+      - name: Install browsers
+        run: uv run playwright install --with-deps chromium firefox webkit
+      - name: Find chromedriver
+        shell: bash
+        run: |
+          # GitHub's machines ship chromedriver next to a matching Chrome. Its folder is named by
+          # CHROMEWEBDRIVER, spelled ChromeWebDriver on some Windows images; PATH is the last resort.
+          name="chromedriver${{ runner.os == 'Windows' && '.exe' || '' }}"
+          found=""
+          for dir in "${CHROMEWEBDRIVER:-}" "${ChromeWebDriver:-}" "C:/SeleniumWebDrivers/ChromeDriver"; do
+            if [ -n "$dir" ] && [ -f "$dir/$name" ]; then found="$dir/$name"; break; fi
+          done
+          [ -n "$found" ] || found="$(command -v "$name" || true)"
+          if [ -z "$found" ]; then
+            echo "chromedriver not found. CHROMEWEBDRIVER='${CHROMEWEBDRIVER:-}'"
+            env | grep -i chrome || true
+            exit 1
+          fi
+          echo "chromedriver: $found"
+          echo "TRACEQA_CHROMEDRIVER=$found" >> "$GITHUB_ENV"
+      - name: Python tests
+        run: uv run pytest
+
+      # TypeScript: the SDK against the binary, real browsers and the transcripts.
+      - name: Put the drivers and the workspace's Python on PATH
+        shell: bash
+        run: echo "$GITHUB_WORKSPACE/.venv/${{ runner.os == 'Windows' && 'Scripts' || 'bin' }}" >> "$GITHUB_PATH"
+      - name: TypeScript tests
+        working-directory: sdks/typescript
+        run: |
+          npm ci
+          npm test
+
+      # End to end: the binary, a driver, three browsers and the collector on the demo site.
+      # One repeat: CI checks that every component is found. Speed is measured locally.
+      - name: Bench
+        run: uv run bench/run.py --repeats 1 --json bench-scores.json
+      - name: Upload the bench scores
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-scores-${{ matrix.os }}
+          path: bench-scores.json
+          if-no-files-found: ignore
+
+  # The one check to require before merging. It passes when the jobs above passed, or were
+  # skipped because only documentation changed, and fails when any of them failed.
+  ci:
+    name: CI
+    needs: [changes, lint, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Result
+        shell: bash
+        run: |
+          echo "changes: ${{ needs.changes.result }}, lint: ${{ needs.lint.result }}, test: ${{ needs.test.result }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then exit 1; fi
+          for result in "${{ needs.lint.result }}" "${{ needs.test.result }}"; do
+            case "$result" in
+              success|skipped) ;;
+              *) exit 1 ;;
+            esac
+          done

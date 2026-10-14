@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "driver-protocol.schema.json",
+  "title": "TraceQA driver protocol",
+  "description": "Messages between the engine and a browser driver. JSON-RPC 2.0, one message per line, over the driver's stdin and stdout. The engine is always the caller. A driver holds no logic: it does what it is told and reports what happened.",
+  "x-traceqa": {
+    "contract": "driver-protocol",
+    "version": 1,
+    "methods": {
+      "driver.hello": { "params": "DriverHelloParams", "result": "DriverHelloResult" },
+      "driver.shutdown": { "params": "Empty", "result": "Empty" },
+      "session.open": { "params": "SessionOpenParams", "result": "SessionOpenResult" },
+      "session.close": { "params": "SessionCloseParams", "result": "Empty" },
+      "session.storage": { "params": "SessionStorageParams", "result": "StorageState" },
+      "page.goto": { "params": "PageGotoParams", "result": "PageGotoResult" },
+      "page.eval": { "params": "PageEvalParams", "result": "PageEvalResult" },
+      "page.scroll": { "params": "PageScrollParams", "result": "PageScrollResult" },
+      "page.screenshot": { "params": "PageScreenshotParams", "result": "PageScreenshotResult" },
+      "page.act": { "params": "PageActParams", "result": "PageActResult" }
+    },
+    "notifications": {
+      "driver.log": { "params": "DriverLogParams" }
+    }
+  },
+  "$defs": {
+    "DriverHelloParams": {
+      "type": "object",
+      "required": ["protocolVersion", "engineVersion"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "minimum": 0 },
+        "engineVersion": { "type": "string" }
+      }
+    },
+    "DriverHelloResult": {
+      "type": "object",
+      "required": ["driverName", "driverVersion", "protocolVersion", "browsers"],
+      "properties": {
+        "driverName": { "type": "string" },
+        "driverVersion": { "type": "string" },
+        "protocolVersion": {
+          "description": "The version the driver speaks. The engine refuses to continue when it differs from its own.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "browsers": {
+          "description": "Browser names this driver can open.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "exclusiveBrowsers": {
+          "description": "Browsers of which only one session can exist on the machine at a time, whichever process opens it. The engine never runs two of these at once.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "Capabilities": {
+      "description": "What this browser session can do. The engine adapts to these instead of knowing browser names.",
+      "type": "object",
+      "required": [
+        "clipScreenshot",
+        "fullPageScreenshot",
+        "evalAllFrames",
+        "crossOriginFrames",
+        "parallelSessions",
+        "setViewport",
+        "consoleEvents",
+        "networkEvents"
+      ],
+      "properties": {
+        "clipScreenshot": { "description": "Can screenshot one rectangle of the page.", "type": "boolean" },
+        "fullPageScreenshot": { "description": "Can screenshot the whole scrollable page.", "type": "boolean" },
+        "evalAllFrames": { "description": "Can run a script in every frame, not only the top one.", "type": "boolean" },
+        "crossOriginFrames": { "description": "Can run a script inside frames from another origin.", "type": "boolean" },
+        "parallelSessions": { "description": "Can hold more than one session at a time.", "type": "boolean" },
+        "setViewport": { "description": "Can set an exact viewport size.", "type": "boolean" },
+        "consoleEvents": { "type": "boolean" },
+        "networkEvents": { "type": "boolean" }
+      }
+    },
+    "SessionOpenParams": {
+      "type": "object",
+      "required": ["target", "viewport"],
+      "properties": {
+        "target": { "$ref": "common.schema.json#/$defs/BrowserTarget" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "locale": { "description": "BCP 47 language tag, for example en-US.", "type": "string" },
+        "storageState": {
+          "description": "Cookies and stored values to put in place before the first page is loaded.",
+          "$ref": "common.schema.json#/$defs/StorageState"
+        }
+      }
+    },
+    "SessionStorageParams": {
+      "description": "Asks for the session's cookies and stored values, to save them after someone has signed in.",
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": { "sessionId": { "type": "string" } }
+    },
+    "SessionOpenResult": {
+      "type": "object",
+      "required": ["sessionId", "browser", "capabilities"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "capabilities": { "$ref": "#/$defs/Capabilities" },
+        "viewport": {
+          "description": "The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
+          "$ref": "common.schema.json#/$defs/Viewport"
+        }
+      }
+    },
+    "SessionCloseParams": {
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": { "sessionId": { "type": "string" } }
+    },
+    "WaitUntil": {
+      "description": "load: the load event fired. settled: load fired and the network and DOM have been quiet for a short time.",
+      "type": "string",
+      "enum": ["load", "settled"]
+    },
+    "PageGotoParams": {
+      "type": "object",
+      "required": ["sessionId", "url"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "url": { "type": "string" },
+        "waitUntil": { "$ref": "#/$defs/WaitUntil" },
+        "timeoutMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "PageGotoResult": {
+      "type": "object",
+      "required": ["finalUrl", "title"],
+      "properties": {
+        "finalUrl": { "description": "URL after redirects.", "type": "string" },
+        "status": { "description": "HTTP status of the main document, when known.", "type": "integer", "minimum": 0 },
+        "title": { "type": "string" },
+        "loadComplete": {
+          "description": "False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.",
+          "type": "boolean"
+        },
+        "closedShadowRoots": {
+          "description": "How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "PageEvalParams": {
+      "type": "object",
+      "required": ["sessionId", "script"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "script": {
+          "description": "A JavaScript expression that evaluates to a function. The driver calls it with arg and returns its JSON-serialisable result.",
+          "type": "string"
+        },
+        "arg": { "description": "Any JSON value, passed to the function." },
+        "allFrames": { "description": "Run in every frame the driver can reach. Default false.", "type": "boolean" },
+        "timeoutMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "FrameInfo": {
+      "type": "object",
+      "description": "One frame of the page. box is where the frame element sits in the top-level page and is absent for the main frame.",
+      "required": ["id", "url", "crossOrigin"],
+      "properties": {
+        "id": { "description": "'main' for the top frame. Otherwise unique within the session.", "type": "string" },
+        "parentId": { "type": "string" },
+        "url": { "type": "string" },
+        "name": { "type": "string" },
+        "crossOrigin": { "description": "True when the frame's origin differs from the top page's.", "type": "boolean" },
+        "box": { "$ref": "common.schema.json#/$defs/Rect" }
+      }
+    },
+    "FrameEvalResult": {
+      "description": "Exactly one of value or error is present.",
+      "type": "object",
+      "required": ["frame"],
+      "properties": {
+        "frame": { "$ref": "#/$defs/FrameInfo" },
+        "value": { "description": "What the function returned." },
+        "error": { "description": "Why the script could not run in this frame.", "type": "string" }
+      }
+    },
+    "PageEvalResult": {
+      "type": "object",
+      "required": ["results"],
+      "properties": {
+        "results": {
+          "description": "One entry per frame, main frame first.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/FrameEvalResult" }
+        }
+      }
+    },
+    "ScrollTo": { "type": "string", "enum": ["top", "bottom"] },
+    "ScrollWait": {
+      "description": "What to wait for after scrolling. animations: the page height is stable and animations that end have ended. height: only that the page height is stable, which is quicker and enough when no picture is taken.",
+      "type": "string",
+      "enum": ["animations", "height"]
+    },
+    "PageScrollParams": {
+      "description": "Give exactly one of to or byY.",
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "to": { "$ref": "#/$defs/ScrollTo" },
+        "byY": { "description": "Pixels to scroll down. Negative scrolls up.", "type": "number" },
+        "waitFor": { "$ref": "#/$defs/ScrollWait" }
+      }
+    },
+    "PageScrollResult": {
+      "type": "object",
+      "required": ["y", "height", "atEnd"],
+      "properties": {
+        "y": { "type": "number" },
+        "height": { "description": "Full scrollable height after the scroll.", "type": "number" },
+        "atEnd": { "type": "boolean" }
+      }
+    },
+    "PageScreenshotParams": {
+      "description": "clip is a rectangle in top-level page coordinates and requires the clipScreenshot capability.",
+      "type": "object",
+      "required": ["sessionId", "path"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "path": { "description": "Absolute path of the PNG file the driver must write.", "type": "string" },
+        "fullPage": { "description": "Default false: only the current viewport.", "type": "boolean" },
+        "clip": { "$ref": "common.schema.json#/$defs/Rect" }
+      }
+    },
+    "PageScreenshotResult": {
+      "type": "object",
+      "required": ["path", "width", "height"],
+      "properties": {
+        "path": { "type": "string" },
+        "width": { "description": "Image width in device pixels.", "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ActionKind": {
+      "type": "string",
+      "enum": ["click", "hover", "type", "select", "press"]
+    },
+    "ElementTarget": {
+      "type": "object",
+      "required": ["selector"],
+      "properties": {
+        "selector": { "type": "string" },
+        "frameId": { "description": "Default 'main'.", "type": "string" }
+      }
+    },
+    "PageActParams": {
+      "description": "Reserved for the explorer. Component extraction never sends it.",
+      "type": "object",
+      "required": ["sessionId", "action", "target"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "action": { "$ref": "#/$defs/ActionKind" },
+        "target": { "$ref": "#/$defs/ElementTarget" },
+        "value": { "description": "Text to type, option to select, or key to press.", "type": "string" }
+      }
+    },
+    "PageActResult": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": { "ok": { "type": "boolean" } }
+    },
+    "LogLevel": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+    "DriverLogParams": {
+      "type": "object",
+      "required": ["level", "message"],
+      "properties": {
+        "level": { "$ref": "#/$defs/LogLevel" },
+        "message": { "type": "string" }
+      }
+    },
+    "RpcErrorData": {
+      "description": "The data field of a JSON-RPC error from a driver or the engine.",
+      "type": "object",
+      "required": ["kind", "retryable"],
+      "properties": {
+        "kind": {
+          "description": "Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, internal.",
+          "type": "string"
+        },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  }
+}

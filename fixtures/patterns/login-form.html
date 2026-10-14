@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: login form</title>
+<style>body { font: 14px sans-serif; } form > div { margin: 8px 0; } ul { list-style: none; padding: 0; }</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "textbox", "name": "Email", "instances": 1},
+  {"role": "textbox", "name": "Password", "instances": 1},
+  {"role": "button", "name": "Show password", "instances": 1},
+  {"role": "checkbox", "name": "Remember me", "instances": 1},
+  {"role": "button", "name": "Sign in", "instances": 1},
+  {"role": "link", "name": "Forgot password?", "instances": 1},
+  {"role": "button", "name": "Continue with Google", "instances": 1},
+  {"role": "button", "name": "Continue with GitHub", "instances": 1},
+  {"role": "button", "name": "Continue with Apple", "instances": 1},
+  {"role": "link", "name": "Create an account", "instances": 1}
+]
+</script>
+<body>
+<main>
+  <h1>Sign in</h1>
+  <form aria-label="Sign in">
+    <div><label for="lg-email">Email</label>
+      <input id="lg-email" type="email" required autocomplete="username"
+        data-expect="role=textbox; name=Email; required=true"></div>
+    <div><label for="lg-password">Password</label>
+      <input id="lg-password" type="password" required data-expect="role=textbox; name=Password; required=true">
+      <button id="lg-show" type="button" aria-label="Show password" aria-pressed="false"
+        data-expect="name=Show password; pressed=false">eye</button></div>
+    <div><label><input id="lg-remember" type="checkbox" data-expect="role=checkbox; name=Remember me; checked=false"> Remember me</label></div>
+    <div><button id="lg-submit" type="submit" data-expect="role=button; name=Sign in">Sign in</button>
+      <a id="lg-forgot" href="/forgot" data-expect="name=Forgot password?">Forgot password?</a></div>
+  </form>
+  <ul aria-label="Other ways to sign in">
+    <li><button id="lg-google" data-expect="name=Continue with Google">Continue with Google</button></li>
+    <li><button>Continue with GitHub</button></li>
+    <li><button>Continue with Apple</button></li>
+  </ul>
+  <p>New here? <a href="/signup">Create an account</a></p>
+</main>
+</body>
+</html>

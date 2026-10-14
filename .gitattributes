@@ -1,0 +1,4 @@
+# Keep line endings the same on every system, so files compare equal on Windows too.
+* text=auto eol=lf
+
+*.png binary

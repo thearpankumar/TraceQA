@@ -1,0 +1,41 @@
+{
+  "formatVersion": 1,
+  "runId": "r_20261013_210455_a1b2",
+  "feature": "extract",
+  "url": "https://shop.test",
+  "status": "completed",
+  "startedAt": "2026-10-13T15:34:51Z",
+  "finishedAt": "2026-10-13T15:34:56Z",
+  "engineVersion": "0.1.0",
+  "targets": [
+    {
+      "dir": "firefox-1280x800",
+      "target": {
+        "browser": "firefox",
+        "headless": true
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "browser": {
+        "name": "firefox",
+        "version": "143.0"
+      },
+      "status": "completed",
+      "componentCount": 18,
+      "instanceCount": 64,
+      "warningCount": 1,
+      "durationMs": 4210,
+      "timings": {
+        "openMs": 612,
+        "loadMs": 1480,
+        "readMs": 96,
+        "scrollMs": 1240,
+        "screenshotMs": 310,
+        "cropMs": 84,
+        "screens": 3
+      }
+    }
+  ]
+}

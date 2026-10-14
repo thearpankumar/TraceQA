@@ -1,0 +1,7 @@
+{
+  "sessionId": "s1",
+  "action": "click",
+  "target": {
+    "selector": "#grid > li:nth-of-type(1) > button"
+  }
+}
