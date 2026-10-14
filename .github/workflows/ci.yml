@@ -112,8 +112,21 @@ jobs:
       - name: Find chromedriver
         shell: bash
         run: |
-          # GitHub's machines ship chromedriver next to a matching Chrome and name its folder here.
-          echo "TRACEQA_CHROMEDRIVER=${CHROMEWEBDRIVER}/chromedriver${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
+          # GitHub's machines ship chromedriver next to a matching Chrome. Its folder is named by
+          # CHROMEWEBDRIVER, spelled ChromeWebDriver on some Windows images; PATH is the last resort.
+          name="chromedriver${{ runner.os == 'Windows' && '.exe' || '' }}"
+          found=""
+          for dir in "${CHROMEWEBDRIVER:-}" "${ChromeWebDriver:-}" "C:/SeleniumWebDrivers/ChromeDriver"; do
+            if [ -n "$dir" ] && [ -f "$dir/$name" ]; then found="$dir/$name"; break; fi
+          done
+          [ -n "$found" ] || found="$(command -v "$name" || true)"
+          if [ -z "$found" ]; then
+            echo "chromedriver not found. CHROMEWEBDRIVER='${CHROMEWEBDRIVER:-}'"
+            env | grep -i chrome || true
+            exit 1
+          fi
+          echo "chromedriver: $found"
+          echo "TRACEQA_CHROMEDRIVER=$found" >> "$GITHUB_ENV"
       - name: Python tests
         run: uv run pytest
 

@@ -88,10 +88,14 @@ def test_attaches_to_a_running_browser_over_cdp(driver: DriverClient, shop_url: 
     flags = [
         f"--remote-debugging-port={port}",
         "--headless=new",
+        # Playwright passes this too. Ubuntu 24.04 does not let Chromium start its sandbox in CI.
+        "--no-sandbox",
         f"--user-data-dir={tmp_path / 'profile'}",
         "about:blank",
     ]
-    browser = subprocess.Popen([chromium, *flags], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log = tmp_path / "chromium.log"
+    with log.open("wb") as output:
+        browser = subprocess.Popen([chromium, *flags], stdout=output, stderr=subprocess.STDOUT)
     endpoint = f"http://127.0.0.1:{port}"
     try:
         for _ in range(100):
@@ -100,6 +104,11 @@ def test_attaches_to_a_running_browser_over_cdp(driver: DriverClient, shop_url: 
                 break
             except OSError:
                 time.sleep(0.1)
+        else:
+            exited = "" if browser.poll() is None else f" It exited with {browser.returncode}."
+            pytest.fail(
+                f"Chromium did not open its CDP port in 10 s.{exited} Its output:\n{log.read_text(errors='replace')[-2000:]}"
+            )
 
         driver.call("driver.hello", HELLO)
         session = driver.call(
