@@ -136,7 +136,33 @@ pub(crate) fn extract_target(
     })?;
     clock.open = opening.elapsed();
 
-    let result = read_page(driver, &session, job, progress, &mut clock);
+    // A browser may not reach the size asked for. The page is then read, scrolled, cropped and
+    // recorded at the size it really has, and a warning says so.
+    let reached = session.viewport.clone().filter(|reached| reached != job.viewport);
+    let at_reached = reached.as_ref().map(|viewport| Job { viewport, ..*job });
+    let result = read_page(
+        driver,
+        &session,
+        at_reached.as_ref().unwrap_or(job),
+        progress,
+        &mut clock,
+    )
+    .map(|mut file| {
+        if let Some(reached) = &reached {
+            let message = format!(
+                "The browser could not give a {}x{} viewport, so the page was read at {}x{}.",
+                job.viewport.width, job.viewport.height, reached.width, reached.height
+            );
+            progress.emit(
+                "warning",
+                Some(job.name),
+                message.clone(),
+                json!({ "code": "viewport_not_reached" }),
+            );
+            file.warnings.push(warning("viewport_not_reached", message));
+        }
+        file
+    });
     // A driver that stopped answering cannot close anything. It is replaced before its next use.
     if !driver.is_lost() {
         if let Err(error) = driver.close_session(&session.session_id) {
@@ -198,6 +224,7 @@ fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job: &Job) -> R
                         frame_id: frame.id.clone(),
                         frame_step: frame_step.clone(),
                         page_box,
+                        name_changes: false,
                     });
                 }
                 if is_main {
@@ -263,6 +290,103 @@ fn at_end(scroll: &ScrollInfo) -> bool {
     scroll.y + scroll.viewport_height >= scroll.height - 1.0
 }
 
+/// The least time between the two looks at the page that tell which names change. A countdown
+/// ticks every second, so a second is enough to see it.
+const NAME_WATCH: Duration = Duration::from_millis(1000);
+
+/// Role, name and position of every element, by element.
+type Names = HashMap<ElementKey, (String, String, Option<(f64, f64)>)>;
+
+fn names_of(reading: &Reading) -> Names {
+    reading
+        .elements
+        .iter()
+        .map(|located| {
+            let at = located.page_box.as_ref().map(|b| (b.x, b.y));
+            let key = element_key(&located.frame_id, &located.element.selectors);
+            (key, (located.element.role.clone(), located.element.name.clone(), at))
+        })
+        .collect()
+}
+
+/// Marks the elements whose name is not the one they had before the walk. Only the same
+/// element counts: same place in the page, same role, same position. Content that loaded on
+/// the way and moved others down is new, not renamed.
+fn mark_changed_names(reading: &mut Reading, before: &Names) {
+    for located in &mut reading.elements {
+        let key = element_key(&located.frame_id, &located.element.selectors);
+        let Some((role, name, at)) = before.get(&key) else {
+            continue;
+        };
+        let now = located.page_box.as_ref().map(|b| (b.x, b.y));
+        let same_place = match (at, now) {
+            (Some(a), Some(b)) => (a.0 - b.0).abs() <= 2.0 && (a.1 - b.1).abs() <= 2.0,
+            _ => false,
+        };
+        if same_place && *role == located.element.role && *name != located.element.name {
+            located.name_changes = true;
+        }
+    }
+}
+
+/// Lists what can be clicked or typed into, as tag and text, quickly and without the
+/// collector's detail. The page is not changed.
+const LIST_CONTROLS: &str = "(function () {
+  var found = document.querySelectorAll('a[href], area[href], button, input, select, textarea, summary, ' +
+    '[role], [tabindex], [onclick], [contenteditable]');
+  var keys = [];
+  for (var i = 0; i < found.length && i < 5000; i++) {
+    keys.push(found[i].localName + '|' + (found[i].textContent || found[i].value || '').trim().slice(0, 80));
+  }
+  return keys;
+})";
+
+/// Watches which controls the page holds while it is scrolled. A long table or feed that keeps
+/// only the rows near the screen holds about as many at any moment, but not the same ones:
+/// rows it showed earlier are gone, and so they are gone when the page is read.
+#[derive(Default)]
+struct Removals {
+    seen: std::collections::HashSet<String>,
+    most: u64,
+    dropped: u64,
+}
+
+impl Removals {
+    fn saw(&mut self, keys: Vec<String>) {
+        let present: std::collections::HashSet<String> = keys.into_iter().collect();
+        self.most = self.most.max(present.len() as u64);
+        self.seen.extend(present.iter().cloned());
+        self.dropped = self.dropped.max(self.seen.difference(&present).count() as u64);
+    }
+
+    /// A few controls come and go on any page, a menu closing for one. Only a real drop counts.
+    fn warning(&self) -> Option<Warning> {
+        (self.dropped >= 5 && self.dropped * 10 >= self.most).then(|| {
+            warning(
+                "elements_removed_while_scrolling",
+                format!(
+                    "The page removed {} controls it had shown while it was scrolled, as long lists that keep only the rows near the screen do. Rows that had left the screen are not listed.",
+                    self.dropped
+                ),
+            )
+        })
+    }
+}
+
+fn list_controls(driver: &mut Driver, session: &SessionOpenResult, clock: &mut Clock) -> Option<Vec<String>> {
+    let evaluated = timed(&mut clock.read, || {
+        driver.eval(&PageEvalParams {
+            session_id: session.session_id.clone(),
+            script: LIST_CONTROLS.to_string(),
+            arg: None,
+            all_frames: Some(false),
+            timeout_ms: Some(5_000),
+        })
+    });
+    let value = evaluated.ok()?.results.into_iter().next()?.value?;
+    serde_json::from_value(value).ok()
+}
+
 /// What going through the page produced.
 struct Walk {
     /// The reading taken at the last position, when the walk took readings.
@@ -272,6 +396,32 @@ struct Walk {
     steps: u64,
     /// Whether the bottom was reached. `None` when the walk could not tell.
     reached_end: Option<bool>,
+    removals: Removals,
+}
+
+/// How long to wait at the bottom of a page for a part that is fetched only once the bottom is
+/// reached, as feeds do. A page that fits on one screen is never waited for.
+const PATIENCE_AT_END: Duration = Duration::from_millis(1000);
+
+/// At the bottom of a page: waits for more to arrive, and says whether it did.
+fn more_at_end(
+    driver: &mut Driver,
+    session: &SessionOpenResult,
+    job: &Job,
+    clock: &mut Clock,
+    height: f64,
+) -> Result<bool, EngineError> {
+    check_cancelled(job)?;
+    let scrolled = timed(&mut clock.scroll, || {
+        thread::sleep(PATIENCE_AT_END);
+        driver.scroll(&PageScrollParams {
+            session_id: session.session_id.clone(),
+            to: Some(ScrollTo::Bottom),
+            by_y: None,
+            wait_for: Some(ScrollWait::Height),
+        })
+    })?;
+    Ok(scrolled.height > height + 1.0)
 }
 
 /// Goes through the page one screen at a time, the way a person scrolls, reading it and
@@ -289,9 +439,23 @@ fn walk_with_pictures(
     fs::create_dir_all(screens_dir)?;
     let mut screens: Vec<Screen> = Vec::new();
     let mut steps = 0;
+    let mut removals = Removals::default();
     loop {
         check_cancelled(job)?;
         let reading = timed(&mut clock.read, || read_frames(driver, session, job))?;
+        removals.saw(
+            reading
+                .elements
+                .iter()
+                .map(|located| {
+                    format!(
+                        "{}|{}",
+                        located.element.tag,
+                        located.element.text.as_deref().unwrap_or("")
+                    )
+                })
+                .collect(),
+        );
         let scroll = &reading.scroll;
         let image = screens_dir.join(format!("{steps}.png"));
         let captured = timed(&mut clock.screenshot, || {
@@ -316,12 +480,22 @@ fn walk_with_pictures(
         }
 
         let reached_end = at_end(scroll);
+        // The bottom of a page that scrolls may only be the bottom for now.
+        if reached_end
+            && scroll.y > 0.0
+            && steps < max_steps
+            && more_at_end(driver, session, job, clock, scroll.height)?
+        {
+            steps += 1;
+            continue;
+        }
         if reached_end || steps >= max_steps {
             return Ok(Walk {
                 reading: Some(reading),
                 screens,
                 steps,
                 reached_end: Some(reached_end),
+                removals,
             });
         }
         // A little less than a full screen, so nothing falls into the gap between two screens.
@@ -342,6 +516,7 @@ fn walk_with_pictures(
                 screens,
                 steps,
                 reached_end: Some(true),
+                removals,
             });
         }
     }
@@ -362,7 +537,11 @@ fn walk_quickly(
         screens: Vec::new(),
         steps: 0,
         reached_end: None,
+        removals: Removals::default(),
     };
+    if let Some(keys) = list_controls(driver, session, clock) {
+        walk.removals.saw(keys);
+    }
     let mut y = 0.0;
     while walk.steps < max_steps {
         check_cancelled(job)?;
@@ -375,7 +554,17 @@ fn walk_quickly(
             })
         })?;
         walk.steps += 1;
+        if let Some(keys) = list_controls(driver, session, clock) {
+            walk.removals.saw(keys);
+        }
         if scrolled.at_end || scrolled.y <= y {
+            // The bottom of a page that scrolls may only be the bottom for now.
+            if scrolled.y > 0.0 && walk.steps < max_steps && more_at_end(driver, session, job, clock, scrolled.height)?
+            {
+                walk.steps += 1;
+                y = scrolled.y;
+                continue;
+            }
             walk.reached_end = Some(true);
             return Ok(walk);
         }
@@ -409,6 +598,30 @@ fn read_page(
         ),
         json!({ "finalUrl": page.final_url, "status": page.status, "title": page.title }),
     );
+    // The page is read either way: an error page or a page still loading can be the thing under test.
+    let mut page_warnings = Vec::new();
+    if let Some(status) = page.status.filter(|status| *status >= 400) {
+        page_warnings.push(warning(
+            "http_error_status",
+            format!("The page answered with HTTP {status}, so this may be an error page."),
+        ));
+    }
+    if let Some(closed) = page.closed_shadow_roots.filter(|closed| *closed > 0) {
+        page_warnings.push(warning(
+            "closed_shadow_roots",
+            format!(
+                "The page has {closed} closed shadow root{}. No script can read inside one, so what it holds is not listed.",
+                if closed == 1 { "" } else { "s" }
+            ),
+        ));
+    }
+    if page.load_complete == Some(false) {
+        page_warnings.push(warning(
+            "page_load_incomplete",
+            "The page's content arrived, but it had not finished loading when time ran out, so it was read as it stood."
+                .to_string(),
+        ));
+    }
 
     // A timed intro or splash screen gives no sign of itself, so the caller says how long to wait.
     let mut waited = 0;
@@ -423,6 +636,10 @@ fn read_page(
     let screens_dir = job.dir.join("screens");
     let max_steps = job.max_scroll_steps.unwrap_or(DEFAULT_SCROLL_STEPS);
     let mut screenshot_warning = None;
+    // What every element is called before the walk, to see which names change by the end.
+    let before = timed(&mut clock.read, || read_frames(driver, session, job)).map(|reading| names_of(&reading))?;
+    let watched_since = Instant::now();
+
     let walk = if job.crops {
         walk_with_pictures(
             driver,
@@ -441,32 +658,35 @@ fn read_page(
         screens,
         steps,
         reached_end,
+        removals,
     } = walk;
     clock.screens = steps + 1;
 
     // The list of elements is read with the page at the top, so positions do not depend on
-    // where scrolling stopped. A walk that never scrolled has that reading already.
-    let reading = match reading {
-        Some(reading) if steps == 0 => reading,
-        _ => {
-            if steps > 0 {
-                let wait_for = if job.crops {
-                    ScrollWait::Animations
-                } else {
-                    ScrollWait::Height
-                };
-                timed(&mut clock.scroll, || {
-                    driver.scroll(&PageScrollParams {
-                        session_id: session_id.clone(),
-                        to: Some(ScrollTo::Top),
-                        by_y: None,
-                        wait_for: Some(wait_for),
-                    })
-                })?;
-            }
-            timed(&mut clock.read, || read_frames(driver, session, job))?
-        }
-    };
+    // where scrolling stopped, and long enough after the first look for a name that ticks,
+    // as a countdown's does, to have changed.
+    drop(reading);
+    if steps > 0 {
+        let wait_for = if job.crops {
+            ScrollWait::Animations
+        } else {
+            ScrollWait::Height
+        };
+        timed(&mut clock.scroll, || {
+            driver.scroll(&PageScrollParams {
+                session_id: session_id.clone(),
+                to: Some(ScrollTo::Top),
+                by_y: None,
+                wait_for: Some(wait_for),
+            })
+        })?;
+    }
+    if let Some(left) = NAME_WATCH.checked_sub(watched_since.elapsed()) {
+        check_cancelled(job)?;
+        thread::sleep(left);
+    }
+    let mut reading = timed(&mut clock.read, || read_frames(driver, session, job))?;
+    mark_changed_names(&mut reading, &before);
     let reached_end = reached_end.unwrap_or_else(|| steps == 0 && at_end(&reading.scroll));
     if steps > 0 {
         progress.emit(
@@ -490,6 +710,7 @@ fn read_page(
             format!("The page is longer than {max_steps} screens. Content further down was not read."),
         ));
     }
+    warnings.extend(removals.warning());
     progress.emit(
         "elements.collected",
         Some(job.name),
@@ -498,6 +719,7 @@ fn read_page(
     );
 
     let mut components = group(elements);
+    warnings.extend(covered_warning(&components));
     let instance_count: usize = components.iter().map(|component| component.instances.len()).sum();
     progress.emit(
         "components.grouped",
@@ -532,6 +754,7 @@ fn read_page(
         fs::remove_dir_all(&screens_dir)?;
     }
 
+    warnings.extend(page_warnings);
     warnings.extend(screenshot_warning);
     for item in &warnings {
         progress.emit(
@@ -555,6 +778,39 @@ fn read_page(
         components,
         warnings,
     })
+}
+
+/// One warning for every component a click would not reach, because something lies on top of it:
+/// a cookie banner or a modal's backdrop often covers a whole page at once.
+fn covered_warning(components: &[Component]) -> Option<Warning> {
+    let covered: Vec<(&Component, &str)> = components
+        .iter()
+        .filter_map(|component| {
+            let instance = component.instances.iter().find(|i| i.state.covered == Some(true))?;
+            Some((
+                component,
+                instance.state.covered_by.as_deref().unwrap_or("another element"),
+            ))
+        })
+        .collect();
+    let (first, by) = covered.first()?;
+    let name = if first.name.is_empty() {
+        "(no name)"
+    } else {
+        &first.name
+    };
+    let more = match covered.len() {
+        1 => String::new(),
+        n => format!(" and {} more", n - 1),
+    };
+    Some(warning(
+        "covered_elements",
+        format!(
+            "{} {name:?} is under {by}{more}, so a click would not reach {}.",
+            first.role,
+            if covered.len() == 1 { "it" } else { "them" }
+        ),
+    ))
 }
 
 /// Takes a screenshot and says whether it worked. Pictures are evidence, not data, so a
@@ -674,6 +930,36 @@ fn frame_label(frame: &FrameInfo) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shop example's component, under a cookie banner or not, renamed.
+    fn component(name: &str, covered: Option<bool>) -> Component {
+        let file: ComponentsFile =
+            serde_json::from_str(include_str!("../../../spec/examples/ComponentsFile.shop.json")).unwrap();
+        let mut component = file.components.into_iter().next().unwrap();
+        component.name = name.to_string();
+        for instance in &mut component.instances {
+            instance.state.covered = covered;
+            instance.state.covered_by = covered.filter(|c| *c).map(|_| "#cookie-banner".to_string());
+        }
+        component
+    }
+
+    #[test]
+    fn covered_components_get_one_warning_that_names_the_first() {
+        assert!(covered_warning(&[component("Buy", Some(false)), component("Help", None)]).is_none());
+
+        let one = covered_warning(&[component("Buy", Some(false)), component("Accept", Some(true))]).unwrap();
+        assert_eq!(one.code, "covered_elements");
+        assert_eq!(
+            one.message,
+            "button \"Accept\" is under #cookie-banner, so a click would not reach it."
+        );
+
+        let several = covered_warning(&[component("Accept", Some(true)), component("Reject", Some(true))]).unwrap();
+        assert!(several
+            .message
+            .ends_with("and 1 more, so a click would not reach them."));
+    }
 
     fn frame(name: Option<&str>, url: &str) -> FrameInfo {
         FrameInfo {

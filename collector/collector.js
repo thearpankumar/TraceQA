@@ -86,11 +86,19 @@
     return isEditableHost(el) ? "textbox" : "generic";
   }
 
+  // ARIA ignores role="presentation" or "none" on an element that can take focus or that
+  // carries its own label: it stays what it is, so a <button role="none"> is still a button.
+  function presentationApplies(el) {
+    return !(isNative(el) || el.hasAttribute("tabindex") || isEditableHost(el) || hasLabel(el) ||
+             el.hasAttribute("aria-describedby"));
+  }
+
   function roleOf(el) {
     var cached = roleCache.get(el);
     if (cached) return cached;
     var explicit = attr(el, "role").split(/\s+/)[0].toLowerCase();
-    var role = explicit === "presentation" || explicit === "none" ? "generic" : explicit || implicitRole(el);
+    var presentational = explicit === "presentation" || explicit === "none";
+    var role = presentational ? (presentationApplies(el) ? "generic" : implicitRole(el)) : explicit || implicitRole(el);
     roleCache.set(el, role);
     return role;
   }
@@ -266,6 +274,60 @@
     return value === "true" ? true : value === "false" ? false : undefined;
   }
 
+  // The usual ways of hiding something from sight while keeping it for screen readers, as
+  // skip links and "visually hidden" text are: one pixel or less, or clipped away entirely.
+  function visuallyHidden(rect, style) {
+    if (rect.width <= 1 && rect.height <= 1) return true;
+    var clip = (style.clip || "").replace(/\s+/g, "");
+    if (/^rect\(/.test(clip)) {
+      var edges = clip.match(/-?[\d.]+/g) || [];
+      if (edges.length === 4 && edges[0] === edges[2] && edges[1] === edges[3]) return true;
+    }
+    var clipPath = (style.clipPath || "").replace(/\s+/g, "");
+    return /^inset\((50|100)%\)$/.test(clipPath);
+  }
+
+  // True when a click at this point would reach the element: the hit is the element, part of
+  // it, one of its labels, or an ancestor (the element itself lets clicks through to it).
+  function reaches(el, hit) {
+    if (hit === el || el.contains(hit) || hit.contains(el)) return true;
+    var labels = el.labels || [];
+    for (var i = 0; i < labels.length; i++) {
+      if (labels[i] === hit || labels[i].contains(hit)) return true;
+    }
+    return false;
+  }
+
+  // The element on top of `el` at every point tested, or null when a click can reach it.
+  // Only what is on screen can be tested, so the part of the box inside the viewport is used.
+  var COVER_POINTS = [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]];
+  function coverOf(el, rect) {
+    var left = Math.max(rect.left, 0), right = Math.min(rect.right, window.innerWidth);
+    var top = Math.max(rect.top, 0), bottom = Math.min(rect.bottom, window.innerHeight);
+    if (right - left < 1 || bottom - top < 1) return null;
+    var cover = null;
+    for (var i = 0; i < COVER_POINTS.length; i++) {
+      var hit = topmostAt(left + (right - left) * COVER_POINTS[i][0], top + (bottom - top) * COVER_POINTS[i][1]);
+      if (!hit || reaches(el, hit)) return null;
+      cover = cover || hit;
+    }
+    return cover;
+  }
+
+  // The element on top at a point, looking into open shadow roots. The document answers with
+  // the shadow host, and each shadow root then says which of its elements is on top. Asking a
+  // shadow root directly is not the same in every browser: Firefox answers null for a point
+  // where something outside that shadow root is on top.
+  function topmostAt(x, y) {
+    var hit = document.elementFromPoint(x, y);
+    while (hit && hit.shadowRoot && typeof hit.shadowRoot.elementFromPoint === "function") {
+      var inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+
   function stateOf(el, rect, style) {
     var visible = rect.width > 0 && rect.height > 0 && style.visibility === "visible";
     // The browser's own answer also covers what size and visibility miss: the content of a
@@ -274,6 +336,7 @@
     if (visible && typeof el.checkVisibility === "function") {
       visible = el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
     }
+    if (visible && visuallyHidden(rect, style)) visible = false;
     var state = {
       visible: visible,
       enabled: !el.matches(":disabled") && ariaFlag(el, "aria-disabled") !== true,
@@ -290,6 +353,11 @@
     if (ariaFlag(el, "aria-pressed") !== undefined) state.pressed = ariaFlag(el, "aria-pressed");
     if (el.readOnly === true || ariaFlag(el, "aria-readonly") === true) state.readonly = true;
     if (el.required === true || ariaFlag(el, "aria-required") === true) state.required = true;
+    if (state.visible && state.inViewport) {
+      var cover = coverOf(el, rect);
+      state.covered = !!cover;
+      if (cover) state.coveredBy = selectorsOf(cover)[0];
+    }
     return state;
   }
 

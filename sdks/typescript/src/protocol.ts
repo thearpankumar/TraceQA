@@ -376,7 +376,7 @@ h: number
  */
 export interface ElementState {
 /**
- * False when the element is hidden by CSS, has no size, or is inside a hidden ancestor.
+ * False when the element is hidden by CSS (display, visibility, opacity, content-visibility), has no size, is clipped to one pixel or less, or is inside a hidden ancestor.
  */
 visible: boolean
 enabled: boolean
@@ -387,6 +387,14 @@ selected?: boolean
 pressed?: boolean
 readonly?: boolean
 required?: boolean
+/**
+ * True when another element lies on top of this one at every point tested, so a click would not reach it, as under a cookie banner or a modal's backdrop. Only tested for visible elements in the viewport; absent means it was not tested.
+ */
+covered?: boolean
+/**
+ * A selector for the element on top, when covered is true.
+ */
+coveredBy?: string
 }
 export interface PathStep {
 role: string
@@ -419,7 +427,7 @@ signals: string[]
  */
 export interface Warning {
 /**
- * Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree.
+ * Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling.
  */
 code: string
 message: string
@@ -493,6 +501,14 @@ export interface SessionOpenResult {
 sessionId: string
 browser: BrowserInfo
 capabilities: Capabilities
+viewport?: Viewport1
+}
+/**
+ * Size of the browser window content area, in CSS pixels.
+ */
+export interface Viewport1 {
+width: number
+height: number
 }
 export interface SessionCloseParams {
 sessionId: string
@@ -513,6 +529,14 @@ finalUrl: string
  */
 status?: number
 title: string
+/**
+ * False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.
+ */
+loadComplete?: boolean
+/**
+ * How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.
+ */
+closedShadowRoots?: number
 }
 export interface PageEvalParams {
 sessionId: string
@@ -666,13 +690,20 @@ url: string
 finalUrl: string
 title: string
 browser: BrowserInfo
-viewport: Viewport
+viewport: Viewport2
 /**
  * RFC 3339 timestamp in UTC.
  */
 capturedAt: string
 components: Component[]
 warnings: Warning[]
+}
+/**
+ * Size of the browser window content area, in CSS pixels.
+ */
+export interface Viewport2 {
+width: number
+height: number
 }
 /**
  * One kind of interactive element. Repeated copies are instances of the same component.
@@ -688,6 +719,10 @@ role: string
  */
 name: string
 nameIsTemplate: boolean
+/**
+ * True when the name was seen to change while the page was read, as a countdown's or a cart total's does. The id then leaves the name out, so it stays the same from run to run. The name is the one read last.
+ */
+nameChanges?: boolean
 confidence: Confidence
 signals: string[]
 /**

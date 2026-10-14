@@ -1,0 +1,227 @@
+{
+  "fingerprintVersion": 1,
+  "components": {
+    "c_076331c919de": {
+      "role": "link",
+      "name": "Privacy",
+      "path": "contentinfo",
+      "instances": 1
+    },
+    "c_09e6791c035f": {
+      "role": "searchbox",
+      "name": "Search products",
+      "path": "banner > search \"Site search\"",
+      "instances": 1
+    },
+    "c_1409286dd67a": {
+      "role": "checkbox",
+      "name": "On sale",
+      "path": "main > group \"Filters\" > div",
+      "instances": 1
+    },
+    "c_186dc6df9a21": {
+      "role": "button",
+      "name": "Shipping info",
+      "path": "main > group",
+      "instances": 1
+    },
+    "c_1d96c0909e10": {
+      "role": "button",
+      "name": "Decrease quantity",
+      "path": "main > region \"Cart preview\"",
+      "instances": 1
+    },
+    "c_203b7f98723c": {
+      "role": "spinbutton",
+      "name": "Quantity",
+      "path": "main > region \"Cart preview\"",
+      "instances": 1
+    },
+    "c_24838722144a": {
+      "role": "button",
+      "name": "",
+      "path": "banner",
+      "instances": 1
+    },
+    "c_2d0b680ded53": {
+      "role": "button",
+      "name": "Subscribe",
+      "path": "frame \"newsletter\"",
+      "instances": 1
+    },
+    "c_2e55f1684f56": {
+      "role": "button",
+      "name": "Open menu",
+      "path": "banner",
+      "instances": 1
+    },
+    "c_31bfc088e6c9": {
+      "role": "textbox",
+      "name": "Email address",
+      "path": "frame \"newsletter\"",
+      "instances": 1
+    },
+    "c_327c5312f3ab": {
+      "role": "generic",
+      "name": "See today's offers",
+      "path": "main",
+      "instances": 1
+    },
+    "c_3831c2a69675": {
+      "role": "radio",
+      "name": "Over $25",
+      "path": "main > group \"Filters\" > group \"Price\" > label",
+      "instances": 1
+    },
+    "c_38f7eebcb18b": {
+      "role": "link",
+      "name": "Contact",
+      "path": "banner > navigation \"Main\" > list > listitem",
+      "instances": 1
+    },
+    "c_3a1ea6a13812": {
+      "role": "radio",
+      "name": "Under $25",
+      "path": "main > group \"Filters\" > group \"Price\" > label",
+      "instances": 1
+    },
+    "c_3be42f9a5897": {
+      "role": "radio",
+      "name": "Any",
+      "path": "main > group \"Filters\" > group \"Price\" > label",
+      "instances": 1
+    },
+    "c_4111071197fe": {
+      "role": "textbox",
+      "name": "Card number",
+      "path": "frame \"pay\"",
+      "instances": 1
+    },
+    "c_445cac6c4635": {
+      "role": "button",
+      "name": "कार्ट देखें",
+      "path": "main > region \"Languages\"",
+      "instances": 1
+    },
+    "c_4c57645c9e40": {
+      "role": "checkbox",
+      "name": "In stock only",
+      "path": "main > group \"Filters\" > div",
+      "instances": 1
+    },
+    "c_54751a251306": {
+      "role": "button",
+      "name": "Add to cart",
+      "path": "main > list \"Products\" > listitem",
+      "instances": 12
+    },
+    "c_55524dcbff18": {
+      "role": "link",
+      "name": "Terms",
+      "path": "contentinfo",
+      "instances": 1
+    },
+    "c_6a9f5e75b65e": {
+      "role": "link",
+      "name": "تواصل معنا",
+      "path": "main > region \"Languages\"",
+      "instances": 1
+    },
+    "c_710732aa2786": {
+      "role": "link",
+      "name": "Deals",
+      "path": "banner > navigation \"Main\" > list > listitem",
+      "instances": 1
+    },
+    "c_716da1ef2c7c": {
+      "role": "textbox",
+      "name": "Order notes",
+      "path": "main > region \"Cart preview\"",
+      "instances": 1
+    },
+    "c_7783310ec309": {
+      "role": "generic",
+      "name": "Dismiss",
+      "path": "main",
+      "instances": 1
+    },
+    "c_78b42c193ced": {
+      "role": "button",
+      "name": "Increase quantity",
+      "path": "main > region \"Cart preview\"",
+      "instances": 1
+    },
+    "c_87b6f7bb2fbd": {
+      "role": "button",
+      "name": "Open size guide",
+      "path": "main",
+      "instances": 1
+    },
+    "c_8e8546fb70dc": {
+      "role": "link",
+      "name": "Home",
+      "path": "banner > navigation \"Main\" > list > listitem",
+      "instances": 1
+    },
+    "c_9b66080fcd4f": {
+      "role": "button",
+      "name": "Helpful",
+      "path": "main > list \"Reviews\" > listitem",
+      "instances": 9
+    },
+    "c_a9228eaf6df3": {
+      "role": "link",
+      "name": "*",
+      "path": "main > list \"Products\" > listitem",
+      "instances": 12
+    },
+    "c_c32ddfbb62d8": {
+      "role": "generic",
+      "name": "Gift cards",
+      "path": "main",
+      "instances": 1
+    },
+    "c_c8c31956191c": {
+      "role": "button",
+      "name": "Search",
+      "path": "banner > search \"Site search\"",
+      "instances": 1
+    },
+    "c_c91bb8aab892": {
+      "role": "link",
+      "name": "Buggy Shop",
+      "path": "banner",
+      "instances": 1
+    },
+    "c_d1db6ad698d0": {
+      "role": "button",
+      "name": "Pay now",
+      "path": "frame \"pay\"",
+      "instances": 1
+    },
+    "c_d97c6a8da24f": {
+      "role": "button",
+      "name": "Clear cart",
+      "path": "main > region \"Cart preview\"",
+      "instances": 1
+    },
+    "c_dabf74a531d6": {
+      "role": "combobox",
+      "name": "Sort by",
+      "path": "main > group \"Filters\" > div",
+      "instances": 1
+    },
+    "c_e414df463ceb": {
+      "role": "link",
+      "name": "Products",
+      "path": "banner > navigation \"Main\" > list > listitem",
+      "instances": 1
+    },
+    "c_ebebc49efb2a": {
+      "role": "button",
+      "name": "Apply filters",
+      "path": "main > group \"Filters\"",
+      "instances": 1
+    }
+  }
+}

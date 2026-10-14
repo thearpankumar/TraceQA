@@ -39,7 +39,13 @@
 
 <div><span id="click-role-link" role="link" tabindex="0" data-expect="role=link; name=Terms">Terms</span></div>
 
-<div><button id="click-presentation" role="presentation" data-expect="role=button; signals=native"
-  data-known-gap="ARIA ignores presentation on a focusable element, but the collector reports generic">Kept</button></div>
+<div><button id="click-presentation" role="presentation" data-expect="role=button; signals=native">Kept</button></div>
+
+<div><a id="click-none-link" href="#x" role="none" data-expect="role=link">Still a link</a></div>
+
+<div><span id="click-none-labelled" role="none" tabindex="0" aria-label="Labelled"
+  data-expect="role=generic; name=Labelled; signals=tabindex">Has a label, so ARIA keeps it; it has no role of its own</span></div>
+
+<ul role="presentation"><li id="click-presentation-plain" role="presentation" data-expect="absent">Plain list item, presentation applies</li></ul>
 </body>
 </html>

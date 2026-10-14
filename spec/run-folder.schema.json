@@ -98,7 +98,10 @@
         "finalUrl": { "description": "URL after redirects.", "type": "string" },
         "title": { "type": "string" },
         "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
-        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "viewport": {
+          "description": "The viewport the page was read at. It differs from the target's when the browser could not give the one asked for, and a viewport_not_reached warning says so.",
+          "$ref": "common.schema.json#/$defs/Viewport"
+        },
         "capturedAt": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
         "components": { "type": "array", "items": { "$ref": "#/$defs/Component" } },
         "warnings": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/Warning" } }
@@ -116,6 +119,10 @@
           "type": "string"
         },
         "nameIsTemplate": { "type": "boolean" },
+        "nameChanges": {
+          "description": "True when the name was seen to change while the page was read, as a countdown's or a cart total's does. The id then leaves the name out, so it stays the same from run to run. The name is the one read last.",
+          "type": "boolean"
+        },
         "confidence": { "$ref": "common.schema.json#/$defs/Confidence" },
         "signals": { "type": "array", "items": { "type": "string" } },
         "path": {

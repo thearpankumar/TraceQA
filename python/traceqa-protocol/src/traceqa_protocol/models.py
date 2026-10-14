@@ -200,7 +200,7 @@ class Warning(BaseModel):
     )
     code: str = Field(
         ...,
-        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree.",
+        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling.",
     )
     message: str
 
@@ -215,7 +215,7 @@ class ElementState(BaseModel):
     )
     visible: bool = Field(
         ...,
-        description="False when the element is hidden by CSS, has no size, or is inside a hidden ancestor.",
+        description="False when the element is hidden by CSS (display, visibility, opacity, content-visibility), has no size, is clipped to one pixel or less, or is inside a hidden ancestor.",
     )
     enabled: bool
     in_viewport: bool = Field(..., alias="inViewport")
@@ -225,6 +225,15 @@ class ElementState(BaseModel):
     pressed: bool | None = None
     readonly: bool | None = None
     required: bool | None = None
+    covered: bool | None = Field(
+        None,
+        description="True when another element lies on top of this one at every point tested, so a click would not reach it, as under a cookie banner or a modal's backdrop. Only tested for visible elements in the viewport; absent means it was not tested.",
+    )
+    covered_by: str | None = Field(
+        None,
+        alias="coveredBy",
+        description="A selector for the element on top, when covered is true.",
+    )
 
 
 class Confidence(str, Enum):
@@ -329,6 +338,10 @@ class SessionOpenResult(BaseModel):
     session_id: str = Field(..., alias="sessionId")
     browser: BrowserInfo
     capabilities: Capabilities
+    viewport: Viewport | None = Field(
+        None,
+        description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
+    )
 
 
 class SessionCloseParams(BaseModel):
@@ -366,6 +379,17 @@ class PageGotoResult(BaseModel):
         None, description="HTTP status of the main document, when known.", ge=0
     )
     title: str
+    load_complete: bool | None = Field(
+        None,
+        alias="loadComplete",
+        description="False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.",
+    )
+    closed_shadow_roots: int | None = Field(
+        None,
+        alias="closedShadowRoots",
+        description="How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
+        ge=0,
+    )
 
 
 class PageEvalParams(BaseModel):
@@ -753,6 +777,11 @@ class Component(BaseModel):
         description="Accessible name. When nameIsTemplate is true the instances have different names and this is '*'.",
     )
     name_is_template: bool = Field(..., alias="nameIsTemplate")
+    name_changes: bool | None = Field(
+        None,
+        alias="nameChanges",
+        description="True when the name was seen to change while the page was read, as a countdown's or a cart total's does. The id then leaves the name out, so it stays the same from run to run. The name is the one read last.",
+    )
     confidence: Confidence
     signals: list[str]
     path: str = Field(
@@ -849,7 +878,10 @@ class ComponentsFile(BaseModel):
     final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
     title: str
     browser: BrowserInfo
-    viewport: Viewport
+    viewport: Viewport = Field(
+        ...,
+        description="The viewport the page was read at. It differs from the target's when the browser could not give the one asked for, and a viewport_not_reached warning says so.",
+    )
     captured_at: str = Field(
         ..., alias="capturedAt", description="RFC 3339 timestamp in UTC."
     )

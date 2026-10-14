@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 import http.server
+import os
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -30,7 +31,11 @@ from traceqa_protocol.testing import DriverClient
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "fixtures" / "collector-cases"
 COLLECTOR = (ROOT / "collector" / "collector.js").read_text(encoding="utf-8")
-BROWSERS = ["chromium", "firefox", "webkit"]
+# Real Safari runs only where it can: on a Mac with "Allow remote automation" switched on,
+# which CI machines are not. TRACEQA_TEST_SAFARI=1 adds it, as in the WebDriver driver's tests.
+BROWSERS = ["chromium", "firefox", "webkit"] + (["safari"] if os.environ.get("TRACEQA_TEST_SAFARI") == "1" else [])
+# Safari is driven by the WebDriver driver, every other browser by the Playwright driver.
+DRIVER_OF = {"safari": "traceqa_driver_webdriver"}
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 VIEWPORT = {"width": 1280, "height": 800}
 
@@ -52,6 +57,9 @@ FIELDS = {
     "visible": lambda e: str(e["state"]["visible"]).lower(),
     "enabled": lambda e: str(e["state"]["enabled"]).lower(),
     "inviewport": lambda e: str(e["state"]["inViewport"]).lower(),
+    # Tested only for visible elements on screen: absent means it was not tested.
+    "covered": lambda e: str(e["state"]["covered"]).lower() if "covered" in e["state"] else "unchecked",
+    "coveredby": lambda e: e["state"].get("coveredBy", ""),
     # Optional states: absent means false.
     **{key: optional_state(key) for key in ["checked", "expanded", "selected", "pressed", "readonly", "required"]},
 }
@@ -133,26 +141,34 @@ class Readings:
 
     def __init__(self, site: str) -> None:
         self.site = site
-        self.driver = DriverClient([sys.executable, "-m", "traceqa_driver_playwright"])
-        self.driver.call("driver.hello", HELLO)
-        self.sessions: dict[str, str] = {}
+        self.drivers: dict[str, DriverClient] = {}
+        self.sessions: dict[str, tuple[DriverClient, str]] = {}
         self.pages: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    def _session(self, browser: str) -> tuple[DriverClient, str]:
+        if browser not in self.sessions:
+            module = DRIVER_OF.get(browser, "traceqa_driver_playwright")
+            if module not in self.drivers:
+                self.drivers[module] = DriverClient([sys.executable, "-m", module])
+                self.drivers[module].call("driver.hello", HELLO)
+            driver = self.drivers[module]
+            opened = driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
+            self.sessions[browser] = (driver, opened["sessionId"])
+        return self.sessions[browser]
 
     def elements(self, browser: str, page: str) -> list[dict[str, Any]]:
         if (browser, page) not in self.pages:
-            if browser not in self.sessions:
-                opened = self.driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
-                self.sessions[browser] = opened["sessionId"]
-            session = self.sessions[browser]
-            self.driver.call("page.goto", {"sessionId": session, "url": self.site + page, "waitUntil": "settled"})
-            raw = self.driver.call("page.eval", {"sessionId": session, "script": COLLECTOR, "arg": {}})
+            driver, session = self._session(browser)
+            driver.call("page.goto", {"sessionId": session, "url": self.site + page, "waitUntil": "settled"})
+            raw = driver.call("page.eval", {"sessionId": session, "script": COLLECTOR, "arg": {}})
             self.pages[(browser, page)] = raw["results"][0]["value"]["elements"]
         return self.pages[(browser, page)]
 
     def close(self) -> None:
-        for session in self.sessions.values():
-            self.driver.call("session.close", {"sessionId": session})
-        self.driver.shutdown()
+        for driver, session in self.sessions.values():
+            driver.call("session.close", {"sessionId": session})
+        for driver in self.drivers.values():
+            driver.shutdown()
 
 
 @pytest.fixture(scope="module")

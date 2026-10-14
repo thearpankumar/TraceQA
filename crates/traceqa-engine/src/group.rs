@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use traceqa_protocol::types::{Component, Confidence, Instance, RawElement, Rect};
 
-use crate::fingerprint::{self, REPEAT_THRESHOLD, TEMPLATE};
+use crate::fingerprint::{self, CHANGING, REPEAT_THRESHOLD, TEMPLATE};
 
 /// Repeated items under these roles are distinct controls (menu entries, tabs), never one template.
 const NEVER_TEMPLATED: [&str; 5] = ["navigation", "menu", "menubar", "tablist", "toolbar"];
@@ -17,6 +17,8 @@ pub struct Located {
     pub frame_step: Option<String>,
     /// The element's box in top-level page coordinates, when that is known.
     pub page_box: Option<Rect>,
+    /// The name was seen to change while the page was read, so the id leaves it out.
+    pub name_changes: bool,
 }
 
 /// Identifies "the same control" across the cards of a repeated group: the group it is in,
@@ -149,6 +151,7 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
             element,
             frame_id,
             page_box,
+            name_changes,
             ..
         } = located;
         let template_ordinal = info
@@ -160,6 +163,8 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
             Some(0) => TEMPLATE.to_string(),
             // A second templated control in the same item is a different component.
             Some(ordinal) => format!("{TEMPLATE}#{ordinal}"),
+            // A countdown or a running total: the text is data, the control is the same.
+            None if name_changes => CHANGING.to_string(),
             None if element.name.is_empty() => {
                 let item: String = element
                     .path
@@ -185,6 +190,7 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
                     element.name.clone()
                 },
                 name_is_template: template_ordinal.is_some(),
+                name_changes: name_changes.then_some(true),
                 confidence: element.interactive.confidence,
                 signals: Vec::new(),
                 path: info.path_key.clone(),
@@ -258,6 +264,8 @@ mod tests {
                     pressed: None,
                     readonly: None,
                     required: None,
+                    covered: None,
+                    covered_by: None,
                 },
                 in_shadow_dom: false,
                 path,
@@ -269,6 +277,7 @@ mod tests {
             frame_id: "main".into(),
             frame_step: None,
             page_box: None,
+            name_changes: false,
         }
     }
 
@@ -287,6 +296,26 @@ mod tests {
             .iter()
             .map(|c| (c.role.clone(), c.name.clone(), c.instances.len()))
             .collect()
+    }
+
+    #[test]
+    fn a_name_seen_to_change_is_left_out_of_the_id() {
+        let ticking = |name: &str| Located {
+            name_changes: true,
+            ..element("button", name, vec![])
+        };
+        let first = group(vec![ticking("Sale ends in 59 s"), element("button", "Buy", vec![])]);
+        let later = group(vec![ticking("Sale ends in 12 s"), element("button", "Buy", vec![])]);
+        // The countdown keeps its id while its text runs down, and shows the text it had last.
+        assert_eq!(first[0].id, later[0].id);
+        assert_eq!(
+            (later[0].name.as_str(), later[0].name_changes),
+            ("Sale ends in 12 s", Some(true))
+        );
+        // A name that stays put is part of the id as always.
+        assert_eq!(first[1].id, later[1].id);
+        assert_eq!(first[1].name_changes, None);
+        assert_ne!(first[0].id, first[1].id);
     }
 
     #[test]

@@ -39,7 +39,14 @@ tagged.
    Then run `cargo build` and `uv lock`, so `Cargo.lock` and `uv.lock` carry the
    new version too, and merge the pull request.
 
-2. **Tag the merged commit** and push the tag:
+2. **Check Safari by hand**, on a Mac with "Allow remote automation" switched on
+   in Safari's Developer settings. CI cannot run Safari.
+
+   ```sh
+   TRACEQA_TEST_SAFARI=1 uv run pytest drivers/webdriver-py collector
+   ```
+
+3. **Tag the merged commit** and push the tag:
 
    ```sh
    git checkout master
@@ -50,7 +57,7 @@ tagged.
 
    Pushing a branch never sends its tags, so the tag is pushed by name.
 
-3. **Wait for the Release workflow** under the repository's Actions tab. When
+4. **Wait for the Release workflow** under the repository's Actions tab. When
    it finishes, the release is on the Releases page.
 
 The same can be done without a terminal: on GitHub, open Releases, then Draft a

@@ -65,6 +65,21 @@ What this means in practice:
 | A list of cards that are each a single link | Every card is its own component. |
 | Page sections that repeat but hold different controls | Nothing is templated. |
 
+### Special case 3: names that change
+
+A countdown ("Sale ends in 3:42"), a running total ("5 items in cart") or any
+text the page rewrites on its own would give its element a new id every run.
+The engine reads the page twice: once before it scrolls through it, and once
+after, at least a second later. An element still at the same place, with the
+same role and at the same position, whose name differs between the two readings
+gets the `nameKey` `~`, and its component has `nameChanges: true`. Its name is
+the one read last.
+
+Elements whose names stay put are not affected, so their ids are the same as
+before this rule existed and `fingerprintVersion` stays 1. A name that changes
+more slowly than the time between the two readings, a clock showing minutes for
+one, is not seen to change.
+
 ## What is left out on purpose
 
 - Pixel position and size: they change with viewport and browser.
@@ -84,8 +99,9 @@ a list is reordered.
   one id and are reported as two instances.
 - **Unnamed elements move.** Their ids depend on their order, so adding an
   unnamed button before another one changes the second one's id.
-- **Names taken from changing text.** A low-confidence element is named by its
-  text. If the page rewrites that text, the id changes with it.
+- **Names that change slowly.** A name the page rewrites while it is read is
+  left out of the id (special case 3). One that changes less often than that,
+  or only between visits, still changes the id.
 - **Renames.** Changing a button's label changes its id. The old and new ids are
   not linked.
 - **Translated pages.** The same page in another language gets different ids,

@@ -38,8 +38,13 @@
 
 <div style="opacity: 0"><button id="vis-in-transparent-parent" data-expect="visible=false">Inside a transparent parent</button></div>
 
-<div><a id="vis-skip-link" class="visually-hidden" href="#main" data-expect="visible=false"
-  data-known-gap="a 1x1 pixel clipped element counts as visible">Skip to content</a></div>
+<div><a id="vis-skip-link" class="visually-hidden" href="#main" data-expect="visible=false">Skip to content</a></div>
+
+<div><button id="vis-clip-path" style="clip-path: inset(50%)" data-expect="visible=false">Clipped by clip-path</button></div>
+
+<div><button id="vis-clip-rect" style="position: absolute; clip: rect(0 0 0 0)" data-expect="visible=false">Clipped by clip</button></div>
+
+<div><button id="vis-partly-clipped" style="clip-path: inset(10%)" data-expect="visible=true">Only its edges clipped</button></div>
 
 <div><input id="vis-input-hidden" type="hidden" name="token" value="x" data-expect="absent"></div>
 

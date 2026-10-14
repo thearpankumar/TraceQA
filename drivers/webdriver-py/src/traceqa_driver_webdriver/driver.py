@@ -205,7 +205,10 @@ class WebDriverDriver:
         except WebDriverError as error:
             self._close(session_id)
             raise RpcError("internal", f"could not size the window: {error.message}") from error
+        # Reported, so the engine records the size the page was really read at.
+        unreached = None
         if reached != (params.viewport.width, params.viewport.height):
+            unreached = models.Viewport(width=reached[0], height=reached[1])
             self._channel.log(
                 "warn",
                 f"asked for a {params.viewport.width}x{params.viewport.height} viewport, the browser gave {reached[0]}x{reached[1]}",
@@ -218,6 +221,7 @@ class WebDriverDriver:
             session_id=session_id,
             browser=models.BrowserInfo(name=name, version=version),
             capabilities=CAPABILITIES,
+            viewport=unreached,
         )
 
     def session_close(self, params: models.SessionCloseParams) -> models.Empty:
@@ -239,15 +243,26 @@ class WebDriverDriver:
     def page_goto(self, params: models.PageGotoParams) -> models.PageGotoResult:
         webdriver = self._session(params.session_id).webdriver
         timeout = params.timeout_ms or DEFAULT_TIMEOUT_MS
+        load_complete = True
         try:
             webdriver.set_timeouts(page_load_ms=timeout, script_ms=timeout)
-            webdriver.navigate(params.url)  # returns once the load event has fired
+            try:
+                webdriver.navigate(params.url)  # returns once the load event has fired
+            except WebDriverError as error:
+                if error.code != "timeout":
+                    raise
+                # One image or script that never arrives holds the load event back forever. When the
+                # content itself has arrived, the page is still there to read.
+                if webdriver.execute("return document.readyState;") == "loading":
+                    raise
+                load_complete = False
             if params.wait_until == models.WaitUntil.settled:
                 settle(webdriver, SETTLE_AFTER_LOAD_S)
             # WebDriver does not expose the HTTP status, so `status` is left out.
             return models.PageGotoResult(
                 final_url=webdriver.execute("return location.href;"),
                 title=webdriver.execute("return document.title;"),
+                load_complete=None if load_complete else False,
             )
         except WebDriverError as error:
             if error.code == "timeout":

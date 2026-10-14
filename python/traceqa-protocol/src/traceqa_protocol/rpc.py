@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 from collections.abc import Callable
 from typing import IO, Any
@@ -54,7 +55,13 @@ class Channel:
 
     @classmethod
     def from_stdio(cls) -> Channel:
-        """Take over stdout for the protocol and point stray prints at stderr."""
+        """Take over stdout for the protocol and point stray prints at stderr.
+
+        Ctrl-C is ignored. A terminal sends it to every process of the command, the driver
+        included, but the engine owns the driver: it finishes or cancels the step under way,
+        closes the sessions and then shuts the driver down, so the run ends as cancelled.
+        """
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         writer = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
         os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
         sys.stdout = sys.stderr
