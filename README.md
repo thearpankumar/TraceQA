@@ -72,7 +72,7 @@ change is tested on all three in continuous integration.
 | Chromium, Google Chrome, Microsoft Edge | Playwright |
 | Firefox | Playwright |
 | WebKit | Playwright |
-| Safari | WebDriver, through `safaridriver` on macOS |
+| Safari | WebDriver, through `safaridriver` on macOS. Tested on Safari 26. |
 | Agent and cloud browsers | Chrome DevTools Protocol endpoint (`cdp=ENDPOINT`) |
 | Selenium grids and cloud device farms | Any W3C WebDriver server (`webdriver=URL`) |
 
@@ -197,7 +197,7 @@ traceqa extract http://127.0.0.1:4173/
 ### Command line
 
 Exit codes make it suitable for CI: `0` when every browser completed, `1` when
-any failed, `2` for invalid input. `--json` prints a machine-readable summary.
+any failed, `2` for invalid input, `130` when stopped with Ctrl-C. `--json` prints a machine-readable summary.
 All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
 
 ### Python

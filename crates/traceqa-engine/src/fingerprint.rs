@@ -12,6 +12,9 @@ pub const REPEAT_THRESHOLD: u64 = 3;
 /// Name key of a component whose instances have different names.
 pub const TEMPLATE: &str = "*";
 
+/// Name key of a component whose name was seen to change while the page was read.
+pub const CHANGING: &str = "~";
+
 /// `c_` plus the first 12 hex characters of the hash.
 pub fn component_id(role: &str, name_key: &str, path_key: &str) -> String {
     let digest = Sha256::digest(format!("v{VERSION}\n{role}\n{name_key}\n{path_key}"));

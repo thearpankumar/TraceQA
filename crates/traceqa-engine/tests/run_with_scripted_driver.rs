@@ -30,6 +30,8 @@ struct Scripted {
     exclusive: bool,
     /// How many more page loads time out, across every scripted driver of a test.
     slow_loads: Arc<AtomicUsize>,
+    /// The viewport the pretend browser really gives, when it cannot give the one asked for.
+    reaches: Option<(u64, u64)>,
 }
 
 #[derive(Default)]
@@ -57,7 +59,17 @@ fn take_one(counter: &AtomicUsize) -> bool {
 
 impl Transport for Scripted {
     fn call(&mut self, method: &str, params: Value, _timeout: Duration) -> Result<Value, DriverError> {
-        self.calls.lock().unwrap().push(method.to_string());
+        // The collector and the quick listing of controls taken while scrolling are told apart,
+        // so a test can count how often the page was really read.
+        let collector = params["script"]
+            .as_str()
+            .is_some_and(|script| script.contains("traceqaCollect"));
+        let label = if method == "page.eval" && !collector {
+            "page.eval:controls"
+        } else {
+            method
+        };
+        self.calls.lock().unwrap().push(label.to_string());
         if method == "page.goto" && take_one(&self.slow_loads) {
             return Err(DriverError {
                 kind: "timeout".into(),
@@ -80,7 +92,7 @@ impl Transport for Scripted {
                 self.sessions.most_at_once.fetch_max(open, Ordering::SeqCst);
                 // Long enough for another worker to open its session too, if nothing stops it.
                 std::thread::sleep(Duration::from_millis(30));
-                json!({
+                let mut opened = json!({
                     "sessionId": "s1",
                     "browser": { "name": "firefox", "version": "1.0" },
                     "capabilities": {
@@ -88,7 +100,11 @@ impl Transport for Scripted {
                         "crossOriginFrames": false, "parallelSessions": false, "setViewport": true,
                         "consoleEvents": false, "networkEvents": false
                     }
-                })
+                });
+                if let Some((width, height)) = self.reaches {
+                    opened["viewport"] = json!({ "width": width, "height": height });
+                }
+                opened
             }
             "page.goto" => json!({ "finalUrl": "https://shop.test/", "status": 200, "title": "Buggy Shop" }),
             "page.scroll" => {
@@ -149,6 +165,17 @@ fn run(full_page: bool, fail: Option<(&'static str, &'static str)>, cancelled: b
 
 /// One browser at one viewport, with or without pictures.
 fn run_with(full_page: bool, fail: Option<(&'static str, &'static str)>, cancelled: bool, crops: bool) -> Outcome {
+    run_reaching(full_page, fail, cancelled, crops, None)
+}
+
+/// As `run_with`, with a pretend browser that may not reach the viewport asked for.
+fn run_reaching(
+    full_page: bool,
+    fail: Option<(&'static str, &'static str)>,
+    cancelled: bool,
+    crops: bool,
+    reaches: Option<(u64, u64)>,
+) -> Outcome {
     let out = std::env::temp_dir().join("traceqa-engine-tests");
     let request = RunStartParams {
         feature: "extract".into(),
@@ -183,6 +210,7 @@ fn run_with(full_page: bool, fail: Option<(&'static str, &'static str)>, cancell
                 sessions: Arc::default(),
                 exclusive: false,
                 slow_loads: Arc::default(),
+                reaches,
             };
             Driver::connect(Box::new(transport))
         };
@@ -392,6 +420,7 @@ fn run_six_targets_with(
                 sessions: Arc::clone(&sessions),
                 exclusive,
                 slow_loads: Arc::clone(&slow_loads),
+                reaches: None,
             };
             Driver::connect(Box::new(transport))
         };
@@ -500,10 +529,13 @@ fn without_pictures_the_page_is_scrolled_but_never_photographed() {
     let data_only = run_with(true, None, false, false);
     assert_eq!(data_only.manifest.status, RunStatus::Completed);
 
-    // No screenshot is taken and the page is read once, after scrolling to the end and back.
+    // No screenshot is taken and the page is read twice: once before the walk, to see later which
+    // names changed, and once after scrolling to the end and back. On the way, only the quick
+    // listing of controls runs, once before scrolling and after each scroll.
     let count = |outcome: &Outcome, method: &str| outcome.calls.iter().filter(|call| *call == method).count();
     assert_eq!(count(&data_only, "page.screenshot"), 0);
-    assert_eq!(count(&data_only, "page.eval"), 1);
+    assert_eq!(count(&data_only, "page.eval"), 2);
+    assert!(count(&data_only, "page.eval:controls") >= 2);
     assert!(count(&data_only, "page.scroll") >= 2);
     assert!(count(&pictures, "page.eval") > 1 && count(&pictures, "page.screenshot") > 1);
 
@@ -534,4 +566,39 @@ fn without_pictures_the_page_is_scrolled_but_never_photographed() {
         .all(|component| component.crop.is_some()));
     fs::remove_dir_all(data_only.folder).unwrap();
     fs::remove_dir_all(pictures.folder).unwrap();
+}
+
+#[test]
+fn a_viewport_the_browser_cannot_reach_is_recorded_as_it_really_was() {
+    // Asked for 1280x400. The pretend browser, like Safari in a window macOS will not resize, gives 1280x600.
+    let outcome = run_reaching(true, None, false, false, Some((1280, 600)));
+    let target = &outcome.manifest.targets[0];
+    assert_eq!(target.status, RunStatus::Completed);
+    // The target keeps the name and viewport it was asked for, so runs stay comparable.
+    assert_eq!((target.dir.as_str(), target.viewport.height), ("firefox-1280x400", 400));
+
+    let file = components(&outcome);
+    assert_eq!((file.viewport.width, file.viewport.height), (1280, 600));
+    let warning = file
+        .warnings
+        .iter()
+        .find(|warning| warning.code == "viewport_not_reached")
+        .expect("a viewport_not_reached warning");
+    assert!(warning.message.contains("1280x400") && warning.message.contains("1280x600"));
+    assert_eq!(target.warning_count, file.warnings.len() as u64);
+    assert!(outcome.events.iter().any(|event| event.type_ == "warning"
+        && event.data.get("code").and_then(|code| code.as_str()) == Some("viewport_not_reached")));
+    fs::remove_dir_all(outcome.folder).unwrap();
+}
+
+#[test]
+fn a_viewport_that_is_reached_raises_no_warning() {
+    let outcome = run_reaching(true, None, false, false, Some((1280, 400)));
+    let file = components(&outcome);
+    assert_eq!((file.viewport.width, file.viewport.height), (1280, 400));
+    assert!(file
+        .warnings
+        .iter()
+        .all(|warning| warning.code != "viewport_not_reached"));
+    fs::remove_dir_all(outcome.folder).unwrap();
 }

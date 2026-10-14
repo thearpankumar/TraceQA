@@ -69,7 +69,7 @@
       "required": ["code", "message"],
       "properties": {
         "code": {
-          "description": "Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree.",
+          "description": "Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling.",
           "type": "string"
         },
         "message": { "type": "string" }
@@ -81,7 +81,7 @@
       "required": ["visible", "enabled", "inViewport"],
       "properties": {
         "visible": {
-          "description": "False when the element is hidden by CSS, has no size, or is inside a hidden ancestor.",
+          "description": "False when the element is hidden by CSS (display, visibility, opacity, content-visibility), has no size, is clipped to one pixel or less, or is inside a hidden ancestor.",
           "type": "boolean"
         },
         "enabled": { "type": "boolean" },
@@ -91,7 +91,15 @@
         "selected": { "type": "boolean" },
         "pressed": { "type": "boolean" },
         "readonly": { "type": "boolean" },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "covered": {
+          "description": "True when another element lies on top of this one at every point tested, so a click would not reach it, as under a cookie banner or a modal's backdrop. Only tested for visible elements in the viewport; absent means it was not tested.",
+          "type": "boolean"
+        },
+        "coveredBy": {
+          "description": "A selector for the element on top, when covered is true.",
+          "type": "string"
+        }
       }
     },
     "Confidence": {

@@ -92,7 +92,11 @@
       "properties": {
         "sessionId": { "type": "string" },
         "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
-        "capabilities": { "$ref": "#/$defs/Capabilities" }
+        "capabilities": { "$ref": "#/$defs/Capabilities" },
+        "viewport": {
+          "description": "The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
+          "$ref": "common.schema.json#/$defs/Viewport"
+        }
       }
     },
     "SessionCloseParams": {
@@ -121,7 +125,16 @@
       "properties": {
         "finalUrl": { "description": "URL after redirects.", "type": "string" },
         "status": { "description": "HTTP status of the main document, when known.", "type": "integer", "minimum": 0 },
-        "title": { "type": "string" }
+        "title": { "type": "string" },
+        "loadComplete": {
+          "description": "False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.",
+          "type": "boolean"
+        },
+        "closedShadowRoots": {
+          "description": "How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "PageEvalParams": {

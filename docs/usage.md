@@ -82,8 +82,13 @@ result to standard output.
 | Code | Meaning |
 |---|---|
 | `0` | Every target completed. |
-| `1` | At least one target failed or the run was cancelled. |
-| `2` | The request was invalid, for example a malformed URL or viewport. |
+| `1` | At least one target failed. |
+| `2` | The request was invalid, for example a malformed URL or viewport. Nothing was run. |
+| `130` | The run was stopped with Ctrl-C. |
+
+Ctrl-C stops the run at its next step, closes the browsers and writes a run
+folder that says `cancelled`. Targets that had already finished keep their
+results. A second Ctrl-C quits at once.
 
 ### Examples
 
@@ -369,6 +374,12 @@ of the element the previous part matched.
 | `scroll_limit_reached` | The page is longer than the scroll limit, so its end was not read. |
 | `screenshot_failed` | The browser could not take a screenshot, so some crops are missing. The component data is unaffected. |
 | `browsers_disagree` | Browsers found different numbers of elements at the same viewport. Reported once for the run, in `events.jsonl`. |
+| `http_error_status` | The page answered with an HTTP error, such as 404 or 500. It was still read, since an error page can be the thing under test. WebDriver browsers do not report the status, so they never raise this. |
+| `page_load_incomplete` | The page's content arrived, but it had not finished loading when the time limit ran out, for example because one image never arrived. It was read as it stood. A page whose content never arrives fails instead. |
+| `covered_elements` | Components on screen lie under something else, such as a cookie banner or a modal's backdrop, so a click would not reach them. Each such instance has `covered: true` and `coveredBy`. |
+| `closed_shadow_roots` | The page has closed shadow roots, which no script can read inside, so what they hold is not listed. Only Chromium-based browsers can tell. |
+| `elements_removed_while_scrolling` | The page removed controls it had shown as it was scrolled, as long tables and feeds that keep only the rows near the screen do. The rows that had left the screen are not listed. |
+| `viewport_not_reached` | The browser could not give the viewport asked for, for example Safari in a window macOS will not resize. The page was read at the size it really had, which `components.json` records. The target keeps its name, such as `safari-390x844`. |
 
 ## Speed
 

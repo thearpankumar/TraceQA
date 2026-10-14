@@ -1,0 +1,21 @@
+{
+  "sessionId": "s1",
+  "browser": {
+    "name": "Safari",
+    "version": "26.6.2"
+  },
+  "capabilities": {
+    "clipScreenshot": false,
+    "fullPageScreenshot": false,
+    "evalAllFrames": true,
+    "crossOriginFrames": true,
+    "parallelSessions": false,
+    "setViewport": true,
+    "consoleEvents": false,
+    "networkEvents": false
+  },
+  "viewport": {
+    "width": 1710,
+    "height": 1021
+  }
+}

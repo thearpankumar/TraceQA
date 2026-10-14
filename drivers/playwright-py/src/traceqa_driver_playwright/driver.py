@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import os
 import struct
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,6 +58,8 @@ class Session:
     context: BrowserContext
     page: Page
     owns_context: bool
+    # Only Chromium lets a driver see closed shadow roots, through its own protocol.
+    chromium: bool = False
     frame_ids: dict[Frame, str] = field(default_factory=dict)
 
     def frame_id(self, frame: Frame) -> str:
@@ -65,6 +68,36 @@ class Session:
         if frame not in self.frame_ids:
             self.frame_ids[frame] = f"f{len(self.frame_ids) + 1}"
         return self.frame_ids[frame]
+
+
+def first_line(message: str) -> str:
+    """Playwright appends a multi-line call log to its errors. People only need the first line."""
+    return message.strip().splitlines()[0] if message.strip() else message
+
+
+def count_closed_shadow_roots(page: Page) -> int | None:
+    """Closed shadow roots on the page, which no script can read inside. None when it cannot be told."""
+    try:
+        cdp = page.context.new_cdp_session(page)
+    except PlaywrightError:
+        return None
+    try:
+        document = cdp.send("DOM.getDocument", {"depth": -1, "pierce": True})
+    except PlaywrightError:
+        return None
+    finally:
+        with contextlib.suppress(PlaywrightError):
+            cdp.detach()
+    closed = 0
+    pending = [document["root"]]
+    while pending:
+        node = pending.pop()
+        closed += node.get("shadowRootType") == "closed"
+        pending.extend(node.get("children", []))
+        pending.extend(node.get("shadowRoots", []))
+        if "contentDocument" in node:
+            pending.append(node["contentDocument"])
+    return closed
 
 
 def png_size(path: Path) -> tuple[int, int]:
@@ -149,8 +182,9 @@ class PlaywrightDriver:
                 browser = self._playwright.chromium.connect_over_cdp(target.cdp_endpoint)
             elif target.browser in BROWSERS:
                 engine, channel = BROWSERS[target.browser]
+                # The engine closes the browser when a run is cancelled, not Playwright on Ctrl-C.
                 browser = getattr(self._playwright, engine).launch(
-                    headless=target.headless is not False, channel=channel
+                    headless=target.headless is not False, channel=channel, handle_sigint=False
                 )
             else:
                 raise RpcError("unsupported", f"this driver cannot open {target.browser!r}")
@@ -171,11 +205,12 @@ class PlaywrightDriver:
             if browser is not None:
                 with contextlib.suppress(PlaywrightError):
                     browser.close()
-            raise RpcError("internal", f"could not open {target.browser}: {error.message}") from error
+            raise RpcError("internal", f"could not open {target.browser}: {first_line(error.message)}") from error
 
         self._opened += 1
         session_id = f"s{self._opened}"
-        self._sessions[session_id] = Session(browser, context, page, owns_context)
+        chromium = target.browser == CDP or BROWSERS.get(target.browser, ("",))[0] == "chromium"
+        self._sessions[session_id] = Session(browser, context, page, owns_context, chromium)
         self._channel.log("info", f"opened {target.browser} {browser.version}")
         return models.SessionOpenResult(
             session_id=session_id,
@@ -203,23 +238,42 @@ class PlaywrightDriver:
     # ---- page ------------------------------------------------------------
 
     def page_goto(self, params: models.PageGotoParams) -> models.PageGotoResult:
-        page = self._session(params.session_id).page
+        session = self._session(params.session_id)
+        page = session.page
         timeout = params.timeout_ms or DEFAULT_TIMEOUT_MS
+        started = time.monotonic()
         try:
-            response = page.goto(params.url, wait_until="load", timeout=timeout)
-            if params.wait_until == models.WaitUntil.settled:
-                # A page that never goes quiet is still usable.
-                with contextlib.suppress(PlaywrightTimeout):
-                    page.wait_for_load_state("networkidle", timeout=3_000)
-                settle(page, SETTLE_AFTER_LOAD_S)
+            # The content first. Without it there is nothing to read, so this is the one that can fail.
+            response = page.goto(params.url, wait_until="domcontentloaded", timeout=timeout)
         except PlaywrightTimeout as error:
             raise RpcError("timeout", f"{params.url} did not load in {timeout} ms", retryable=True) from error
         except PlaywrightError as error:
-            raise RpcError("navigation_failed", error.message, retryable=True) from error
+            raise RpcError("navigation_failed", first_line(error.message), retryable=True) from error
+
+        # Then the load event, in the time that is left. One image or script that never arrives
+        # holds it back forever, and the page is still there to read.
+        load_complete = True
+        left = max(1, timeout - int((time.monotonic() - started) * 1000))
+        try:
+            page.wait_for_load_state("load", timeout=left)
+        except PlaywrightTimeout:
+            load_complete = False
+        try:
+            if params.wait_until == models.WaitUntil.settled:
+                if load_complete:
+                    # A page that never goes quiet is still usable.
+                    with contextlib.suppress(PlaywrightTimeout):
+                        page.wait_for_load_state("networkidle", timeout=3_000)
+                settle(page, SETTLE_AFTER_LOAD_S)
+            title = page.title()
+        except PlaywrightError as error:
+            raise RpcError("navigation_failed", first_line(error.message), retryable=True) from error
         return models.PageGotoResult(
             final_url=page.url,
             status=response.status if response else None,
-            title=page.title(),
+            title=title,
+            load_complete=None if load_complete else False,
+            closed_shadow_roots=count_closed_shadow_roots(page) if session.chromium else None,
         )
 
     def page_eval(self, params: models.PageEvalParams) -> models.PageEvalResult:
@@ -283,6 +337,6 @@ class PlaywrightDriver:
             # With a clip, full_page makes Playwright read the clip in page coordinates.
             page.screenshot(path=str(path), full_page=bool(params.full_page) or clip is not None, clip=clip)
         except PlaywrightError as error:
-            raise RpcError("internal", f"screenshot failed: {error.message}") from error
+            raise RpcError("internal", f"screenshot failed: {first_line(error.message)}") from error
         width, height = png_size(path)
         return models.PageScreenshotResult(path=str(path), width=width, height=height)

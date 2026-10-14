@@ -6,7 +6,7 @@ mod install;
 use std::io::{self, BufReader};
 use std::path::Path;
 use std::process::ExitCode;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::{Args, Parser, Subcommand};
 use traceqa_engine::driver::Drivers;
@@ -184,9 +184,10 @@ fn extract(args: ExtractArgs) -> ExitCode {
     let folder = run.folder().to_path_buf();
 
     let commands = driver_commands(&args.drivers.drivers);
+    cancel_on_ctrl_c();
     let execution = Execution {
         drivers: &|| Drivers::new(commands.clone()),
-        cancel: &AtomicBool::new(false),
+        cancel: &CANCEL,
     };
     // Browsers run side by side, so each line says which one it is about.
     let mut show_progress = |event: &Event| match &event.target {
@@ -207,10 +208,30 @@ fn extract(args: ExtractArgs) -> ExitCode {
         }
         println!("\nRun folder: {}", folder.display());
     }
-    if manifest.status == RunStatus::Completed {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::FAILURE
+    match manifest.status {
+        RunStatus::Completed => ExitCode::SUCCESS,
+        RunStatus::Cancelled => ExitCode::from(INTERRUPTED),
+        _ => ExitCode::FAILURE,
+    }
+}
+
+/// Set by the first Ctrl-C. The run then stops at the next step, closes its browsers and
+/// writes a run folder that says it was cancelled.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Exit code of a run stopped with Ctrl-C, as shells report an interrupted command.
+const INTERRUPTED: u8 = 130;
+
+fn cancel_on_ctrl_c() {
+    let handler = || {
+        if CANCEL.swap(true, Ordering::SeqCst) {
+            // A second Ctrl-C: the person does not want to wait for the browsers to close.
+            std::process::exit(i32::from(INTERRUPTED));
+        }
+        eprintln!("\nCancelling: closing the browsers. Press Ctrl-C again to quit at once.");
+    };
+    if let Err(error) = ctrlc::set_handler(handler) {
+        eprintln!("traceqa: Ctrl-C will stop the run without closing it cleanly: {error}");
     }
 }
 

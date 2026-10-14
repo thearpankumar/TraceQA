@@ -35,6 +35,8 @@ checked. `absent` means the collector must not list the element at all.
 | `signals` | The evidence for being interactive, in any order | `signals=role,tabindex` |
 | `shadow` | Whether it is inside shadow DOM | `shadow=true` |
 | `visible`, `enabled`, `inviewport` | State | `visible=false` |
+| `covered` | `true`, `false`, or `unchecked` when it was not tested (hidden or off screen) | `covered=true` |
+| `coveredby` | The selector of what covers it | `coveredby=#cookie-banner` |
 | `checked`, `expanded`, `selected`, `pressed`, `readonly`, `required` | State. A state the collector leaves out counts as `false`. | `checked=true` |
 
 Rules:
@@ -70,3 +72,4 @@ marked.
 | `states.html` | Disabled, checked, expanded, pressed, selected, read-only, required |
 | `controls.html` | The role of each kind of form control |
 | `structure.html` | Open, nested and closed shadow roots, and slotted content |
+| `covered.html` | Covered by a banner, a backdrop or an overlay, and the cases that are not covering: clicks passing through, partial overlap, own content, own label |

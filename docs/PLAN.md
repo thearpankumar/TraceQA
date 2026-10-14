@@ -68,7 +68,7 @@ it is in and does not click anything. Check and sweep are built on its output.
 | 5 | Engine and CLI | Done |
 | 6 | Bench and CI | Done. CI runs every test and the bench on Linux, macOS and Windows, and passes on all three. |
 | 7 | Python SDK | Done |
-| 8 | Safari and Kitesurf | Partly. See below. |
+| 8 | Safari and Kitesurf | Safari done, see below. Kitesurf not yet. |
 
 ### Measured on the Buggy Shop
 
@@ -128,10 +128,12 @@ What these sites showed, and what changed because of them:
 
 Limits these sites showed that are still there:
 
-- **Covered elements.** An element behind another one (controls inside a closed
-  book cover on one site) counts as visible, and its crop shows what covers it.
-- **Names that change.** A low-confidence element takes its name from its text.
-  When that text changes over time, so does the id.
+- **Covered elements.** Fixed for elements on screen when the page is read: they
+  are marked `covered`, with what covers them. An element further down the page
+  is not tested, because only what is on screen can be.
+- **Names that change.** Fixed for names that change while the page is read,
+  such as a countdown: they are left out of the id. A name that changes only
+  between visits still changes the id.
 - **Different pages at different sizes.** One site builds a different page for
   mobile, so desktop and mobile share only some ids. That is correct, but it
   means ids are comparable across browsers, not always across viewports.
@@ -161,10 +163,13 @@ targets that time out beside others.
 
 ### Not done or not verified
 
-- **Real Safari.** The WebDriver driver is written and passes its tests against
-  chromedriver, which speaks the same protocol. It has not driven Safari: that
-  needs "Allow remote automation" switched on in Safari's Developer settings.
-  Then run `TRACEQA_TEST_SAFARI=1 uv run pytest drivers/webdriver-py`.
+- **Safari window size.** On the Mac Safari was tested on, Safari ignored every
+  request to resize its automation window and stayed at the screen's size,
+  1710x1021. Resizing with a position, after maximizing or minimizing, and in a
+  new window made no difference, and one session out of several did resize. It
+  is a macOS window state that a driver cannot change. The page is then read and
+  recorded at the size it really has, with a `viewport_not_reached` warning, so
+  a Safari "390x844" run on such a Mac is a desktop-sized run and says so.
 - **Kitesurf.** `--browser cdp=ENDPOINT` works against a local Chromium. It has
   not been pointed at Kitesurf, which needs an endpoint from Cloudflare.
 - **Real sites.** Four have been run (see above), all simple public pages built
@@ -173,21 +178,22 @@ targets that time out beside others.
   first run found three problems, all fixed: a lint that newer Rust added,
   Chromium's sandbox on Ubuntu 24.04, and finding chromedriver on Windows. A
   second run found a test that stopped scrolling too early on a slow machine.
-- **Cancelling from the command line.** Ctrl-C stops the engine at once. Drivers
-  close their browsers, but `run.json` is left saying `running`.
-- **Viewport reached.** When a WebDriver browser cannot reach the requested
-  viewport, the driver logs it, but `components.json` records the size asked for.
 - **Fingerprint freeze.** The recipe is stable on the shop and on four real
   sites, after one change. See `spec/fingerprint.md`.
 - **`page.act`.** Reserved in the driver protocol. No driver implements it.
-- **Slow content at the end of a page.** After each scroll the engine waits for
-  the page height to stop changing. Content that takes longer than that to
-  arrive when the bottom is reached is missed.
+- **Slow content at the end of a page.** Fixed: at the bottom of a page that
+  scrolls, the engine waits a second and looks again, and goes on while the page
+  grows. Content that takes longer than a second after each bottom is missed.
 - **Parallel runs on heavy pages.** Several browsers rendering a heavy page at
   once can make its loads slow. A browser that times out is retried alone, but
   one that is merely slow is not.
-- **Virtualised lists.** A list that removes rows as you scroll is read as it
-  stands after the last scroll.
+- **Virtualised lists.** Detected but not yet read in full. A list that keeps
+  only the rows near the screen is reported with `elements_removed_while_scrolling`,
+  and only the rows present at the end are listed. Reading every screen and
+  merging the readings needs care, because such lists reuse page elements for
+  other rows and fixed headers appear on every screen. Rows whose controls all
+  have the same text, such as a column of "Open" buttons alone, are not told
+  apart, so such a list is not detected.
 
 ## Multi-language support
 
@@ -247,13 +253,37 @@ macOS but not yet in CI on Windows and Linux. The release workflow runs for the
 first time when `v0.1.0` is tagged, and installing drivers from GitHub needs
 that tag to exist.
 
+## Safari
+
+Tested on Safari 26.6 on macOS, through `safaridriver` and the WebDriver driver.
+
+| Check | Result |
+|---|---|
+| The driver's own test (frames, shadow DOM, lazy content) | Passes |
+| The demo shop, beside Chromium, Firefox and WebKit at two viewports | 37 of 37 in every browser. Component ids, names and instance counts identical in all four. |
+| The collector case pages | All pass, as in the other browsers |
+| Window size | Not reached on this Mac. See "Safari window size" above. |
+
+The `viewport_not_reached` warning came out of this: before it, a run that could
+not reach its viewport recorded the size asked for. The driver now reports the
+size it reached, and the engine reads, scrolls, crops and records at that size.
+
+Safari cannot run on GitHub's machines, which do not allow remote automation.
+It is checked by hand before a release:
+
+```sh
+TRACEQA_TEST_SAFARI=1 uv run pytest drivers/webdriver-py collector
+```
+
 ## Test plan
 
 | Phase | Tests | Status |
 |---|---|---|
 | 1 | Every run folder a test produces is checked against `spec/` and against rules a schema cannot state (event order, ids, counts, crops). The checker has its own tests that break a folder nine ways. | Done |
 | 1 | Collector case pages: about 95 cases on 6 pages, each checked in Chromium, Firefox and WebKit, plus a check that nothing unexpected is listed. | Done |
-| 2 | Failure cases, command-line tests, golden ids | Next |
+| 2 | Failure cases against `fixtures/trouble/`, a site that fails on purpose: 404, 500, a redirect, a load that never finishes, an endless page, plain text, an address nothing answers, a driver that crashes, and Ctrl-C. | Done |
+| 2 | Command-line tests: every exit code, `--json` equals `run.json`, refusals with reasons, help for every command. | Done |
+| 2 | Golden ids: the 37 ids of the Buggy Shop are saved in `fixtures/buggy-shop/golden-ids.json` and every run must reproduce them. | Done |
 | 3 | Real-world pattern pages | Planned |
 | 4 | Nightly: language versions, comparison with the browser's accessibility tree | Planned |
 
@@ -264,11 +294,34 @@ What phase 1 found:
   show. The collector now asks the browser with `checkVisibility()`, which also
   makes `opacity: 0` count as hidden.
 
-Known gaps, kept as expected failures in the case pages:
+What phase 2 found:
 
-- An element clipped to 1x1 pixel, as skip links are, counts as visible.
-- `role="presentation"` on a button is reported as `generic`. ARIA ignores that
-  role on a focusable element, so it should stay a button.
+- **HTTP errors passed silently.** A 404 or 500 page completed with no sign of
+  it. It is still read, and now raises `http_error_status`.
+- **One stuck image failed the whole page.** A page whose load event never fired
+  failed with a timeout, though its content was there. The drivers now wait for
+  the content first, then for the load event in the time left, and a page that
+  never finishes is read as it stands, with `page_load_incomplete`.
+- **Ctrl-C left the run saying `running`,** and the target under way `failed`,
+  because the terminal also stopped the drivers. Drivers now ignore Ctrl-C and
+  the engine closes them. The run ends `cancelled`, with exit code 130, and no
+  process is left behind.
+- **Errors carried Playwright's call log,** several lines of it. Only the first
+  line is kept.
+
+## Accuracy fixes
+
+| Fix | What changed | Tested by |
+|---|---|---|
+| `role="presentation"` on a focusable element | ARIA ignores it, so the element keeps its role: a button stays a button. | Case pages, 4 browsers |
+| Visually hidden elements | One pixel or less, `clip: rect(0 0 0 0)` and `clip-path: inset(50%)` count as hidden, as skip links are. | Case pages, 4 browsers |
+| Covered elements | Five points of each element on screen are hit-tested. Under something at all five, it is `covered`, with `coveredBy`, and one `covered_elements` warning names the first. An overlay that lets clicks through does not cover, nor does the element's own content or label. | Case pages, 4 browsers; a cookie banner end to end |
+| Content that arrives after the bottom is reached | The engine waits a second at the bottom of a page that scrolls, and goes on while it grows. | End to end, in both modes |
+| Closed shadow roots | Counted in Chromium, the only browser that lets a driver see them, and reported with `closed_shadow_roots`. No browser lets a script read inside one. | End to end, Chromium and Firefox |
+| Lists that remove rows | Detected and reported with `elements_removed_while_scrolling`. | End to end, in both modes, and the shop raises no false warning |
+| Names that change, such as a countdown | The page is read before and after the walk, at least a second apart. A name that differs at the same place is left out of the id, and the component has `nameChanges`. Other ids are unchanged. | A countdown keeps its id across runs, in both modes; a unit test; none of the four real sites has a false alarm, and each finds the same components as before |
+
+The case pages have no known gaps left.
 
 ## What comes next
 

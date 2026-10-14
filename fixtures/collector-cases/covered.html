@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: covered</title>
+<style>
+  body { font: 14px sans-serif; margin: 8px; }
+  .box { position: relative; height: 44px; margin: 6px 0; }
+  .over { position: absolute; inset: 0; z-index: 2; background: #fff; }
+  .dim { position: absolute; inset: 0; z-index: 2; background: rgba(0, 0, 0, 0.4); }
+  .dialog { position: absolute; left: 260px; top: 4px; z-index: 3; background: #fff; }
+</style>
+<body>
+<h1>Covered by another element</h1>
+<p>Covered means a click would land on something else at every point tested.</p>
+
+<div class="box"><button id="cov-free" data-expect="covered=false">Nothing on top</button></div>
+
+<div class="box"><button id="cov-under-banner" data-expect="covered=true; coveredby=#cookie-banner; visible=true">Under a cookie banner</button>
+  <div id="cookie-banner" class="over">We use cookies</div></div>
+
+<div class="box"><button id="cov-under-backdrop" data-expect="covered=true; coveredby=#backdrop">Behind a modal</button>
+  <div id="backdrop" class="dim"></div>
+  <div class="dialog"><button id="cov-in-dialog" data-expect="covered=false">In the modal</button></div></div>
+
+<div class="box"><button id="cov-pass-through" data-expect="covered=false">Under an overlay that lets clicks through</button>
+  <div class="over" style="pointer-events: none; background: transparent"></div></div>
+
+<div class="box"><button id="cov-partly" style="width: 240px" data-expect="covered=false">Half under a sticky bar</button>
+  <div class="over" style="right: auto; width: 120px"></div></div>
+
+<div class="box"><button id="cov-own-icon" data-expect="covered=false"><span style="display: inline-block; width: 30px">icon</span> Own content on top</button></div>
+
+<div class="box"><input id="cov-under-own-label" type="checkbox" data-expect="covered=false; name=Custom checkbox">
+  <label for="cov-under-own-label" style="position: absolute; left: 0; top: 0; width: 120px; height: 30px; z-index: 2; background: #eef">Custom checkbox</label></div>
+
+<div class="box"><div id="cov-shadow-host"><template shadowrootmode="open">
+  <button id="cov-in-shadow" data-expect="covered=true; shadow=true">In a shadow root, under an overlay</button>
+</template></div>
+  <div id="shadow-cover" class="over"></div></div>
+
+<div class="box"><button id="cov-hidden" style="display: none" data-expect="covered=unchecked">Hidden, so not tested</button></div>
+
+<div style="height: 3000px"></div>
+<div class="box"><button id="cov-below-fold" data-expect="covered=unchecked; inviewport=false">Off screen, so not tested</button></div>
+</body>
+</html>
