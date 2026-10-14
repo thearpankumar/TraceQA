@@ -53,7 +53,11 @@ pub fn list() -> Value {
                         "type": "integer", "minimum": 0,
                         "description": "How many screens to scroll through. 0 reads the page without scrolling."
                     },
-                    "timeout_ms": { "type": "integer", "minimum": 0, "description": "Time allowed for the page to load." }
+                    "timeout_ms": { "type": "integer", "minimum": 0, "description": "Time allowed for the page to load." },
+                    "storage_state": {
+                        "type": "string",
+                        "description": "Path of a state file (Playwright's storageState format, as `traceqa login` saves) holding cookies and stored values, for pages behind a sign-in. Its contents are never shown."
+                    }
                 },
                 "required": ["url"],
                 "additionalProperties": false
@@ -170,6 +174,15 @@ impl Call<'_> {
         for target in &mut targets {
             target.headless = Some(true);
         }
+        let storage_state = match &args.storage_state {
+            Some(path) => {
+                let text =
+                    fs::read_to_string(path).map_err(|e| format!("could not read the state file {path}: {e}"))?;
+                // The contents are a secret, so a parse error names the file and not what is in it.
+                Some(serde_json::from_str(&text).map_err(|_| format!("{path} is not a storage state file"))?)
+            }
+            None => None,
+        };
         let request = RunStartParams {
             feature: "extract".into(),
             url: args.url,
@@ -184,6 +197,7 @@ impl Call<'_> {
                 timeout_ms: args.timeout_ms,
                 settle_ms: args.settle_ms,
             }),
+            storage_state,
         };
         let run = Run::prepare(request).map_err(|e| e.to_string())?;
         let commands = self.config.drivers.clone();
@@ -406,6 +420,7 @@ struct ExtractArgs {
     settle_ms: Option<u64>,
     max_scroll_steps: Option<u64>,
     timeout_ms: Option<u64>,
+    storage_state: Option<String>,
 }
 
 #[derive(Deserialize)]

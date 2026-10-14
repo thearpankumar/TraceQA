@@ -15,12 +15,11 @@ from __future__ import annotations
 
 import functools
 import http.server
+import importlib.util
 import os
 import sys
 import threading
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -65,60 +64,19 @@ FIELDS = {
 }
 
 
-@dataclass(frozen=True)
-class Case:
-    page: str
-    id: str
-    expect: dict[str, str]  # empty means the element must be absent
-    gap: str | None
+def _load_expectations():
+    spec = importlib.util.spec_from_file_location("expectations", ROOT / "tests" / "support" / "expectations.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look their module up while being defined
+    spec.loader.exec_module(module)
+    return module
 
 
-def parse_expectation(text: str) -> dict[str, str]:
-    if text.strip() == "absent":
-        return {}
-    expect = {}
-    for part in text.split(";"):
-        if not part.strip():
-            continue
-        key, separator, value = part.partition("=")
-        key = key.strip()
-        if not separator or key not in FIELDS:
-            raise ValueError(f"unknown expectation {part.strip()!r}. Known keys: {', '.join(FIELDS)}")
-        value = value.strip()
-        expect[key] = ",".join(sorted(value.split(","))) if key == "signals" else value
-    return expect
+expectations = _load_expectations()
+Case = expectations.Case
 
 
-class _Reader(HTMLParser):
-    def __init__(self, page: str) -> None:
-        super().__init__()
-        self.page = page
-        self.cases: list[Case] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        found = dict(attrs)
-        if "data-expect" not in found:
-            return
-        if not found.get("id"):
-            raise ValueError(f"{self.page}: a <{tag}> with data-expect has no id")
-        expect = parse_expectation(found["data-expect"] or "")
-        self.cases.append(Case(self.page, found["id"], expect, found.get("data-known-gap")))
-
-
-def read_cases() -> list[Case]:
-    cases = []
-    for path in sorted(CASES.glob("*.html")):
-        reader = _Reader(path.name)
-        reader.feed(path.read_text(encoding="utf-8"))
-        cases.extend(reader.cases)
-    ids = [(case.page, case.id) for case in cases]
-    duplicates = {item for item in ids if ids.count(item) > 1}
-    if duplicates:
-        raise ValueError(f"case ids must be unique within a page: {sorted(duplicates)}")
-    return cases
-
-
-ALL_CASES = read_cases()
+ALL_CASES = expectations.read_cases(CASES, FIELDS)
 PAGES = sorted({case.page for case in ALL_CASES})
 
 

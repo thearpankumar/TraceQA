@@ -37,6 +37,7 @@ export type {
   Instance,
   RunManifest,
   RunStatus,
+  StorageState,
   TargetSummary,
   Viewport,
   Warning,

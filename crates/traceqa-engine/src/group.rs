@@ -9,6 +9,10 @@ use crate::fingerprint::{self, CHANGING, REPEAT_THRESHOLD, TEMPLATE};
 /// Repeated items under these roles are distinct controls (menu entries, tabs), never one template.
 const NEVER_TEMPLATED: [&str; 5] = ["navigation", "menu", "menubar", "tablist", "toolbar"];
 
+/// The cells of a table row repeat, but they are its columns, not items of a list: the
+/// repeated item of a table is its row.
+const CELLS: [&str; 4] = ["cell", "gridcell", "columnheader", "rowheader"];
+
 /// One element together with where it was found.
 pub struct Located {
     pub element: RawElement,
@@ -48,7 +52,7 @@ fn placement(located: &Located) -> Option<Placement> {
     }
     let repeated = path
         .iter()
-        .rposition(|step| step.repeat_count.unwrap_or(0) >= REPEAT_THRESHOLD)?;
+        .rposition(|step| step.repeat_count.unwrap_or(0) >= REPEAT_THRESHOLD && !CELLS.contains(&step.role.as_str()))?;
     let keys = |steps: &[_]| steps.iter().map(fingerprint::step_key).collect::<Vec<_>>().join(" > ");
     let outer: String = path[..repeated]
         .iter()
@@ -296,6 +300,31 @@ mod tests {
             .iter()
             .map(|c| (c.role.clone(), c.name.clone(), c.instances.len()))
             .collect()
+    }
+
+    #[test]
+    fn the_rows_of_a_table_are_its_items_not_its_cells() {
+        // Six rows of four cells: a checkbox named after the row in the first cell, Edit and
+        // Delete in the last. The cells repeat too, but the row is what is repeated.
+        let at = |row: u64, cell: u64| {
+            vec![
+                step("table", "table", None),
+                step("row", "tr", Some((row, 6))),
+                step("cell", "td", Some((cell, 4))),
+            ]
+        };
+        let mut elements = Vec::new();
+        for row in 0..6 {
+            elements.push(element("checkbox", &format!("Select person {row}"), at(row, 0)));
+            elements.push(element("button", "Edit", at(row, 3)));
+            elements.push(element("button", "Delete", at(row, 3)));
+        }
+        let components = group(elements);
+        let shape: Vec<(&str, bool, usize)> = components
+            .iter()
+            .map(|c| (c.name.as_str(), c.name_is_template, c.instances.len()))
+            .collect();
+        assert_eq!(shape, [("*", true, 6), ("Edit", false, 6), ("Delete", false, 6)]);
     }
 
     #[test]

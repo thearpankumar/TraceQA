@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: mega menu</title>
+<style>
+  body { font: 14px sans-serif; margin: 0; }
+  nav ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px; }
+  .panel { display: none; position: absolute; top: 40px; left: 0; right: 0; background: #fff; }
+</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "link", "name": "Acme", "instances": 1},
+  {"role": "button", "name": "Products", "instances": 1},
+  {"role": "button", "name": "Solutions", "instances": 1},
+  {"role": "link", "name": "Pricing", "instances": 1},
+  {"role": "link", "name": "Analytics", "instances": 1},
+  {"role": "link", "name": "Automation", "instances": 1},
+  {"role": "link", "name": "Reports", "instances": 1},
+  {"role": "link", "name": "For startups", "instances": 1},
+  {"role": "link", "name": "For enterprise", "instances": 1},
+  {"role": "button", "name": "Sign in", "instances": 1}
+]
+</script>
+<body>
+<header>
+  <a id="mm-logo" href="/" data-expect="role=link; name=Acme">Acme</a>
+  <nav aria-label="Main">
+    <ul>
+      <li><button id="mm-products" aria-expanded="false" aria-controls="mm-products-panel"
+        data-expect="role=button; name=Products; expanded=false">Products</button>
+        <div id="mm-products-panel" class="panel">
+          <ul>
+            <li><a id="mm-analytics" href="/analytics" data-expect="name=Analytics; visible=false">Analytics</a></li>
+            <li><a href="/automation">Automation</a></li>
+            <li><a href="/reports">Reports</a></li>
+          </ul>
+        </div></li>
+      <li><button id="mm-solutions" aria-expanded="false" data-expect="expanded=false">Solutions</button>
+        <div class="panel">
+          <ul>
+            <li><a href="/startups">For startups</a></li>
+            <li><a href="/enterprise">For enterprise</a></li>
+          </ul>
+        </div></li>
+      <li><a id="mm-pricing" href="/pricing" data-expect="name=Pricing; visible=true">Pricing</a></li>
+    </ul>
+  </nav>
+  <button id="mm-sign-in" data-expect="role=button; name=Sign in">Sign in</button>
+</header>
+<main><h1>Welcome</h1></main>
+</body>
+</html>

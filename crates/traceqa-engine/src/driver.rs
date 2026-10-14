@@ -18,7 +18,7 @@ use traceqa_protocol::jsonrpc::{self, Id, Message};
 use traceqa_protocol::types::{
     DriverHelloParams, DriverHelloResult, DriverLogParams, Empty, PageEvalParams, PageEvalResult, PageGotoParams,
     PageGotoResult, PageScreenshotParams, PageScreenshotResult, PageScrollParams, PageScrollResult, RpcErrorData,
-    SessionCloseParams, SessionOpenParams, SessionOpenResult,
+    SessionCloseParams, SessionOpenParams, SessionOpenResult, SessionStorageParams, StorageState,
 };
 
 /// Time a page load or a script gets when the caller names none.
@@ -308,6 +308,14 @@ impl Driver {
         };
         self.request::<_, Empty>(method::SESSION_CLOSE, &params, SHORT)
             .map(drop)
+    }
+
+    /// The session's cookies and stored values, to save them after someone has signed in.
+    pub fn storage(&mut self, session_id: &str) -> Result<StorageState, DriverError> {
+        let params = SessionStorageParams {
+            session_id: session_id.to_string(),
+        };
+        self.request(method::SESSION_STORAGE, &params, SHORT)
     }
 
     pub fn goto(&mut self, params: &PageGotoParams) -> Result<PageGotoResult, DriverError> {

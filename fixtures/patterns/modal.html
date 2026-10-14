@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: modal dialog</title>
+<style>
+  body { font: 14px sans-serif; margin: 0; }
+  main { padding: 16px; }
+  #backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 10; }
+  #newsletter { position: fixed; top: 80px; left: 50%; width: 320px; margin-left: -160px; background: #fff;
+                padding: 16px; z-index: 11; }
+</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "link", "name": "Blog", "instances": 1},
+  {"role": "button", "name": "Read more", "instances": 1},
+  {"role": "button", "name": "Close", "instances": 1},
+  {"role": "textbox", "name": "Email address", "instances": 1},
+  {"role": "button", "name": "Join", "instances": 1},
+  {"role": "button", "name": "No thanks", "instances": 1}
+]
+</script>
+<body>
+<main>
+  <a id="md-blog" href="/blog" data-expect="covered=true; coveredby=#backdrop">Blog</a>
+  <p>An article.</p>
+  <button id="md-more" data-expect="covered=true">Read more</button>
+</main>
+<div id="backdrop"></div>
+<div id="newsletter" role="dialog" aria-modal="true" aria-labelledby="md-title">
+  <h2 id="md-title">Get our newsletter</h2>
+  <button id="md-close" aria-label="Close" data-expect="name=Close; covered=false">x</button>
+  <label for="md-email">Email address</label>
+  <input id="md-email" type="email" data-expect="role=textbox; name=Email address; covered=false">
+  <button id="md-join" data-expect="covered=false">Join</button>
+  <button id="md-no" data-expect="name=No thanks; covered=false">No thanks</button>
+</div>
+</body>
+</html>

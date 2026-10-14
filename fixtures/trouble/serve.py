@@ -14,6 +14,8 @@
 | /banner    | A page whose button is under a cookie banner. |
 | /closed    | A page with a button inside a closed shadow root, which no script can read. |
 | /ticking   | A countdown button whose name changes four times a second, beside one that does not. |
+| /signin    | A sign-in page with a password field. It signs in by itself: a cookie and a stored value, as a real sign-in leaves. |
+| /members   | Shows a members-only page when both are present, and sends the browser to /signin otherwise. |
 | /virtual   | A list of 300 rows that keeps only the rows near the screen, as long tables and feeds do. |
 | /text      | Plain text, not HTML. |
 """
@@ -114,6 +116,22 @@ TICKING = b"""<!doctype html><title>Ticking</title>
   setInterval(() => { left -= 250; countdown.textContent = "Sale ends in " + Math.round(left / 10) / 100 + " s"; }, 250);
 </script>"""
 
+SIGNIN = b"""<!doctype html><title>Sign in</title>
+<main><form aria-label="Sign in"><label>Email <input type="email"></label>
+<label>Password <input type="password"></label><button>Sign in</button></form></main>
+<script>
+  // Stands in for a person signing in: what a real sign-in leaves behind.
+  localStorage.setItem("token", "secret-token-123");
+  document.cookie = "sid=secret-cookie-456; path=/";
+</script>"""
+MEMBERS = b"""<!doctype html><title>Members</title>
+<script>
+  if (localStorage.getItem("token") !== "secret-token-123" || !document.cookie.includes("sid=secret-cookie-456")) {
+    location.replace("/signin");
+  }
+</script>
+<main><h1>Members area</h1><button>Members only</button></main>"""
+
 # Requests to /never are held until the server stops, so a page that needs one never finishes loading.
 STOPPING = threading.Event()
 
@@ -152,6 +170,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, CLOSED)
         elif path == "/ticking":
             self.send(200, TICKING)
+        elif path == "/signin":
+            self.send(200, SIGNIN)
+        elif path == "/members":
+            self.send(200, MEMBERS)
         elif path == "/virtual":
             self.send(200, VIRTUAL)
         elif path == "/late":

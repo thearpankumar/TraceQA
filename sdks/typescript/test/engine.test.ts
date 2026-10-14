@@ -1,12 +1,12 @@
 // Runs the client against the real engine binary and the Buggy Shop.
 
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import { Engine, extract, toTarget, TraceQAError, type Event, type RunManifest } from "../src/index.js";
-import { BINARY, HAVE_BINARY, startShop, tempDir, type Shop } from "./helpers.js";
+import { BINARY, HAVE_BINARY, startShop, startTrouble, tempDir, type Shop } from "./helpers.js";
 
 describe("against the real engine", { skip: HAVE_BINARY ? false : "build the engine first: cargo build" }, () => {
   let shop: Shop;
@@ -152,6 +152,44 @@ describe("against the real engine", { skip: HAVE_BINARY ? false : "build the eng
       signal: abort.signal,
     });
     assert.equal(result.status, "cancelled");
+  });
+});
+
+describe("pages behind a sign-in", { skip: HAVE_BINARY ? false : "build the engine first: cargo build" }, () => {
+  let trouble: Shop;
+  before(async () => {
+    trouble = await startTrouble();
+  });
+  after(() => trouble.stop());
+
+  test("a storage state starts the browser signed in, given as data or as a file", async () => {
+    const state = {
+      cookies: [{ name: "sid", value: "secret-cookie-456", domain: "127.0.0.1", path: "/" }],
+      origins: [{ origin: trouble.url.replace(/\/$/, ""), localStorage: [{ name: "token", value: "secret-token-123" }] }],
+    };
+    const fromData = await extract(trouble.url + "members", { binary: BINARY, outDir: tempDir(), storageState: state });
+    assert.deepEqual(
+      (await fromData.components()).components.map((c) => c.name),
+      ["Members only"],
+    );
+    const file = join(tempDir(), "state.json");
+    writeFileSync(file, JSON.stringify(state));
+    const fromFile = await extract(trouble.url + "members", { binary: BINARY, outDir: tempDir(), storageState: file });
+    assert.deepEqual(
+      (await fromFile.components()).components.map((c) => c.name),
+      ["Members only"],
+    );
+  });
+
+  test("a bad state file is refused without showing what it holds", async () => {
+    const file = join(tempDir(), "bad.json");
+    writeFileSync(file, JSON.stringify({ token: "secret-token-123" }));
+    await assert.rejects(extract(trouble.url + "members", { binary: BINARY, storageState: file }), (error: unknown) => {
+      assert.ok(error instanceof TraceQAError);
+      assert.match(error.message, /not a storage state file/);
+      assert.ok(!error.message.includes("secret-token-123"));
+      return true;
+    });
   });
 });
 

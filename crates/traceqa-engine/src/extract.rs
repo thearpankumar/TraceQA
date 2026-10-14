@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use traceqa_protocol::types::{
     BrowserInfo, BrowserTarget, CollectorResult, Component, ComponentsFile, Event, FrameInfo, PageEvalParams,
     PageGotoParams, PageScreenshotParams, PageScrollParams, Rect, ScrollInfo, ScrollTo, ScrollWait, SessionOpenParams,
-    SessionOpenResult, Timings, Viewport, WaitUntil, Warning,
+    SessionOpenResult, StorageState, Timings, Viewport, WaitUntil, Warning,
 };
 use traceqa_recorder::{now_rfc3339, save_crops, CropRequest, PageImage, RunWriter};
 
@@ -106,6 +106,8 @@ pub(crate) struct Job<'a> {
     pub dir: &'a Path,
     /// Shared by every target of the run, for browsers that allow one session at a time.
     pub exclusive: &'a Exclusive,
+    /// Cookies and stored values every browser starts with, for pages behind a sign-in.
+    pub storage_state: Option<&'a StorageState>,
     pub cancel: &'a AtomicBool,
 }
 
@@ -133,6 +135,7 @@ pub(crate) fn extract_target(
         target: job.target.clone(),
         viewport: job.viewport.clone(),
         locale: None,
+        storage_state: job.storage_state.cloned(),
     })?;
     clock.open = opening.elapsed();
 
@@ -288,6 +291,39 @@ impl Screen {
 /// True when the page is scrolled as far down as it goes.
 fn at_end(scroll: &ScrollInfo) -> bool {
     scroll.y + scroll.viewport_height >= scroll.height - 1.0
+}
+
+/// Address words that mean a sign-in page.
+const SIGN_IN_WORDS: [&str; 6] = ["login", "log-in", "signin", "sign-in", "sign_in", "auth"];
+
+/// A run given cookies and stored values that still lands on what looks like a sign-in page
+/// was not let in: the session has expired, or the state belongs to another site. Without this
+/// the run would quietly read the sign-in page in place of the page asked for.
+fn sign_in_warning(reading: &Reading, final_url: &str) -> Option<Warning> {
+    let path = final_url
+        .split_once("://")
+        .map_or(final_url, |(_, rest)| rest)
+        .to_lowercase();
+    let path = path.split_once('/').map_or("", |(_, path)| path);
+    let address = SIGN_IN_WORDS.iter().any(|word| path.contains(word));
+    let password = reading.elements.iter().any(|located| {
+        located
+            .element
+            .attrs
+            .get("type")
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("password"))
+    });
+    let sign = match (address, password) {
+        (true, _) => "its address",
+        (false, true) => "its password field",
+        (false, false) => return None,
+    };
+    Some(warning(
+        "session_not_accepted",
+        format!(
+            "The browser started with the stored session, but by {sign} the page is a sign-in page, so the session may have expired. Sign in again to make a new state file."
+        ),
+    ))
 }
 
 /// The least time between the two looks at the page that tell which names change. A countdown
@@ -687,6 +723,9 @@ fn read_page(
     }
     let mut reading = timed(&mut clock.read, || read_frames(driver, session, job))?;
     mark_changed_names(&mut reading, &before);
+    if job.storage_state.is_some() {
+        page_warnings.extend(sign_in_warning(&reading, &page.final_url));
+    }
     let reached_end = reached_end.unwrap_or_else(|| steps == 0 && at_end(&reading.scroll));
     if steps > 0 {
         progress.emit(

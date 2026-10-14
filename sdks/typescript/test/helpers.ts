@@ -31,7 +31,15 @@ export interface Shop {
  * be the workspace's, which `uv run` puts first on PATH together with the drivers.
  */
 export function startShop(): Promise<Shop> {
-  const script = join(ROOT, "fixtures", "buggy-shop", "serve.py");
+  return serve(join(ROOT, "fixtures", "buggy-shop", "serve.py"));
+}
+
+/** fixtures/trouble/serve.py, the site that fails on purpose and has a members area. */
+export function startTrouble(): Promise<Shop> {
+  return serve(join(ROOT, "fixtures", "trouble", "serve.py"));
+}
+
+function serve(script: string): Promise<Shop> {
   const child: ChildProcess = spawn("python", [script, "--port", "0"], { stdio: ["ignore", "pipe", "inherit"] });
   return new Promise((resolveShop, reject) => {
     child.once("error", (error) => reject(new Error(`could not start the shop: ${error.message}. Run under uv run.`)));

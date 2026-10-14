@@ -19,3 +19,8 @@ dist/
 
 # TraceQA output
 /runs/
+
+# Saved browser states from `traceqa login`. They hold session keys.
+*.state.json
+storage-state*.json
+state.json

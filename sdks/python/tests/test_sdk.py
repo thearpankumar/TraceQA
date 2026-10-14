@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -114,3 +115,28 @@ def test_a_missing_engine_is_explained(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "")
     with pytest.raises(traceqa.TraceQAError, match="not found"):
         traceqa.extract("https://example.com")
+
+
+def test_a_storage_state_starts_the_browsers_signed_in(trouble: str, tmp_path: Path) -> None:
+    # /members sends a browser back to /signin unless it holds both of these.
+    state = {
+        "cookies": [{"name": "sid", "value": "secret-cookie-456", "domain": "127.0.0.1", "path": "/"}],
+        "origins": [{"origin": trouble.rstrip("/"), "localStorage": [{"name": "token", "value": "secret-token-123"}]}],
+    }
+    result = traceqa.extract(trouble + "members", binary=BINARY, out_dir=tmp_path, storage_state=state)
+    assert [c.name for c in result.components().components] == ["Members only"]
+
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps(state), encoding="utf-8")
+    from_file = traceqa.extract(trouble + "members", binary=BINARY, out_dir=tmp_path, storage_state=path)
+    assert [c.name for c in from_file.components().components] == ["Members only"]
+
+
+def test_a_bad_storage_state_is_refused_without_showing_it(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"token": "secret-token-123"}', encoding="utf-8")
+    with pytest.raises(traceqa.TraceQAError) as refused:
+        traceqa.extract("https://example.com", binary=BINARY, storage_state=bad)
+    assert "secret-token-123" not in str(refused.value)
+    with pytest.raises(traceqa.TraceQAError, match="not a storage state"):
+        traceqa.extract("https://example.com", binary=BINARY, storage_state={"token": "x"})

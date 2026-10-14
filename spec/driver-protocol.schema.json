@@ -11,6 +11,7 @@
       "driver.shutdown": { "params": "Empty", "result": "Empty" },
       "session.open": { "params": "SessionOpenParams", "result": "SessionOpenResult" },
       "session.close": { "params": "SessionCloseParams", "result": "Empty" },
+      "session.storage": { "params": "SessionStorageParams", "result": "StorageState" },
       "page.goto": { "params": "PageGotoParams", "result": "PageGotoResult" },
       "page.eval": { "params": "PageEvalParams", "result": "PageEvalResult" },
       "page.scroll": { "params": "PageScrollParams", "result": "PageScrollResult" },
@@ -83,8 +84,18 @@
       "properties": {
         "target": { "$ref": "common.schema.json#/$defs/BrowserTarget" },
         "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
-        "locale": { "description": "BCP 47 language tag, for example en-US.", "type": "string" }
+        "locale": { "description": "BCP 47 language tag, for example en-US.", "type": "string" },
+        "storageState": {
+          "description": "Cookies and stored values to put in place before the first page is loaded.",
+          "$ref": "common.schema.json#/$defs/StorageState"
+        }
       }
+    },
+    "SessionStorageParams": {
+      "description": "Asks for the session's cookies and stored values, to save them after someone has signed in.",
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": { "sessionId": { "type": "string" } }
     },
     "SessionOpenResult": {
       "type": "object",

@@ -64,7 +64,11 @@
           "type": "integer",
           "minimum": 0
         },
-        "options": { "$ref": "#/$defs/ExtractOptions" }
+        "options": { "$ref": "#/$defs/ExtractOptions" },
+        "storageState": {
+          "description": "Start every browser with these cookies and stored values, for pages behind a sign-in or a first screen. Never written to the run folder.",
+          "$ref": "common.schema.json#/$defs/StorageState"
+        }
       }
     },
     "RunStartResult": {

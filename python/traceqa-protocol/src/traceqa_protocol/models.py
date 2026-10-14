@@ -190,6 +190,40 @@ class BrowserInfo(BaseModel):
     version: str
 
 
+class SameSite(Enum):
+    strict = "Strict"
+    lax = "Lax"
+    none = "None"
+
+
+class StorageCookie(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    value: str
+    domain: str = Field(
+        ...,
+        description="For example example.com, or .example.com for its subdomains too.",
+    )
+    path: str
+    expires: float | None = Field(
+        None,
+        description="Unix time in seconds. -1 or absent for a cookie that lasts until the browser closes.",
+    )
+    http_only: bool | None = Field(None, alias="httpOnly")
+    secure: bool | None = None
+    same_site: SameSite | None = Field(None, alias="sameSite")
+
+
+class StorageItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    value: str
+
+
 class Warning(BaseModel):
     """
     Something that did not stop the run but that the reader should know.
@@ -200,7 +234,7 @@ class Warning(BaseModel):
     )
     code: str = Field(
         ...,
-        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling.",
+        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted.",
     )
     message: str
 
@@ -320,15 +354,15 @@ class Capabilities(BaseModel):
     network_events: bool = Field(..., alias="networkEvents")
 
 
-class SessionOpenParams(BaseModel):
+class SessionStorageParams(BaseModel):
+    """
+    Asks for the session's cookies and stored values, to save them after someone has signed in.
+    """
+
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    target: BrowserTarget
-    viewport: Viewport
-    locale: str | None = Field(
-        None, description="BCP 47 language tag, for example en-US."
-    )
+    session_id: str = Field(..., alias="sessionId")
 
 
 class SessionOpenResult(BaseModel):
@@ -687,31 +721,6 @@ class Instance(BaseModel):
     in_shadow_dom: bool = Field(..., alias="inShadowDom")
 
 
-class RunStartParams(BaseModel):
-    """
-    The engine runs every target at every viewport.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    feature: str = Field(..., description="Known values: extract.")
-    url: str
-    targets: list[BrowserTarget]
-    viewports: list[Viewport]
-    out_dir: str | None = Field(
-        None,
-        alias="outDir",
-        description="Where to create the run folder. Default ./runs.",
-    )
-    parallel: int | None = Field(
-        None,
-        description="How many browsers to run at the same time. 1 runs them one after another. 0 or absent lets the engine choose from the machine's cores.",
-        ge=0,
-    )
-    options: ExtractOptions | None = None
-
-
 class RunEventParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -733,6 +742,16 @@ class InteractiveEvidence(BaseModel):
         ...,
         description="Known values: native, role, tabindex, onclick-attr, cursor-pointer, contenteditable.",
     )
+
+
+class StorageOrigin(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    origin: str = Field(
+        ..., description="Scheme, host and port, for example https://app.example.com."
+    )
+    local_storage: list[StorageItem] = Field(..., alias="localStorage")
 
 
 class TargetSummary(BaseModel):
@@ -837,6 +856,36 @@ class RawElement(BaseModel):
     interactive: InteractiveEvidence
 
 
+class StorageState(BaseModel):
+    """
+    Cookies and stored values to start a browser with, so it is already signed in or past a site's first screen. The same format as Playwright's storageState, so a file made by Playwright can be used. It holds session keys: treat it as a password. The engine never writes it to a run folder or an event.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cookies: list[StorageCookie]
+    origins: list[StorageOrigin] = Field(
+        ..., description="Values in each site's localStorage."
+    )
+
+
+class SessionOpenParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    target: BrowserTarget
+    viewport: Viewport
+    locale: str | None = Field(
+        None, description="BCP 47 language tag, for example en-US."
+    )
+    storage_state: StorageState | None = Field(
+        None,
+        alias="storageState",
+        description="Cookies and stored values to put in place before the first page is loaded.",
+    )
+
+
 class RunManifest(BaseModel):
     """
     run.json. Written at the start and rewritten at the end.
@@ -887,6 +936,36 @@ class ComponentsFile(BaseModel):
     )
     components: list[Component]
     warnings: list[Warning]
+
+
+class RunStartParams(BaseModel):
+    """
+    The engine runs every target at every viewport.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    feature: str = Field(..., description="Known values: extract.")
+    url: str
+    targets: list[BrowserTarget]
+    viewports: list[Viewport]
+    out_dir: str | None = Field(
+        None,
+        alias="outDir",
+        description="Where to create the run folder. Default ./runs.",
+    )
+    parallel: int | None = Field(
+        None,
+        description="How many browsers to run at the same time. 1 runs them one after another. 0 or absent lets the engine choose from the machine's cores.",
+        ge=0,
+    )
+    options: ExtractOptions | None = None
+    storage_state: StorageState | None = Field(
+        None,
+        alias="storageState",
+        description="Start every browser with these cookies and stored values, for pages behind a sign-in or a first screen. Never written to the run folder.",
+    )
 
 
 class RunDoneParams(BaseModel):

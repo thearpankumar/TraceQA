@@ -62,6 +62,7 @@ traceqa extract [OPTIONS] <URL>
 | `--parallel N` | chosen from the machine | How many browsers run at the same time. `1` runs them one after another. The default is half the machine's cores, at most 4. |
 | `--timings` | off | Also print where each browser's time went. |
 | `--json` | off | Print the run manifest as JSON instead of a table. |
+| `--storage-state FILE` | none | Start every browser with the cookies and stored values in FILE, for pages behind a sign-in. See [Pages behind a sign-in](#pages-behind-a-sign-in). |
 | `--driver COMMAND` | see above | Command that starts a browser driver. |
 
 Every browser is run at every viewport, several at a time. Progress is written
@@ -137,7 +138,7 @@ Other AI tools take the same command in their MCP settings: the program
 
 | Tool | What it does |
 |---|---|
-| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`. Answers with the run id and a summary per target. |
+| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`, `storage_state` (the path of a state file; its contents are never shown). Answers with the run id and a summary per target. |
 | `list_runs` | The runs in the runs folder, newest first. |
 | `get_components` | The components of one run and target: a short line each, filtered by `role` or `name`, or one component in full with `component_id`. |
 | `get_crop` | The picture of one component, for runs made with `crops`. |
@@ -191,6 +192,61 @@ Drivers:
 Ready. Browsers available: cdp, chrome, chromium, firefox, msedge, safari, webdriver, webkit
 ```
 
+## Pages behind a sign-in
+
+Extraction starts every browser empty, so a page behind a sign-in, an
+onboarding step or a "continue as a guest" screen shows that screen instead of
+itself, at the same address. A state file gets past it: the cookies and stored
+values a browser holds once someone is in. It is Playwright's `storageState`
+format, so a file made by Playwright tests works too.
+
+### `traceqa login`
+
+```
+traceqa login URL --save FILE [--browser NAME]
+```
+
+A browser window opens on the page. Sign in there as usual, with a password, a
+code or another service, then come back and press Enter. The browser's state is
+saved to FILE, readable only by you. TraceQA never sees the password. Then:
+
+```
+traceqa extract URL --storage-state FILE
+```
+
+A state saved in one browser works in the others. Through WebDriver, as for
+Safari, only the cookies and stored values of the site the window ends on are
+saved. `--headless` saves as soon as the page has loaded, for scripts and tests
+where the page signs in by itself.
+
+### A state file by hand
+
+When a site only checks a stored value, the file can be written by hand:
+
+```json
+{
+  "cookies": [],
+  "origins": [
+    { "origin": "https://app.example.com", "localStorage": [{ "name": "has_onboarded", "value": "true" }] }
+  ]
+}
+```
+
+### Keeping it safe
+
+| Rule | Why |
+|---|---|
+| Treat a state file as a password | It opens the account until the session expires. |
+| Keep it out of version control | The repository's `.gitignore` already ignores `state.json`, `*.state.json` and `storage-state*.json`. |
+| Use a test account with made-up data | A signed-in page can show personal data, and its names and pictures end up in the run folder. |
+| Prefer a staging copy of the site | Extraction only reads, but later features will click. |
+| In CI, keep the file in the CI system's secrets | Write it to disk in the job, and do not upload it. |
+
+TraceQA never writes the state to a run folder, an event, a log or an error
+message. When a run that was given a state still lands on what looks like a
+sign-in page, its address or a password field, the target has a
+`session_not_accepted` warning: sign in again to make a new file.
+
 ## Python SDK
 
 ```python
@@ -222,6 +278,7 @@ with traceqa.Engine() as engine:
 | `timeout_ms` | `30000` | Time allowed for a page to load. |
 | `settle_ms` | `0` | Extra time to wait after the page has loaded. For pages with a timed intro. |
 | `parallel` | chosen from the machine | How many browsers run at the same time. |
+| `storage_state` | none | A state file's path, or the state as a dict, for pages behind a sign-in. |
 | `on_event` | `None` | Called with each progress event as it happens. |
 
 `traceqa.extract` and `traceqa.Engine` also accept `binary`, the path of the
@@ -272,7 +329,7 @@ One engine can run several extractions at the same time: start them with
 
 The options are the Python ones in camel case: `browsers`, `viewports`
 (`[width, height]` pairs), `outDir`, `headless`, `crops`, `includeHidden`,
-`maxScrollSteps`, `timeoutMs`, `settleMs`, `parallel` and `onEvent`. Two differ:
+`maxScrollSteps`, `timeoutMs`, `settleMs`, `parallel`, `storageState` and `onEvent`. Two differ:
 
 | Option | Meaning |
 |---|---|
@@ -379,6 +436,7 @@ of the element the previous part matched.
 | `covered_elements` | Components on screen lie under something else, such as a cookie banner or a modal's backdrop, so a click would not reach them. Each such instance has `covered: true` and `coveredBy`. |
 | `closed_shadow_roots` | The page has closed shadow roots, which no script can read inside, so what they hold is not listed. Only Chromium-based browsers can tell. |
 | `elements_removed_while_scrolling` | The page removed controls it had shown as it was scrolled, as long tables and feeds that keep only the rows near the screen do. The rows that had left the screen are not listed. |
+| `session_not_accepted` | The run was given a state, but the page is still a sign-in page by its address or a password field. The session has probably expired. |
 | `viewport_not_reached` | The browser could not give the viewport asked for, for example Safari in a window macOS will not resize. The page was read at the size it really had, which `components.json` records. The target keeps its name, such as `safari-390x844`. |
 
 ## Speed

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Pattern: data table</title>
+<style>body { font: 14px sans-serif; } td, th { padding: 4px 8px; }</style>
+<script type="application/json" id="expected-components">
+[
+  {"role": "checkbox", "name": "Select all", "instances": 1},
+  {"role": "button", "name": "Name", "instances": 1},
+  {"role": "button", "name": "Email", "instances": 1},
+  {"role": "checkbox", "name": "*", "template": true, "instances": 6},
+  {"role": "button", "name": "Edit", "instances": 6},
+  {"role": "button", "name": "Delete", "instances": 6},
+  {"role": "button", "name": "Previous page", "instances": 1},
+  {"role": "button", "name": "Next page", "instances": 1}
+]
+</script>
+<body>
+<main>
+  <table aria-label="Users">
+    <thead>
+      <tr>
+        <th><input id="dt-select-all" type="checkbox" aria-label="Select all" data-expect="role=checkbox; name=Select all"></th>
+        <th><button id="dt-sort-name" aria-label="Name" aria-pressed="false" data-expect="name=Name">Name</button></th>
+        <th><button aria-label="Email">Email</button></th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><input type="checkbox" aria-label="Select Asha Rao" id="dt-select-1" data-expect="role=checkbox; template=true; instances=6"></td>
+        <td>Asha Rao</td><td>asha@example.com</td>
+        <td><button id="dt-edit-1" data-expect="name=Edit; instances=6">Edit</button>
+            <button id="dt-delete-1" data-expect="name=Delete; instances=6">Delete</button></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" aria-label="Select Ben Okafor"></td>
+        <td>Ben Okafor</td><td>ben@example.com</td>
+        <td><button>Edit</button>
+            <button>Delete</button></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" aria-label="Select Chen Wei"></td>
+        <td>Chen Wei</td><td>chen@example.com</td>
+        <td><button>Edit</button>
+            <button>Delete</button></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" aria-label="Select Dana Cruz"></td>
+        <td>Dana Cruz</td><td>dana@example.com</td>
+        <td><button>Edit</button>
+            <button>Delete</button></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" aria-label="Select Eli Novak"></td>
+        <td>Eli Novak</td><td>eli@example.com</td>
+        <td><button>Edit</button>
+            <button>Delete</button></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" aria-label="Select Farah Khan"></td>
+        <td>Farah Khan</td><td>farah@example.com</td>
+        <td><button>Edit</button>
+            <button>Delete</button></td>
+      </tr>
+    </tbody>
+  </table>
+  <nav aria-label="Pages">
+    <button id="dt-prev" disabled data-expect="name=Previous page; enabled=false">Previous page</button>
+    <button id="dt-next" data-expect="name=Next page; enabled=true">Next page</button>
+  </nav>
+</main>
+</body>
+</html>

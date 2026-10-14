@@ -48,6 +48,10 @@ DRIVER_PROTOCOL_METHODS = {
         "params": "SessionCloseParams",
         "result": "Empty"
     },
+    "session.storage": {
+        "params": "SessionStorageParams",
+        "result": "StorageState"
+    },
     "page.goto": {
         "params": "PageGotoParams",
         "result": "PageGotoResult"

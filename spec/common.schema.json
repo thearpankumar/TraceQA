@@ -63,13 +63,56 @@
         "version": { "type": "string" }
       }
     },
+    "StorageState": {
+      "description": "Cookies and stored values to start a browser with, so it is already signed in or past a site's first screen. The same format as Playwright's storageState, so a file made by Playwright can be used. It holds session keys: treat it as a password. The engine never writes it to a run folder or an event.",
+      "type": "object",
+      "required": ["cookies", "origins"],
+      "properties": {
+        "cookies": { "type": "array", "items": { "$ref": "#/$defs/StorageCookie" } },
+        "origins": {
+          "description": "Values in each site's localStorage.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/StorageOrigin" }
+        }
+      }
+    },
+    "StorageCookie": {
+      "type": "object",
+      "required": ["name", "value", "domain", "path"],
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string" },
+        "domain": { "description": "For example example.com, or .example.com for its subdomains too.", "type": "string" },
+        "path": { "type": "string" },
+        "expires": { "description": "Unix time in seconds. -1 or absent for a cookie that lasts until the browser closes.", "type": "number" },
+        "httpOnly": { "type": "boolean" },
+        "secure": { "type": "boolean" },
+        "sameSite": { "enum": ["Strict", "Lax", "None"] }
+      }
+    },
+    "StorageOrigin": {
+      "type": "object",
+      "required": ["origin", "localStorage"],
+      "properties": {
+        "origin": { "description": "Scheme, host and port, for example https://app.example.com.", "type": "string" },
+        "localStorage": { "type": "array", "items": { "$ref": "#/$defs/StorageItem" } }
+      }
+    },
+    "StorageItem": {
+      "type": "object",
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
     "Warning": {
       "description": "Something that did not stop the run but that the reader should know.",
       "type": "object",
       "required": ["code", "message"],
       "properties": {
         "code": {
-          "description": "Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling.",
+          "description": "Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted.",
           "type": "string"
         },
         "message": { "type": "string" }

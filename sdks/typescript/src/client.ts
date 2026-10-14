@@ -18,6 +18,7 @@ import {
   type RunStartParams,
   type RunStartResult,
   type RunStatus,
+  type StorageState,
   type TargetSummary,
 } from "./protocol.js";
 
@@ -68,6 +69,11 @@ export interface ExtractOptions {
   settleMs?: number;
   /** How many browsers run at the same time. Leave it out to let the engine choose. */
   parallel?: number;
+  /**
+   * Start every browser signed in: the path of a state file saved by `traceqa login`, or the
+   * state itself. It holds session keys, so keep it out of version control.
+   */
+  storageState?: string | StorageState;
   /** Called for every event, live and in order. A handler that throws cancels the run. */
   onEvent?: (event: Event) => void;
   /** Aborting cancels the run. The result then says `cancelled`. */
@@ -107,6 +113,27 @@ export class ExtractResult {
     }
     return JSON.parse(text) as ComponentsFile;
   }
+}
+
+/** A state file's path, or the state itself. Errors never show what the file holds. */
+async function readStorageState(state: string | StorageState): Promise<StorageState> {
+  if (typeof state !== "string") return state;
+  let text: string;
+  try {
+    text = await readFile(state, "utf8");
+  } catch (error) {
+    throw new TraceQAError(`could not read ${state}: ${(error as NodeJS.ErrnoException).code ?? "error"}`);
+  }
+  let parsed: Partial<StorageState>;
+  try {
+    parsed = JSON.parse(text) as Partial<StorageState>;
+  } catch {
+    throw new TraceQAError(`${state} is not a storage state file`);
+  }
+  if (!Array.isArray(parsed.cookies) || !Array.isArray(parsed.origins)) {
+    throw new TraceQAError(`${state} is not a storage state file: expected cookies and origins, as \`traceqa login\` saves`);
+  }
+  return parsed as StorageState;
 }
 
 /** Accepts the same spellings as the CLI: "firefox", "cdp=ws://...", "webdriver=http://...". */
@@ -292,6 +319,8 @@ export class Engine {
       target.headless ??= options.headless ?? true;
       return target;
     });
+    const storageState =
+      options.storageState === undefined ? undefined : await readStorageState(options.storageState);
     const request: RunStartParams = {
       feature: "extract",
       url,
@@ -306,6 +335,7 @@ export class Engine {
         timeoutMs: options.timeoutMs,
         settleMs: options.settleMs,
       },
+      storageState,
     };
 
     return new Promise<ExtractResult>((resolveRun, rejectRun) => {

@@ -7,14 +7,12 @@ that the run folder is still valid.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import signal
 import socket
 import subprocess
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -27,16 +25,6 @@ BINARY = Path(
 CRASHING_DRIVER = ROOT / "tests" / "support" / "crashing_driver.py"
 
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
-
-
-@pytest.fixture(scope="module")
-def trouble() -> Iterator[str]:
-    spec = importlib.util.spec_from_file_location("trouble_serve", ROOT / "fixtures" / "trouble" / "serve.py")
-    site = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(site)
-    server = site.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}/"
-    site.stop(server)
 
 
 class Result:

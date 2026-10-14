@@ -7,16 +7,18 @@ and reports what happened, as defined in spec/driver-protocol.schema.json.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import struct
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from playwright.sync_api import Browser, BrowserContext, Frame, Page, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
-from traceqa_protocol import contracts, models
+from traceqa_protocol import contracts, models, to_wire
 from traceqa_protocol.frames import is_cross_origin
 from traceqa_protocol.rpc import Channel, Handler, RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
@@ -68,6 +70,34 @@ class Session:
         if frame not in self.frame_ids:
             self.frame_ids[frame] = f"f{len(self.frame_ids) + 1}"
         return self.frame_ids[frame]
+
+
+def playwright_state(state: models.StorageState | None) -> dict[str, Any] | None:
+    """The state in the form Playwright takes, with the defaults it wants spelled out."""
+    if state is None:
+        return None
+    wire = to_wire(state)
+    for cookie in wire["cookies"]:
+        cookie.setdefault("expires", -1)
+        cookie.setdefault("httpOnly", False)
+        cookie.setdefault("secure", False)
+        cookie.setdefault("sameSite", "Lax")
+    return wire
+
+
+def give_state(context: BrowserContext, state: dict[str, Any]) -> None:
+    """Puts state into a context the driver did not create, as a browser reached over CDP has.
+    Stored values are set before any of the site's own scripts run, as a new context would have them."""
+    if state["cookies"]:
+        context.add_cookies(state["cookies"])
+    if state["origins"]:
+        origins = json.dumps(state["origins"])
+        context.add_init_script(
+            script=f"""(() => {{
+  const here = {origins}.find((entry) => entry.origin === location.origin);
+  if (here) for (const item of here.localStorage) localStorage.setItem(item.name, item.value);
+}})();"""
+        )
 
 
 def first_line(message: str) -> str:
@@ -129,6 +159,7 @@ class PlaywrightDriver:
             "driver.shutdown": self.shutdown,
             "session.open": self.session_open,
             "session.close": self.session_close,
+            "session.storage": self.session_storage,
             "page.goto": self.page_goto,
             "page.eval": self.page_eval,
             "page.scroll": self.page_scroll,
@@ -188,8 +219,9 @@ class PlaywrightDriver:
                 )
             else:
                 raise RpcError("unsupported", f"this driver cannot open {target.browser!r}")
+            state = playwright_state(params.storage_state)
             try:
-                context = browser.new_context(viewport=viewport, locale=params.locale)
+                context = browser.new_context(viewport=viewport, locale=params.locale, storage_state=state)
                 owns_context = True
             except PlaywrightError:
                 # Some remote browsers only expose the context they started with.
@@ -197,6 +229,8 @@ class PlaywrightDriver:
                     raise
                 context = browser.contexts[0]
                 owns_context = False
+                if state:
+                    give_state(context, state)
             page = context.new_page()
             if not owns_context:
                 page.set_viewport_size(viewport)
@@ -217,6 +251,13 @@ class PlaywrightDriver:
             browser=models.BrowserInfo(name=target.browser, version=browser.version),
             capabilities=CAPABILITIES,
         )
+
+    def session_storage(self, params: models.SessionStorageParams) -> models.StorageState:
+        session = self._session(params.session_id)
+        try:
+            return models.StorageState.model_validate(session.context.storage_state())
+        except PlaywrightError as error:
+            raise RpcError("internal", f"could not read the session's state: {first_line(error.message)}") from error
 
     def session_close(self, params: models.SessionCloseParams) -> models.Empty:
         self._session(params.session_id)

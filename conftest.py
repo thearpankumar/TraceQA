@@ -32,6 +32,17 @@ def shop_url() -> Iterator[str]:
         server.shutdown()
 
 
+@pytest.fixture(scope="session")
+def trouble() -> Iterator[str]:
+    """fixtures/trouble/serve.py, a site that fails on purpose, on a free port for the whole session."""
+    spec = importlib.util.spec_from_file_location("trouble_serve", ROOT / "fixtures" / "trouble" / "serve.py")
+    site = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(site)
+    server = site.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    site.stop(server)
+
+
 def _validators() -> dict[str, Draft202012Validator]:
     """One validator per type in run-folder.schema.json, resolving references into the other files."""
     schemas = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in SPEC.glob("*.schema.json")}
