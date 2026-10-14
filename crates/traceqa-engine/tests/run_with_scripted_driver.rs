@@ -42,16 +42,23 @@ struct Sessions {
 const PAGE_HEIGHT: f64 = 2400.0;
 const VIEW_HEIGHT: f64 = 400.0;
 
+/// Takes one from `counter` unless it is already 0. Written out, because the standard method
+/// for this is renamed in newer Rust and the old name is deprecated there.
+fn take_one(counter: &AtomicUsize) -> bool {
+    let mut left = counter.load(Ordering::SeqCst);
+    while left > 0 {
+        match counter.compare_exchange(left, left - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(now) => left = now,
+        }
+    }
+    false
+}
+
 impl Transport for Scripted {
     fn call(&mut self, method: &str, params: Value, _timeout: Duration) -> Result<Value, DriverError> {
         self.calls.lock().unwrap().push(method.to_string());
-        let still_slow = |left: usize| left.checked_sub(1);
-        if method == "page.goto"
-            && self
-                .slow_loads
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, still_slow)
-                .is_ok()
-        {
+        if method == "page.goto" && take_one(&self.slow_loads) {
             return Err(DriverError {
                 kind: "timeout".into(),
                 message: "the page did not load in time".into(),
