@@ -25,6 +25,7 @@ See [architecture.md](architecture.md) for how the parts fit together and
 | Python SDK | Built: `traceqa.extract`. |
 | TypeScript SDK | Built: `extract` and `Engine`, Node 18 or later, no runtime dependencies. |
 | Any other language | The protocol is built (`traceqa serve`). [clients.md](clients.md) says how to write a client, and the recorded transcripts test it. |
+| Releases | Built: pushing a tag such as `v0.1.0` publishes binaries for macOS, Windows and Linux. See [releasing.md](releasing.md). |
 | CI action | Not started. The command line already works in CI through its exit code and `--json`. |
 | MCP server | Built: `traceqa mcp`, with the tools `extract`, `list_runs`, `get_components` and `get_crop`. |
 | Setup | Built: `traceqa install` and `traceqa doctor`. |
@@ -65,7 +66,7 @@ it is in and does not click anything. Check and sweep are built on its output.
 | 3 | Collector: the in-page script | Done |
 | 4 | Playwright driver | Done. Tested in Chromium, Firefox and WebKit, and attaching over CDP to a local Chromium. |
 | 5 | Engine and CLI | Done |
-| 6 | Bench and CI | Bench done. The CI workflow covers Linux, macOS and Windows and builds the release binary on each. It has not run on GitHub yet. |
+| 6 | Bench and CI | Done. CI runs every test and the bench on Linux, macOS and Windows, and passes on all three. |
 | 7 | Python SDK | Done |
 | 8 | Safari and Kitesurf | Partly. See below. |
 
@@ -168,12 +169,10 @@ targets that time out beside others.
   not been pointed at Kitesurf, which needs an endpoint from Cloudflare.
 - **Real sites.** Four have been run (see above), all simple public pages built
   by the same few people. None had a login, a large form or a real shop grid.
-- **Windows and Linux.** Everything has only been run on macOS. The Windows
-  problems found by reading the code are fixed (driver commands with spaces in
-  the path, the run folder path format, the bench's binary name, line endings),
-  and the CI workflow runs the tests and the bench on all three systems. Until
-  that workflow has run, none of this is proven.
-- **CI.** The workflow has never run on GitHub. A first run usually needs fixes.
+- **Windows and Linux.** Proven by CI, which passes on all three systems. Its
+  first run found three problems, all fixed: a lint that newer Rust added,
+  Chromium's sandbox on Ubuntu 24.04, and finding chromedriver on Windows. A
+  second run found a test that stopped scrolling too early on a slow machine.
 - **Cancelling from the command line.** Ctrl-C stops the engine at once. Drivers
   close their browsers, but `run.json` is left saying `running`.
 - **Viewport reached.** When a WebDriver browser cannot reach the requested
@@ -200,11 +199,11 @@ targets that time out beside others.
 | Stand-in engine, `crates/traceqa-replay` | Done. |
 | Both SDKs replay every transcript | Done. They send identical messages. |
 | Guide for other languages, `docs/clients.md` | Done. |
-| CI | The TypeScript checks are in the Lint job and the tests in the Test job on all three systems. Not run on GitHub yet. |
+| CI | The TypeScript checks are in the Lint job and the tests in the Test job on all three systems. Passing on all three. |
 | Publishing to npm | Not done. Needs an npm account. |
 
-Only macOS has run any of this. On Windows the TypeScript tests depend on
-`npm` and the workspace's `python` being found on `PATH`, which CI sets up.
+On Windows the TypeScript tests depend on `npm` and the workspace's `python`
+being found on `PATH`, which CI sets up.
 
 ## MCP server and setup
 
@@ -229,13 +228,33 @@ Not done:
   official MCP client library for Python, which speaks the same protocol, but a
   manual check in a real AI tool is still worth doing.
 
+## CI speed and releases
+
+| Change | Why |
+|---|---|
+| Pull requests build and test in debug only | Rust was compiled twice per job, once for the tests and once in release. Debug also keeps overflow and sanity checks on while testing. |
+| Release binaries come from `release.yml`, on a version tag | Downloads get a version number and a permanent home on the Releases page, instead of 90-day CI artifacts. |
+| The bench runs once in CI | CI checks that every component is found. Speed is measured locally, where three repeats mean something. |
+| Documentation-only changes skip Lint and Test | A final `CI` job always reports, so it works as a required check. |
+| `scripts/check_version.py` | Every package must carry the same version, and a release tag must match it. |
+| `traceqa install` defaults to the binary's own tag | A released binary always gets the drivers of its own version. |
+
+Browser caching was considered and left out: Playwright advises against it,
+because restoring the cache takes about as long as downloading.
+
+Not done: the MCP server, the installer and these CI changes have passed on
+macOS but not yet in CI on Windows and Linux. The release workflow runs for the
+first time when `v0.1.0` is tagged, and installing drivers from GitHub needs
+that tag to exist.
+
 ## What comes next
 
-1. Run extraction on sites of other kinds (a shop, a form-heavy app, a login page) before freezing the fingerprint.
-2. Open the pull request, let CI run on macOS, Windows and Linux for the first time, and fix what it finds.
+1. Merge, then tag `v0.1.0`, the first release. See [releasing.md](releasing.md).
+2. Run extraction on sites of other kinds (a shop, a form-heavy app, a login page) before freezing the fingerprint.
 3. Explorer: click components and follow links, calling extraction on each new
    state. This is the first feature that needs an AI key.
 4. Oracles, check mode, sweep mode and reports.
+5. A GitHub Action, and the SDKs on PyPI and npm.
 
 ## Layout
 

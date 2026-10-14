@@ -1,0 +1,111 @@
+name: Release
+
+# Runs when a version tag is pushed:
+#
+#     git tag -a v0.1.0 -m "TraceQA 0.1.0"
+#     git push origin v0.1.0
+#
+# It checks the tag against the version in the files, builds the release binary on each
+# system, checks that each one starts and reports that version, and publishes them all on
+# the repository's Releases page. See docs/releasing.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check the version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: The tag matches every package's version
+        run: echo "version=$(python3 scripts/check_version.py "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            binary: traceqa
+          - os: macos-latest
+            name: macos-arm64
+            binary: traceqa
+          - os: windows-latest
+            name: windows-x86_64
+            binary: traceqa.exe
+    env:
+      ARCHIVE: traceqa-${{ github.ref_name }}-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the release binary
+        run: cargo build --release --locked --bin traceqa
+
+      - name: The binary starts and reports this version
+        shell: bash
+        run: |
+          reported="$(target/release/${{ matrix.binary }} --version)"
+          echo "$reported"
+          [ "$reported" = "traceqa ${{ needs.check.outputs.version }}" ]
+          target/release/${{ matrix.binary }} extract --help > /dev/null
+          target/release/${{ matrix.binary }} mcp --help > /dev/null
+
+      # tar.gz keeps the binary executable on macOS and Linux. Windows users expect a zip.
+      - name: Package (macOS and Linux)
+        if: runner.os != 'Windows'
+        run: tar -czf "$ARCHIVE.tar.gz" -C target/release traceqa -C "$GITHUB_WORKSPACE" README.md LICENSE
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/release/traceqa.exe, README.md, LICENSE -DestinationPath "$env:ARCHIVE.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ARCHIVE }}.*
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Creating a release is the only write this workflow makes.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # Until 1.0.0 every release is marked as a pre-release: early, and may still change.
+          prerelease=""
+          case "$VERSION" in 0.*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TraceQA $VERSION" \
+            --generate-notes \
+            $prerelease

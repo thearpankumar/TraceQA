@@ -170,7 +170,7 @@ class Connection {
   }
 
   /** Fails everything still waiting. The first reason wins. */
-  lose(error: Error): void {
+  private lose(error: Error): void {
     this.gone ??= error;
     for (const waiting of this.pending.values()) waiting.reject(this.gone);
     this.pending.clear();

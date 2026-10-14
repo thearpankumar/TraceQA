@@ -14,9 +14,48 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether the push changes anything that can break. A change to documentation only
+  # (Markdown files, docs/, the licence) skips the jobs below, and the CI job still reports.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # A new branch, a force push or a missing commit: test everything rather than guess.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+              || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "Cannot tell what changed; testing everything."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base" HEAD)"
+          echo "Changed files:"; echo "$changed"
+          # A here-string, not a pipe: with pipefail, grep -q stopping early can fail a pipe.
+          if grep -qvE '(\.md$|^docs/|^LICENSE$)' <<< "$changed"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Documentation only; the tests are skipped."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # Style and generated code. These do not depend on the operating system, so they run once.
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -36,6 +75,8 @@ jobs:
         working-directory: sdks/typescript
         run: npm ci
 
+      - name: Every package has the same version
+        run: python3 scripts/check_version.py
       - name: Rust format
         run: cargo fmt --all --check
       - name: Rust lint
@@ -53,30 +94,25 @@ jobs:
         working-directory: sdks/typescript
         run: npm run typecheck
 
-  # Everything that runs: the Rust crates, the release binary, both drivers, both SDKs and the bench.
+  # Everything that runs: the Rust crates, the binary, both drivers, both SDKs, the MCP server,
+  # the installer and the bench. Built once, in debug, which keeps Rust's overflow and sanity
+  # checks on. Release binaries are built by the release workflow when a version is tagged.
   test:
     name: Test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       # One system failing should not hide what the others do.
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            binary: traceqa
-            artifact: traceqa-linux-x86_64
-          - os: macos-latest
-            binary: traceqa
-            artifact: traceqa-macos-arm64
-          - os: windows-latest
-            binary: traceqa.exe
-            artifact: traceqa-windows-x86_64
+        os: [ubuntu-latest, macos-latest, windows-latest]
     env:
-      # The SDK tests and the bench use the release binary: the same file that is uploaded below.
-      TRACEQA_BIN: ${{ github.workspace }}/target/release/${{ matrix.binary }}
+      # The SDK tests, the end-to-end tests and the bench use this binary.
+      TRACEQA_BIN: ${{ github.workspace }}/target/debug/traceqa${{ matrix.os == 'windows-latest' && '.exe' || '' }}
       # The stand-in engine that plays back spec/transcripts/ to both SDKs.
-      TRACEQA_REPLAY_BIN: ${{ github.workspace }}/target/release/traceqa-replay${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      TRACEQA_REPLAY_BIN: ${{ github.workspace }}/target/debug/traceqa-replay${{ matrix.os == 'windows-latest' && '.exe' || '' }}
       # The WebDriver driver is tested against chromedriver. Missing chromedriver is a failure, not a skip.
       TRACEQA_REQUIRE_CHROMEDRIVER: "1"
     steps:
@@ -90,13 +126,11 @@ jobs:
           cache: npm
           cache-dependency-path: sdks/typescript/package-lock.json
 
-      # Rust: the protocol, engine, recorder and CLI crates.
+      # Rust: every crate's tests, then the binaries, which reuse what the tests compiled.
       - name: Rust tests
         run: cargo test --locked
-
-      # The binary that ships, and the stand-in engine the SDK tests use.
-      - name: Build the release binaries
-        run: cargo build --release --locked
+      - name: Build the binaries
+        run: cargo build --locked
       - name: The binaries start
         shell: bash
         run: |
@@ -104,7 +138,7 @@ jobs:
           "$TRACEQA_BIN" extract --help
           test -f "$TRACEQA_REPLAY_BIN"
 
-      # Python: the drivers, the protocol package and the SDK, against real browsers.
+      # Python: the drivers, the protocol package, the SDK, MCP and install, against real browsers.
       - name: Install the Python packages
         run: uv sync --locked
       - name: Install browsers
@@ -130,7 +164,7 @@ jobs:
       - name: Python tests
         run: uv run pytest
 
-      # TypeScript: the SDK against the release binary, real browsers and the transcripts.
+      # TypeScript: the SDK against the binary, real browsers and the transcripts.
       - name: Put the drivers and the workspace's Python on PATH
         shell: bash
         run: echo "$GITHUB_WORKSPACE/.venv/${{ runner.os == 'Windows' && 'Scripts' || 'bin' }}" >> "$GITHUB_PATH"
@@ -141,9 +175,9 @@ jobs:
           npm test
 
       # End to end: the binary, a driver, three browsers and the collector on the demo site.
+      # One repeat: CI checks that every component is found. Speed is measured locally.
       - name: Bench
-        run: uv run bench/run.py --json bench-scores.json
-
+        run: uv run bench/run.py --repeats 1 --json bench-scores.json
       - name: Upload the bench scores
         if: always()
         uses: actions/upload-artifact@v4
@@ -151,9 +185,24 @@ jobs:
           name: bench-scores-${{ matrix.os }}
           path: bench-scores.json
           if-no-files-found: ignore
-      - name: Upload the binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: target/release/${{ matrix.binary }}
-          if-no-files-found: error
+
+  # The one check to require before merging. It passes when the jobs above passed, or were
+  # skipped because only documentation changed, and fails when any of them failed.
+  ci:
+    name: CI
+    needs: [changes, lint, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Result
+        shell: bash
+        run: |
+          echo "changes: ${{ needs.changes.result }}, lint: ${{ needs.lint.result }}, test: ${{ needs.test.result }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then exit 1; fi
+          for result in "${{ needs.lint.result }}" "${{ needs.test.result }}"; do
+            case "$result" in
+              success|skipped) ;;
+              *) exit 1 ;;
+            esac
+          done

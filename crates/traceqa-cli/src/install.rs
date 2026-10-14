@@ -24,6 +24,9 @@ const PLAYWRIGHT_BROWSERS: [&str; 5] = ["chromium", "chrome", "msedge", "firefox
 
 const PYTHON: &str = "3.12";
 
+/// The tag this binary was released under, for example `v0.1.0`.
+const RELEASE_TAG: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+
 #[derive(Args)]
 pub struct InstallArgs {
     /// Browsers to download. Known values: chromium, chrome, msedge, firefox, webkit, safari.
@@ -32,8 +35,9 @@ pub struct InstallArgs {
     /// Install the drivers from a TraceQA checkout on this machine instead of from GitHub.
     #[arg(long, value_name = "FOLDER")]
     from: Option<PathBuf>,
-    /// Branch, tag or commit to install the drivers from, when installing from GitHub.
-    #[arg(long = "ref", value_name = "REF", default_value = "master")]
+    /// Branch, tag or commit to install the drivers from, when installing from GitHub. The
+    /// default is this binary's own release, so the binary and its drivers always match.
+    #[arg(long = "ref", value_name = "REF", default_value = RELEASE_TAG)]
     git_ref: String,
     /// Also install the system libraries the browsers need. Linux only; may ask for sudo.
     #[arg(long)]
@@ -65,6 +69,10 @@ fn package_specs(from: Option<&Path>, git_ref: &str) -> Vec<String> {
             None => format!("{name} @ git+{repository}@{git_ref}#subdirectory={folder}"),
         })
         .collect()
+}
+
+fn words(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| (*word).to_string()).collect()
 }
 
 /// Runs one step, showing it first. Its output goes straight to the user.
@@ -105,7 +113,10 @@ fn try_install(args: InstallArgs) -> Result<(), String> {
         ));
     }
     if let Some(from) = &args.from {
-        if !from.join(PACKAGES[1].1).join("pyproject.toml").is_file() {
+        let complete = PACKAGES
+            .iter()
+            .all(|(_, folder)| from.join(folder).join("pyproject.toml").is_file());
+        if !complete {
             return Err(format!("{} is not a TraceQA checkout", from.display()));
         }
     }
@@ -121,52 +132,40 @@ fn try_install(args: InstallArgs) -> Result<(), String> {
     eprintln!("Installing TraceQA's drivers into {}", env.display());
 
     if !python.is_file() {
-        let args = [
-            "venv".into(),
-            env.display().to_string(),
-            "--python".into(),
-            PYTHON.into(),
-        ];
-        step("Creating a Python environment", &uv, &args)?;
+        let venv = words(&["venv", &env.display().to_string(), "--python", PYTHON]);
+        step("Creating a Python environment", &uv, &venv)?;
     }
 
-    let mut pip = vec![
-        "pip".into(),
-        "install".into(),
-        "--python".into(),
-        python.display().to_string(),
-    ];
+    let mut pip = words(&["pip", "install", "--python", &python.display().to_string()]);
     if let Some(root) = &args.from {
         // A checkout has a lock file: install the versions it was tested with, not the newest.
-        let pins = home.join("constraints.txt");
-        let mut export: Vec<String> = [
-            "export",
-            "--project",
-            &root.display().to_string(),
+        let pins = home.join("constraints.txt").display().to_string();
+        let mut export = words(&["export", "--project", &root.display().to_string()]);
+        export.extend(words(&[
             "--frozen",
             "--no-hashes",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        export.extend(["--no-emit-workspace".into(), "--no-dev".into(), "--quiet".into()]);
+            "--no-emit-workspace",
+            "--no-dev",
+            "--quiet",
+        ]));
+        // The drivers name every package they need, the protocol package included.
         for (name, _) in &PACKAGES[1..] {
-            export.extend(["--package".into(), name.to_string()]);
+            export.extend(words(&["--package", name]));
         }
-        export.extend(["--output-file".into(), pins.display().to_string()]);
+        export.extend(words(&["--output-file", &pins]));
         step("Reading the tested versions from the checkout's uv.lock", &uv, &export)?;
-        pip.extend(["--constraint".into(), pins.display().to_string()]);
+        pip.extend(words(&["--constraint", &pins]));
     }
     // Installing again brings the drivers up to date, even when their version has not changed.
     for (name, _) in PACKAGES {
-        pip.extend(["--reinstall-package".into(), name.into()]);
+        pip.extend(words(&["--reinstall-package", name]));
     }
     pip.extend(package_specs(args.from.as_deref(), &args.git_ref));
     step("Installing the drivers", &uv, &pip)?;
 
     let downloads: Vec<String> = args.browsers.iter().filter(|b| *b != "safari").cloned().collect();
     if !downloads.is_empty() {
-        let mut playwright = vec!["-m".into(), "playwright".into(), "install".into()];
+        let mut playwright = words(&["-m", "playwright", "install"]);
         if args.with_deps {
             playwright.push("--with-deps".into());
         }
@@ -267,6 +266,7 @@ mod tests {
         );
         // The protocol package comes first, so the drivers' dependency on it is met by the same source.
         assert_eq!(remote.len(), 3);
+        assert_eq!(RELEASE_TAG, format!("v{}", env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
         let args = InstallArgs {
             browsers: vec!["netscape".into()],
             from: None,
-            git_ref: "master".into(),
+            git_ref: RELEASE_TAG.into(),
             with_deps: false,
         };
         assert!(try_install(args).unwrap_err().contains("unknown browser"));

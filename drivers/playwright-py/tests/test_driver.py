@@ -55,17 +55,18 @@ def test_reads_the_shop(driver: DriverClient, shop_url: str, browser: str, tmp_p
     assert pay.frame.box is not None and pay.frame.box.w > 0
     assert names(models.CollectorResult.model_validate(pay.value), "button") == ["Pay now"]
 
-    # Scrolling to the end makes the lazy reviews load. The height must stay the same twice in a
-    # row, because on a slow machine the last ones can arrive just after a scroll has settled.
-    height, unchanged = 0, 0
-    for _ in range(20):
-        scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
-        unchanged = unchanged + 1 if scrolled["height"] == height else 0
-        if unchanged == 2:
+    # Scrolling to the end makes the lazy reviews load. They load when the browser next draws
+    # the page, which a slow machine does seldom, so wait for them rather than count scrolls.
+    deadline = time.monotonic() + 20.0
+    while True:
+        driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
+        main = models.CollectorResult.model_validate(collect(driver, session_id)["main"].value)
+        if names(main, "button").count("Helpful") >= 9 or time.monotonic() > deadline:
             break
-        height = scrolled["height"]
+        time.sleep(0.25)
+    # The last reviews made the page longer, so scroll once more to stand at its new end.
+    scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
     assert scrolled["atEnd"]
-    main = models.CollectorResult.model_validate(collect(driver, session_id)["main"].value)
     assert names(main, "button").count("Helpful") == 9
 
     shot = driver.call(
