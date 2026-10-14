@@ -3,7 +3,8 @@
     python fixtures/buggy-shop/serve.py [--port 4173]
 
 The shop is on PORT. The "third party" payment frame is on PORT + 1, which
-makes it a different origin.
+makes it a different origin. With --port 0 any free pair of ports is used; the
+first line printed names the shop's address either way.
 """
 
 from __future__ import annotations
@@ -58,8 +59,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=4173)
     port = parser.parse_args().port
-    start(port)
-    print(f"Buggy Shop: http://127.0.0.1:{port}/   (payment frame on port {port + 1})")
+    if port == 0:
+        port, _servers = start_on_free_ports()
+    else:
+        start(port)
+    # Flushed, because tests in other languages start this script and wait for the line.
+    print(f"Buggy Shop: http://127.0.0.1:{port}/   (payment frame on port {port + 1})", flush=True)
     with contextlib.suppress(KeyboardInterrupt):
         while True:  # a plain wait() cannot be interrupted with Ctrl-C on Windows
             time.sleep(1)

@@ -15,6 +15,7 @@ across browsers, viewports and runs.
 - [Quick start](#quick-start)
 - [Command line](#command-line)
 - [Python](#python)
+- [TypeScript](#typescript)
 - [Output](#output)
 - [Browsers](#browsers)
 - [Architecture](#architecture)
@@ -42,7 +43,8 @@ across browsers, viewports and runs.
 - **Runs browsers side by side.** A run takes about as long as its slowest
   browsers, and reports where each one spent its time.
 - **Works from any language.** The engine is a standalone program that speaks a
-  documented JSON protocol. A Python SDK is included.
+  documented JSON protocol. Python and TypeScript SDKs are included, and
+  [a guide](docs/clients.md) covers writing one for any other language.
 
 Extraction reads the page in its current state. It does not click, type or
 navigate, and it makes no network calls of its own beyond loading the page.
@@ -115,6 +117,30 @@ for target in result.targets:
 The SDK contains no logic. It starts the engine, exchanges messages with it and
 returns typed results.
 
+## TypeScript
+
+```ts
+import { extract } from "traceqa";
+
+const result = await extract("https://example.com", {
+  browsers: ["chromium", "firefox"],
+  viewports: [
+    [1280, 800],
+    [390, 844],
+  ],
+  onEvent: (event) => console.log(event.message),
+});
+
+for (const target of result.targets) {
+  for (const component of (await result.components(target.dir)).components) {
+    console.log(component.id, component.role, component.name, component.instances.length);
+  }
+}
+```
+
+Node 18 or later, with no runtime dependencies. It works like the Python SDK,
+and also accepts an `AbortSignal` to cancel a run.
+
 ## Output
 
 Each run writes one folder:
@@ -179,6 +205,7 @@ flowchart TB
     subgraph callers["Callers"]
         cli["CLI<br/>traceqa extract"]
         py["Python SDK<br/>traceqa.extract()"]
+        ts["TypeScript SDK<br/>extract()"]
         other["Any other language"]
     end
 
@@ -207,6 +234,7 @@ flowchart TB
 
     cli -->|direct call| run
     py -->|JSON-RPC over stdio| serve
+    ts -->|JSON-RPC over stdio| serve
     other -->|JSON-RPC over stdio| serve
     extract <-->|JSON-RPC over stdio| pw
     extract <-->|JSON-RPC over stdio| wd
@@ -233,32 +261,42 @@ design decisions.
 
 | Path | Purpose |
 |---|---|
-| `spec/` | Contracts: protocols, file formats, the identifier recipe, examples. |
+| `spec/` | Contracts: protocols, file formats, the identifier recipe, examples, and recorded client conversations in `spec/transcripts/`. |
 | `collector/` | The in-page script. |
 | `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
 | `crates/traceqa-engine/` | The engine library. |
 | `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
 | `crates/traceqa-cli/` | The `traceqa` command. |
+| `crates/traceqa-replay/` | A stand-in engine that plays back `spec/transcripts/`, for testing clients. |
 | `drivers/playwright-py/` | Driver for Chromium, Edge, Firefox, WebKit and CDP endpoints. |
 | `drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
 | `python/traceqa-protocol/` | Python types generated from `spec/`, and the driver request loop. |
 | `sdks/python/` | The `traceqa` Python package. |
+| `sdks/typescript/` | The `traceqa` TypeScript package. |
 | `fixtures/buggy-shop/` | Demo site with a manifest of its expected components. |
 | `bench/` | Scores extraction against the demo site. |
-| `scripts/` | Code generation. |
+| `scripts/` | Code generation, and recording the transcripts. |
 | `docs/` | Architecture, usage and project plan. |
 
 ## Development
 
-After editing a schema in `spec/`, run `uv run scripts/gen_python_protocol.py`
-to regenerate the Python types. The Rust types regenerate on build.
+After editing a schema in `spec/`, regenerate the types. The Rust types
+regenerate on build.
+
+```sh
+uv run scripts/gen_python_protocol.py      # Python
+(cd sdks/typescript && npm run gen)        # TypeScript
+uv run scripts/record_transcripts.py       # after a client protocol change
+```
 
 ## Testing
 
 ```sh
-cargo test                # the Rust crates
-uv run pytest             # the drivers, the protocol package and the SDK
+cargo test                # the Rust crates, and the transcripts against the schemas
+uv run pytest             # the drivers, the protocol package and the Python SDK
 uv run bench/run.py       # the whole tool, end to end, on the demo site
+
+cd sdks/typescript && npm ci && uv run npm test    # the TypeScript SDK
 ```
 
 Every part of the repository has tests:
@@ -269,10 +307,13 @@ Every part of the repository has tests:
 | `crates/traceqa-engine` | Grouping, identifiers, driver command parsing and the client server as unit tests. Whole runs against a scripted driver, including a failed page load, a driver that stops answering, a failed screenshot and a cancelled run. | `cargo test` |
 | `crates/traceqa-recorder` | Event log, timestamps, run ids and crop geometry. | `cargo test` |
 | `crates/traceqa-cli` | Argument parsing as unit tests. The built binary is run by the SDK tests and the bench. | `cargo test`, `uv run pytest` |
+| `crates/traceqa-replay` | Matching rules, id mapping, and that every transcript loads. | `cargo test` |
+| `spec/transcripts` | Every message must be valid for its method in the client protocol. Both SDKs replay every transcript and must send exactly the recorded messages. | `cargo test`, `uv run pytest`, `npm test` |
 | `python/traceqa-protocol` | The same `spec/examples/` check as the Rust crate, so both languages read the contracts the same way. The driver request loop. | `uv run pytest` |
 | `drivers/playwright-py` | The real driver process against the demo site in Chromium, Firefox and WebKit, and attached to a running browser over CDP. | `uv run pytest` |
 | `drivers/webdriver-py` | The real driver process against the demo site through chromedriver. A Safari test runs when `TRACEQA_TEST_SAFARI=1`. | `uv run pytest` |
-| `sdks/python` | The SDK through the real binary and a real browser, including cancelling a run part-way. | `uv run pytest` |
+| `sdks/python` | The SDK through the real binary and a real browser, including cancelling a run part-way. The recorded transcripts. | `uv run pytest` |
+| `sdks/typescript` | The same tests as the Python SDK, plus two runs at once on one engine and cancelling with an `AbortSignal`. The recorded transcripts. | `uv run npm test` |
 | `collector/collector.js` | Runs inside real browsers in the driver tests and the bench, which compare what it finds with the demo site's manifest. | `uv run pytest`, `uv run bench/run.py` |
 | `fixtures/buggy-shop` | Its manifest is the bench's answer key. | `uv run bench/run.py` |
 
@@ -285,8 +326,8 @@ The WebDriver test needs chromedriver: put it on `PATH` or set
 
 | Job | Runs on | What it does |
 |---|---|---|
-| Lint | Linux | `cargo fmt --check`, `cargo clippy`, `ruff check`, `ruff format --check`, and a check that the generated Python types match `spec/`. |
-| Test | Linux, macOS and Windows | `cargo test`, builds the release binary and starts it, installs the browsers, runs `uv run pytest` and the bench against that binary. |
+| Lint | Linux | `cargo fmt --check`, `cargo clippy`, `ruff check`, `ruff format --check`, the TypeScript type check, and checks that the generated Python and TypeScript types match `spec/`. |
+| Test | Linux, macOS and Windows | `cargo test`, builds the release binaries and starts them, installs the browsers, runs `uv run pytest`, the TypeScript tests and the bench against that binary. |
 
 Each Test job uploads the release binary it built (`traceqa-linux-x86_64`,
 `traceqa-macos-arm64`, `traceqa-windows-x86_64`) and its bench scores as
@@ -300,12 +341,14 @@ cargo clippy --all-targets -- -D warnings
 uv run ruff check .
 uv run ruff format --check .
 uv run scripts/gen_python_protocol.py --check
+(cd sdks/typescript && npm run gen:check && npm run typecheck)
 ```
 
 ## Documentation
 
-- [docs/usage.md](docs/usage.md): command-line options, the Python SDK, output
-  files, warnings and exit codes.
+- [docs/usage.md](docs/usage.md): command-line options, the Python and TypeScript
+  SDKs, output files, warnings and exit codes.
+- [docs/clients.md](docs/clients.md): writing a client in another language.
 - [docs/architecture.md](docs/architecture.md): components, message flow and
   design decisions.
 - [spec/README.md](spec/README.md): the contracts and the rules for changing them.

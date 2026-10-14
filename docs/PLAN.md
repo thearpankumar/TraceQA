@@ -23,8 +23,8 @@ See [architecture.md](architecture.md) for how the parts fit together and
 |---|---|
 | Command line | Built: `traceqa extract`. |
 | Python SDK | Built: `traceqa.extract`. |
-| Any other language | The protocol is built (`traceqa serve`). A caller writes its own plumbing from `spec/`. |
-| TypeScript SDK | Not started. |
+| TypeScript SDK | Built: `extract` and `Engine`, Node 18 or later, no runtime dependencies. |
+| Any other language | The protocol is built (`traceqa serve`). [clients.md](clients.md) says how to write a client, and the recorded transcripts test it. |
 | CI action | Not started. The command line already works in CI through its exit code and `--json`. |
 | MCP server | Not started. |
 | Web dashboard | Not started. It needs the hosted service. |
@@ -46,6 +46,8 @@ See [architecture.md](architecture.md) for how the parts fit together and
 | The engine uses threads and blocking pipes, not an async runtime. | Each worker talks to one driver at a time. Nothing here needs more yet. |
 | Browsers run in parallel, each worker with its own driver processes. | A run takes about as long as its slowest browsers. A driver that hangs takes only its own target with it. |
 | Pictures are off unless asked for. Without them the page is only scrolled, then read once. | Nothing in the engine reads the pictures, and they cost most of the time on a long page. The features that come next work on the data. |
+| Clients are tested against recorded conversations, played back by a stand-in engine. | Every client must send exactly the same messages. The recordings test that without a browser, and a client in a new language gets the same tests for free. |
+| The stand-in engine is a Rust binary in the workspace. | It builds on every system with the engine, and a client test in any language can start it like the engine. |
 
 ## Feature 1: component extraction
 
@@ -189,6 +191,22 @@ targets that time out beside others.
 - **Virtualised lists.** A list that removes rows as you scroll is read as it
   stands after the last scroll.
 
+## Multi-language support
+
+| Piece | Status |
+|---|---|
+| TypeScript types generated from `spec/` | Done, with a check in CI that they are up to date. |
+| TypeScript SDK, `sdks/typescript` | Done. Tested against the real engine and the Buggy Shop: one run, several runs on one engine, two runs at once, refusals, cancelling by a throwing handler and by an `AbortSignal`. |
+| Recorded conversations, `spec/transcripts/` | Done: a completed run, a refused run, a cancelled run, a version mismatch. Recorded from the real engine by `scripts/record_transcripts.py`, except the version mismatch. |
+| Stand-in engine, `crates/traceqa-replay` | Done. |
+| Both SDKs replay every transcript | Done. They send identical messages. |
+| Guide for other languages, `docs/clients.md` | Done. |
+| CI | The TypeScript checks are in the Lint job and the tests in the Test job on all three systems. Not run on GitHub yet. |
+| Publishing to npm | Not done. Needs an npm account. |
+
+Only macOS has run any of this. On Windows the TypeScript tests depend on
+`npm` and the workspace's `python` being found on `PATH`, which CI sets up.
+
 ## What comes next
 
 1. Run extraction on sites of other kinds (a shop, a form-heavy app, a login page) before freezing the fingerprint.
@@ -207,15 +225,17 @@ crates/
   traceqa-engine/          all logic (library)
   traceqa-recorder/        run folder, events, crops
   traceqa-cli/             the traceqa command
+  traceqa-replay/          stand-in engine for testing clients
 python/
   traceqa-protocol/        generated Python types, the driver request loop
 drivers/
   playwright-py/           Chromium, Edge, Firefox, WebKit, CDP endpoints
   webdriver-py/            real Safari, any WebDriver server or grid
 sdks/python/               the traceqa Python package
+sdks/typescript/           the traceqa TypeScript package
 fixtures/buggy-shop/       demo site and its manifest
 bench/                     scoring
-scripts/                   code generation
+scripts/                   code generation, transcript recording
 ```
 
 Added by later features: `crates/traceqa-models/`, `crates/traceqa-server/`,

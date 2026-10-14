@@ -1,8 +1,8 @@
 # spec
 
 The contracts every part of TraceQA agrees on. These JSON Schemas are the
-single source of truth: the Rust and Python types are generated from them, so
-the two sides cannot drift apart.
+single source of truth: the Rust, Python and TypeScript types are generated
+from them, so the sides cannot drift apart.
 
 | File | Contract | Between |
 |---|---|---|
@@ -12,6 +12,7 @@ the two sides cannot drift apart.
 | `run-folder.schema.json` | Run folder | The engine and anything that reads results |
 | `common.schema.json` | Shared types | Used by the files above |
 | `fingerprint.md` | Component id recipe | The engine and anything that compares runs |
+| `transcripts/` | Recorded client conversations | Every client is tested against them. See `transcripts/README.md`. |
 
 ## How messages travel
 
@@ -61,5 +62,7 @@ runs/<runId>/
 ```
 cargo test                               # Rust types regenerate on build
 uv run scripts/gen_python_protocol.py    # rewrite the Python types
+(cd sdks/typescript && npm run gen)      # rewrite the TypeScript types
+uv run scripts/record_transcripts.py     # after a client protocol change
 uv run pytest
 ```
