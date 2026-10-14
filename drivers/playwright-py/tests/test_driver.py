@@ -55,11 +55,13 @@ def test_reads_the_shop(driver: DriverClient, shop_url: str, browser: str, tmp_p
     assert pay.frame.box is not None and pay.frame.box.w > 0
     assert names(models.CollectorResult.model_validate(pay.value), "button") == ["Pay now"]
 
-    # Scrolling to the end makes the lazy reviews load.
-    height = 0
-    for _ in range(10):
+    # Scrolling to the end makes the lazy reviews load. The height must stay the same twice in a
+    # row, because on a slow machine the last ones can arrive just after a scroll has settled.
+    height, unchanged = 0, 0
+    for _ in range(20):
         scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
-        if scrolled["height"] == height:
+        unchanged = unchanged + 1 if scrolled["height"] == height else 0
+        if unchanged == 2:
             break
         height = scrolled["height"]
     assert scrolled["atEnd"]
