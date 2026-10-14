@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: names</title>
+<style>body { font: 14px sans-serif; } div { margin: 6px 0; }</style>
+<body>
+<h1>Where an accessible name comes from</h1>
+
+<div><button id="name-content" data-expect="role=button; name=Save; source=content">Save</button></div>
+
+<div><button id="name-aria-label" aria-label="Close dialog"
+  data-expect="name=Close dialog; source=aria-label">X</button></div>
+
+<div><span id="label-part-1">Delete</span> <span id="label-part-2">item</span>
+  <button id="name-labelledby" aria-labelledby="label-part-1 label-part-2" aria-label="ignored"
+    data-expect="name=Delete item; source=aria-labelledby">D</button></div>
+
+<div><label for="name-label-for">Email</label>
+  <input id="name-label-for" type="email" data-expect="role=textbox; name=Email; source=label"></div>
+
+<div><label>Remember me <input id="name-label-wrap" type="checkbox"
+  data-expect="role=checkbox; name=Remember me; source=label"></label></div>
+
+<div><label for="name-select">Country</label>
+  <select id="name-select" data-expect="role=combobox; name=Country; source=label"><option>India</option></select></div>
+
+<div><input id="name-image-button" type="image" alt="Search"
+  src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+  data-expect="role=button; name=Search; source=alt"></div>
+
+<div><input id="name-submit-value" type="submit" value="Send"
+  data-expect="role=button; name=Send; source=value"></div>
+
+<div><a id="name-image-in-link" href="#home" data-expect="role=link; name=Home; source=content"><img
+  alt="Home" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" width="16" height="16"></a></div>
+
+<div><button id="name-title" title="Settings" data-expect="name=Settings; source=title"><svg aria-hidden="true"
+  width="12" height="12"><rect width="12" height="12"></rect></svg></button></div>
+
+<div><input id="name-placeholder" placeholder="Search products"
+  data-expect="role=textbox; name=Search products; source=placeholder"></div>
+
+<div><button id="name-skips-aria-hidden" data-expect="name=Favourite"><span aria-hidden="true">icon</span>
+  Favourite</button></div>
+
+<div><button id="name-svg-title" data-expect="name=Play; source=content"><svg width="12" height="12"><title>Play</title>
+  <rect width="12" height="12"></rect></svg></button></div>
+
+<div><a id="name-whitespace" href="#more" data-expect="name=Read more">
+     Read
+       more   </a></div>
+
+<div><button id="name-empty" data-expect="name="></button></div>
+
+<div><button id="name-blank-aria-label" aria-label="   " data-expect="name=Go; source=content">Go</button></div>
+
+<div><button id="name-labelledby-missing" aria-labelledby="no-such-id"
+  data-expect="name=Fallback; source=content">Fallback</button></div>
+
+<div><button id="name-unicode" data-expect="name=Ajouter au panier, Café, 東京">Ajouter au panier, Café, 東京</button></div>
+
+<div><button id="name-long" data-expect="namelength=200">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</button></div>
+
+<div><textarea id="name-textarea-labelledby" aria-labelledby="label-part-1"
+  data-expect="role=textbox; name=Delete; source=aria-labelledby"></textarea></div>
+</body>
+</html>

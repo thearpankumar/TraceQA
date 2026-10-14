@@ -15,7 +15,7 @@ BINARY = Path(os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / "trac
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
 
 
-def test_extract_returns_what_the_engine_wrote(shop_url: str, tmp_path: Path) -> None:
+def test_extract_returns_what_the_engine_wrote(shop_url: str, tmp_path: Path, run_folder_checker) -> None:
     events: list[models.Event] = []
     result = traceqa.extract(
         shop_url,
@@ -27,6 +27,7 @@ def test_extract_returns_what_the_engine_wrote(shop_url: str, tmp_path: Path) ->
     )
 
     assert result.status == models.RunStatus.completed
+    assert run_folder_checker(result.run_folder) == result.manifest
     assert [target.dir for target in result.targets] == ["chromium-1280x800", "chromium-390x844"]
     assert result.run_folder.parent == tmp_path.resolve()
 
@@ -47,7 +48,9 @@ def test_extract_returns_what_the_engine_wrote(shop_url: str, tmp_path: Path) ->
         result.components()
 
 
-def test_one_engine_serves_several_calls_and_reports_refusals(shop_url: str, tmp_path: Path) -> None:
+def test_one_engine_serves_several_calls_and_reports_refusals(
+    shop_url: str, tmp_path: Path, run_folder_checker
+) -> None:
     with traceqa.Engine(binary=BINARY) as engine:
         assert "extract" in engine.info.features
 
@@ -59,10 +62,12 @@ def test_one_engine_serves_several_calls_and_reports_refusals(shop_url: str, tmp
         failed = engine.extract(shop_url, browsers=["netscape"], out_dir=tmp_path)
         assert failed.status == models.RunStatus.failed
         assert "no driver can open" in failed.targets[0].error
+        run_folder_checker(failed.run_folder)
 
         # Pictures are off unless asked for.
         fine = engine.extract(shop_url, out_dir=tmp_path, max_scroll_steps=0)
         assert fine.status == models.RunStatus.completed
+        run_folder_checker(fine.run_folder)
         components = fine.components().components
         # Without scrolling, only the first three reviews have loaded.
         assert len(next(c for c in components if c.name == "Helpful").instances) == 3
@@ -72,7 +77,7 @@ def test_one_engine_serves_several_calls_and_reports_refusals(shop_url: str, tmp
     assert list(tmp_path.iterdir())
 
 
-def test_leaving_in_the_middle_of_a_run_cancels_it(shop_url: str, tmp_path: Path) -> None:
+def test_leaving_in_the_middle_of_a_run_cancels_it(shop_url: str, tmp_path: Path, run_folder_checker) -> None:
     class Stop(Exception):
         pass
 
@@ -85,7 +90,7 @@ def test_leaving_in_the_middle_of_a_run_cancels_it(shop_url: str, tmp_path: Path
 
     # Leaving the `with` block returned, so the engine exited, and the run it left says so.
     (run_folder,) = tmp_path.iterdir()
-    manifest = models.RunManifest.model_validate_json((run_folder / "run.json").read_text(encoding="utf-8"))
+    manifest = run_folder_checker(run_folder)
     assert manifest.status == models.RunStatus.cancelled
     assert [target.status for target in manifest.targets] == [models.RunStatus.cancelled] * 2
 

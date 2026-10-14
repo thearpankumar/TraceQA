@@ -34,7 +34,7 @@ def data(result) -> dict:
     return json.loads(result.content[0].text)
 
 
-def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path) -> None:
+def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_folder_checker) -> None:
     async def conversation() -> None:
         steps: list[float] = []
 
@@ -78,6 +78,8 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path) -> N
             assert wrong.is_error and "several targets" in wrong.content[0].text
 
     anyio.run(conversation)
+    (folder,) = (tmp_path / "runs").iterdir()
+    run_folder_checker(folder)
 
 
 def test_an_older_host_using_the_initialize_handshake(tmp_path: Path) -> None:

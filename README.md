@@ -356,6 +356,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `python/traceqa-protocol/` | Python types generated from `spec/`, shared by the drivers and the SDK. |
 | `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
 | `fixtures/buggy-shop/` | Demo site with a manifest of its expected components. |
+| `fixtures/collector-cases/` | Small pages that test the collector one behaviour at a time. |
 | `bench/` | Scores extraction against the demo site. |
 | `tests/` | End-to-end tests of the MCP server and the installer. |
 | `scripts/` | Code generation and transcript recording. |
@@ -375,13 +376,15 @@ Run the test suites:
 
 ```sh
 cargo test                                          # Rust crates
-uv run pytest                                       # drivers, SDKs, MCP server, installer
+uv run pytest                                       # collector cases, drivers, SDKs, MCP server, installer
 (cd sdks/typescript && npm ci && uv run npm test)   # TypeScript SDK
 uv run bench/run.py                                 # end to end on the demo site
 ```
 
 Every part of the repository has tests, from unit tests of each crate to
-end-to-end runs in real browsers. The MCP server is tested with the official
+end-to-end runs in real browsers. The collector is checked case by case in
+three browsers against pages that state their own expected results, and every
+run folder a test produces is checked against the JSON Schemas in `spec/`. The MCP server is tested with the official
 MCP client library, and both SDKs replay the same recorded conversations so
 they are proven to send identical messages.
 

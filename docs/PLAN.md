@@ -247,6 +247,29 @@ macOS but not yet in CI on Windows and Linux. The release workflow runs for the
 first time when `v0.1.0` is tagged, and installing drivers from GitHub needs
 that tag to exist.
 
+## Test plan
+
+| Phase | Tests | Status |
+|---|---|---|
+| 1 | Every run folder a test produces is checked against `spec/` and against rules a schema cannot state (event order, ids, counts, crops). The checker has its own tests that break a folder nine ways. | Done |
+| 1 | Collector case pages: about 95 cases on 6 pages, each checked in Chromium, Firefox and WebKit, plus a check that nothing unexpected is listed. | Done |
+| 2 | Failure cases, command-line tests, golden ids | Next |
+| 3 | Real-world pattern pages | Planned |
+| 4 | Nightly: language versions, comparison with the browser's accessibility tree | Planned |
+
+What phase 1 found:
+
+- **Content of a closed `<details>` counted as visible**, in all three browsers.
+  Browsers hide it with `content-visibility`, which size and `visibility` do not
+  show. The collector now asks the browser with `checkVisibility()`, which also
+  makes `opacity: 0` count as hidden.
+
+Known gaps, kept as expected failures in the case pages:
+
+- An element clipped to 1x1 pixel, as skip links are, counts as visible.
+- `role="presentation"` on a button is reported as `generic`. ARIA ignores that
+  role on a focusable element, so it should stay a button.
+
 ## What comes next
 
 1. Merge, then tag `v0.1.0`, the first release. See [releasing.md](releasing.md).
