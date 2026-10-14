@@ -21,7 +21,7 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["python/*", "drivers/*", "sdks/*"]
+members = ["python/*", "drivers/*", "sdks/python"]
 
 [tool.uv.sources]
 traceqa-protocol = { workspace = true }

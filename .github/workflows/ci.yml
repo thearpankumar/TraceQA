@@ -27,6 +27,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+      - name: Install the TypeScript tools
+        working-directory: sdks/typescript
+        run: npm ci
 
       - name: Rust format
         run: cargo fmt --all --check
@@ -38,8 +46,14 @@ jobs:
         run: uv run ruff format --check .
       - name: Generated Python types match spec/
         run: uv run scripts/gen_python_protocol.py --check
+      - name: Generated TypeScript types match spec/
+        working-directory: sdks/typescript
+        run: npm run gen:check
+      - name: TypeScript type check
+        working-directory: sdks/typescript
+        run: npm run typecheck
 
-  # Everything that runs: the Rust crates, the release binary, both drivers, the SDK and the bench.
+  # Everything that runs: the Rust crates, the release binary, both drivers, both SDKs and the bench.
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -61,6 +75,8 @@ jobs:
     env:
       # The SDK tests and the bench use the release binary: the same file that is uploaded below.
       TRACEQA_BIN: ${{ github.workspace }}/target/release/${{ matrix.binary }}
+      # The stand-in engine that plays back spec/transcripts/ to both SDKs.
+      TRACEQA_REPLAY_BIN: ${{ github.workspace }}/target/release/traceqa-replay${{ matrix.os == 'windows-latest' && '.exe' || '' }}
       # The WebDriver driver is tested against chromedriver. Missing chromedriver is a failure, not a skip.
       TRACEQA_REQUIRE_CHROMEDRIVER: "1"
     steps:
@@ -68,19 +84,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
 
       # Rust: the protocol, engine, recorder and CLI crates.
       - name: Rust tests
         run: cargo test --locked
 
-      # The binary that ships.
-      - name: Build the release binary
+      # The binary that ships, and the stand-in engine the SDK tests use.
+      - name: Build the release binaries
         run: cargo build --release --locked
-      - name: The binary starts
+      - name: The binaries start
         shell: bash
         run: |
           "$TRACEQA_BIN" --version
           "$TRACEQA_BIN" extract --help
+          test -f "$TRACEQA_REPLAY_BIN"
 
       # Python: the drivers, the protocol package and the SDK, against real browsers.
       - name: Install the Python packages
@@ -94,6 +116,16 @@ jobs:
           echo "TRACEQA_CHROMEDRIVER=${CHROMEWEBDRIVER}/chromedriver${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
       - name: Python tests
         run: uv run pytest
+
+      # TypeScript: the SDK against the release binary, real browsers and the transcripts.
+      - name: Put the drivers and the workspace's Python on PATH
+        shell: bash
+        run: echo "$GITHUB_WORKSPACE/.venv/${{ runner.os == 'Windows' && 'Scripts' || 'bin' }}" >> "$GITHUB_PATH"
+      - name: TypeScript tests
+        working-directory: sdks/typescript
+        run: |
+          npm ci
+          npm test
 
       # End to end: the binary, a driver, three browsers and the collector on the demo site.
       - name: Bench

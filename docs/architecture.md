@@ -9,6 +9,7 @@ flowchart TB
     subgraph callers["Callers"]
         cli["CLI<br/>traceqa extract"]
         py["Python SDK<br/>traceqa.extract()"]
+        ts["TypeScript SDK<br/>extract()"]
         other["Any other language"]
     end
 
@@ -37,6 +38,7 @@ flowchart TB
 
     cli -->|direct call| run
     py -->|JSON-RPC over stdio| serve
+    ts -->|JSON-RPC over stdio| serve
     other -->|JSON-RPC over stdio| serve
     extract <-->|JSON-RPC over stdio| pw
     extract <-->|JSON-RPC over stdio| wd
@@ -75,9 +77,16 @@ language. The same approach is used by language servers and by the Model
 Context Protocol.
 
 The messages are defined in `spec/`. The Rust types are generated from the
-schemas at build time and the Python types by `scripts/gen_python_protocol.py`,
-so the two sides cannot drift apart. Every example in `spec/examples/` is
-checked by the test suites of both languages.
+schemas at build time, the Python types by `scripts/gen_python_protocol.py` and
+the TypeScript types by `sdks/typescript/scripts/gen-protocol.mjs`, so the sides
+cannot drift apart. Every example in `spec/examples/` is checked by the Rust and
+Python test suites.
+
+Every client is also held to the recorded conversations in
+`spec/transcripts/`. A stand-in engine, `traceqa-replay`, plays one back and
+checks each message the client sends, field by field. The Python and TypeScript
+clients pass the same files, so they send the same messages. A client in
+another language is tested the same way: see [clients.md](clients.md).
 
 ## Client protocol
 

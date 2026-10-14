@@ -1,0 +1,39 @@
+# traceqa (TypeScript)
+
+TypeScript client for TraceQA. It starts the `traceqa` engine and talks to it;
+all logic lives in the engine. Node 18 or later, no runtime dependencies.
+
+```ts
+import { extract } from "traceqa";
+
+const result = await extract("https://example.com", {
+  browsers: ["chromium", "firefox"],
+  viewports: [
+    [1280, 800],
+    [390, 844],
+  ],
+  onEvent: (event) => console.log(event.message),
+});
+
+for (const target of result.targets) {
+  for (const component of (await result.components(target.dir)).components) {
+    console.log(component.id, component.role, component.name, component.instances.length);
+  }
+}
+```
+
+All options are in [docs/usage.md](../../docs/usage.md#typescript-sdk).
+
+## Development
+
+```sh
+npm ci
+npm run gen          # regenerate src/protocol.ts from spec/
+npm run gen:check    # fail if src/protocol.ts is out of date
+npm run typecheck
+uv run npm test      # from the repository root's environment, after cargo build
+```
+
+`uv run` puts the browser drivers and the workspace's Python on `PATH`. The
+tests need both: they start the Buggy Shop and run the real engine. They also
+play back `spec/transcripts/` against the stand-in engine, `traceqa-replay`.

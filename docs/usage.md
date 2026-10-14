@@ -147,6 +147,53 @@ A browser that fails does not raise an exception. Inspect `result.status` and
 each target's `status` and `error`. `TraceQAError` is raised when the engine
 cannot be started or refuses the request.
 
+## TypeScript SDK
+
+Node 18 or later. The package has no runtime dependencies.
+
+```ts
+import { extract } from "traceqa";
+
+const result = await extract("https://example.com", { browsers: ["chromium", "firefox"] });
+const components = await result.components("chromium-1280x800");
+```
+
+To make several calls on one engine process:
+
+```ts
+import { Engine } from "traceqa";
+
+const engine = await Engine.start();
+try {
+  const first = await engine.extract("https://example.com");
+  const second = await engine.extract("https://example.org", { browsers: ["webkit"] });
+} finally {
+  await engine.close();
+}
+```
+
+One engine can run several extractions at the same time: start them with
+`Promise.all`. Each run's events go only to its own `onEvent`.
+
+The options are the Python ones in camel case: `browsers`, `viewports`
+(`[width, height]` pairs), `outDir`, `headless`, `crops`, `includeHidden`,
+`maxScrollSteps`, `timeoutMs`, `settleMs`, `parallel` and `onEvent`. Two differ:
+
+| Option | Meaning |
+|---|---|
+| `signal` | An `AbortSignal`. Aborting it cancels the run, and the result resolves with status `cancelled`. |
+| `onEvent` | As in Python. If it throws, the run is cancelled and `extract` rejects with that error. |
+
+`extract` and `Engine.start` also accept `binary` and `drivers`, found the same
+way as in Python. The result has `status`, `targets`, `manifest`, `runFolder`
+and `components(targetDir)`, which returns a promise. The spec types are
+exported, the common ones by name and every one under `protocol`.
+
+## Other languages
+
+Any language that can start a process and read and write lines can call the
+engine. See [clients.md](clients.md).
+
 ## Output files
 
 ```
