@@ -52,7 +52,16 @@ def chrome_target() -> Iterator[dict[str, Any]]:
         except OSError:
             time.sleep(0.1)
     # --no-sandbox: Chrome's sandbox cannot start on some CI machines, and this only ever opens the demo shop.
-    capabilities = {"browserName": "chrome", "goog:chromeOptions": {"args": ["--headless=new", "--no-sandbox"]}}
+    # The --disable flags are ones Playwright always passes: without them Chrome slows the timers of a
+    # window it thinks is in the background, which a CI machine's headless window can be.
+    args = [
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+    ]
+    capabilities = {"browserName": "chrome", "goog:chromeOptions": {"args": args}}
     yield {"browser": "webdriver", "webdriverUrl": url, "webdriverCapabilities": capabilities}
     server.terminate()
     server.wait(timeout=10)
@@ -75,6 +84,19 @@ def collect(driver: DriverClient, session_id: str) -> dict[str, models.FrameEval
     return {result.frame.name or result.frame.id: result for result in results}
 
 
+def scroll_to_the_end(driver: DriverClient, session_id: str) -> dict[str, Any]:
+    """Scroll to the bottom until the page stops growing. Lazy content can arrive just after a
+    scroll has settled on a slow machine, so the height must stay the same twice in a row."""
+    height, unchanged = 0, 0
+    for _ in range(20):
+        scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
+        unchanged = unchanged + 1 if scrolled["height"] == height else 0
+        if unchanged == 2:
+            break
+        height = scrolled["height"]
+    return scrolled
+
+
 def read_the_shop(driver: DriverClient, target: dict[str, Any], shop_url: str, tmp_path: Path) -> None:
     assert target["browser"] in driver.call("driver.hello", HELLO)["browsers"]
     session = driver.call("session.open", {"target": target, "viewport": VIEWPORT})
@@ -95,12 +117,7 @@ def read_the_shop(driver: DriverClient, target: dict[str, Any], shop_url: str, t
     assert pay.frame.box.w == 320 and pay.frame.box.y > frames["newsletter"].frame.box.y
     assert names(models.CollectorResult.model_validate(pay.value), "button") == ["Pay now"]
 
-    height = 0
-    for _ in range(10):
-        scrolled = driver.call("page.scroll", {"sessionId": session_id, "to": "bottom"})
-        if scrolled["height"] == height:
-            break
-        height = scrolled["height"]
+    scrolled = scroll_to_the_end(driver, session_id)
     assert scrolled["atEnd"]
     again = collect(driver, session_id)
     assert names(models.CollectorResult.model_validate(again["main"].value), "button").count("Helpful") == 9
