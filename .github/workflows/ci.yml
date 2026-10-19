@@ -18,7 +18,7 @@ jobs:
   # (Markdown files, docs/, the licence) skips the jobs below, and the CI job still reports.
   changes:
     name: Changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -56,7 +56,7 @@ jobs:
     name: Lint
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +101,7 @@ jobs:
     name: Test (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && (vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest') || matrix.os }}
     timeout-minutes: 45
     strategy:
       # One system failing should not hide what the others do.
@@ -192,7 +192,7 @@ jobs:
     name: CI
     needs: [changes, lint, test]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - name: Result
