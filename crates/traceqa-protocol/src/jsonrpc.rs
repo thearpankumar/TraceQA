@@ -3,11 +3,11 @@
 //! This module only turns messages into lines and back. Reading and writing
 //! the lines is the caller's job, so it works over any transport.
 
-use std::fmt;
 use std::io::{self, BufRead};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use thiserror::Error;
 
 const VERSION: &str = "2.0";
 
@@ -48,23 +48,16 @@ pub enum Message {
     Response { id: Id, result: Result<Value, RpcError> },
 }
 
-#[derive(Debug)]
+/// Why a line is not a message.
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum DecodeError {
+    #[error("not valid JSON: {0}")]
     Json(serde_json::Error),
     /// Valid JSON that is not a JSON-RPC 2.0 message.
+    #[error("not a JSON-RPC 2.0 message: {0}")]
     Invalid(&'static str),
 }
-
-impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DecodeError::Json(e) => write!(f, "not valid JSON: {e}"),
-            DecodeError::Invalid(why) => write!(f, "not a JSON-RPC 2.0 message: {why}"),
-        }
-    }
-}
-
-impl std::error::Error for DecodeError {}
 
 /// A message as it is read from a line.
 #[derive(Deserialize)]

@@ -202,6 +202,14 @@ A target that fails does not stop the others. One that times out while others
 are running is tried again on its own. The session is closed whether or
 not the extraction succeeded.
 
+Errors are typed inside the engine. `ErrorKind` (in `traceqa-protocol`) names the
+`RpcErrorData.kind` values and keeps an unknown kind as it came, so a driver
+that reports a new kind never breaks the engine; on the wire it is still the same
+string. `DriverError` carries a kind and a message, and `EngineError` says whether a
+target was cancelled, timed out, failed in a driver, failed on disk or was refused.
+Strings appear only at the edges: the CLI and the MCP server print what the errors
+say.
+
 ## The collector
 
 `collector/collector.js` is a single JavaScript expression that evaluates to a

@@ -1,7 +1,6 @@
 //! One run: every requested browser at every requested viewport.
 
 use std::collections::HashSet;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -9,10 +8,11 @@ use std::thread;
 use std::time::Instant;
 
 use serde_json::json;
+use thiserror::Error;
 use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, TargetSummary, Viewport};
 use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
 
-use crate::driver::{DriverCommand, DriverError, Drivers};
+use crate::driver::{DriverCommand, DriverError, Drivers, ErrorKind};
 use crate::extract::{extract_target, Job, Progress, Sink};
 use crate::url_policy::UrlPolicy;
 use crate::url_safety::{check_navigable, redact};
@@ -28,52 +28,39 @@ const DEFAULT_DRIVERS: [&str; 2] = ["traceqa-driver-playwright", "traceqa-driver
 /// Environment variable holding driver command lines separated by `;`.
 pub const DRIVERS_ENV: &str = "TRACEQA_DRIVERS";
 
-#[derive(Debug)]
-pub struct EngineError {
-    message: String,
-    cancelled: bool,
-    /// The browser or its driver did not answer in time.
-    timed_out: bool,
+/// Why a run, or one target of it, did not go through. What `Display` says is what the CLI and
+/// the MCP server show.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum EngineError {
+    /// The run was stopped on request.
+    #[error("cancelled")]
+    Cancelled,
+    /// A driver failed, or could not be reached. A `timeout` kind means the browser or its
+    /// driver did not answer in time.
+    #[error(transparent)]
+    Driver(#[from] DriverError),
+    /// A file or folder of the run could not be read or written.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// The request or the page was not acceptable; the text says why.
+    #[error("{0}")]
+    Invalid(String),
 }
 
 impl EngineError {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            cancelled: false,
-            timed_out: false,
-        }
+    pub(crate) fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid(message.into())
     }
 
-    pub(crate) fn cancelled() -> Self {
-        Self {
-            message: "cancelled".into(),
-            cancelled: true,
-            timed_out: false,
-        }
+    /// True when the run was stopped on request.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
     }
-}
 
-impl fmt::Display for EngineError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for EngineError {}
-
-impl From<DriverError> for EngineError {
-    fn from(error: DriverError) -> Self {
-        Self {
-            timed_out: error.kind == "timeout",
-            ..Self::new(error.to_string())
-        }
-    }
-}
-
-impl From<std::io::Error> for EngineError {
-    fn from(error: std::io::Error) -> Self {
-        Self::new(error.to_string())
+    /// True when the browser or its driver did not answer in time.
+    pub fn is_timed_out(&self) -> bool {
+        matches!(self, Self::Driver(error) if *error.kind() == ErrorKind::Timeout)
     }
 }
 
@@ -113,15 +100,15 @@ impl Run {
     /// Checks the request and creates the run folder.
     pub fn prepare(params: RunStartParams) -> Result<Self, EngineError> {
         if !FEATURES.contains(&params.feature.as_str()) {
-            return Err(EngineError::new(format!(
+            return Err(EngineError::invalid(format!(
                 "unknown feature {:?}. This engine runs: {}",
                 params.feature,
                 FEATURES.join(", ")
             )));
         }
-        check_navigable(&params.url).map_err(EngineError::new)?;
+        check_navigable(&params.url).map_err(EngineError::Invalid)?;
         if params.targets.is_empty() || params.viewports.is_empty() {
-            return Err(EngineError::new("a run needs at least one target and one viewport"));
+            return Err(EngineError::invalid("a run needs at least one target and one viewport"));
         }
         let out_dir = PathBuf::from(params.out_dir.as_deref().unwrap_or("runs"));
         // An id that is already taken on disk (another process, same second) is simply drawn again.
@@ -441,14 +428,14 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
             );
             summary.timings = Some(timings);
         }
-        Err(error) if error.cancelled => {}
+        Err(error) if error.is_cancelled() => {}
         Err(error) => {
             summary.status = RunStatus::Failed;
             summary.error = Some(error.to_string());
             progress.emit("error", Some(name), format!("{name} failed: {error}"), json!({}));
             return Finished {
                 summary,
-                timed_out: error.timed_out,
+                timed_out: error.is_timed_out(),
             };
         }
     }
@@ -641,6 +628,33 @@ mod tests {
         // A different browser is not held up by it.
         let _safari = exclusive.hold("safari");
         let _other = exclusive.hold("another");
+    }
+
+    #[test]
+    fn engine_error_display_text_is_unchanged() {
+        // What the CLI and the MCP server print today.
+        assert_eq!(EngineError::Cancelled.to_string(), "cancelled");
+        assert_eq!(
+            EngineError::invalid("a run needs at least one target and one viewport").to_string(),
+            "a run needs at least one target and one viewport"
+        );
+        let driver = DriverError::new(ErrorKind::NavigationFailed, "net::ERR_NAME_NOT_RESOLVED");
+        assert_eq!(
+            EngineError::from(driver).to_string(),
+            "net::ERR_NAME_NOT_RESOLVED (navigation_failed)"
+        );
+        let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access is denied");
+        assert_eq!(EngineError::from(io).to_string(), "access is denied");
+    }
+
+    #[test]
+    fn cancelled_is_distinguishable_from_failed() {
+        let timeout = EngineError::from(DriverError::new(ErrorKind::Timeout, "slow"));
+        let failed = EngineError::from(DriverError::new(ErrorKind::EvalFailed, "boom"));
+        assert!(EngineError::Cancelled.is_cancelled() && !EngineError::Cancelled.is_timed_out());
+        assert!(timeout.is_timed_out() && !timeout.is_cancelled());
+        assert!(!failed.is_timed_out() && !failed.is_cancelled());
+        assert!(!EngineError::invalid("cancelled").is_cancelled());
     }
 
     fn summary_with(status: RunStatus) -> TargetSummary {

@@ -8,14 +8,48 @@ use std::sync::atomic::AtomicBool;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use traceqa_engine::{Execution, Run};
+use thiserror::Error;
+use traceqa_engine::url_policy::Blocked;
+use traceqa_engine::{EngineError, Execution, Run};
 use traceqa_protocol::jsonrpc::{code, RpcError};
 use traceqa_protocol::types::{
     BrowserTarget, Component, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, StorageState,
     Viewport,
 };
+use traceqa_protocol::ParseError;
 
 use crate::Config;
+
+/// Why a tool call failed. What `Display` says is what the AI reads, after paths are hidden.
+#[derive(Debug, Error)]
+pub(crate) enum ToolError {
+    #[error("invalid arguments: {0}")]
+    Arguments(serde_json::Error),
+    /// A browser or viewport written in a way nobody understands.
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+    /// The operator's rules refuse the address.
+    #[error("this server does not open {0}")]
+    Blocked(Blocked),
+    #[error(transparent)]
+    Engine(#[from] EngineError),
+    #[error("no run {0}. list_runs shows the runs.")]
+    NoRun(String),
+    #[error("no component {0} here. get_components lists them.")]
+    NoComponent(String),
+    #[error("{what} must be a plain name, got {name:?}")]
+    NotPlainName { what: String, name: String },
+    /// Any other refusal, worded for the AI.
+    #[error("{0}")]
+    Refused(String),
+}
+
+/// `ToolError::Refused` with a formatted message.
+macro_rules! refuse {
+    ($($arg:tt)*) => {
+        ToolError::Refused(format!($($arg)*))
+    };
+}
 
 /// What `tools/list` returns. The descriptions are what the AI reads to choose a tool.
 pub fn list(config: &Config) -> Value {
@@ -269,7 +303,7 @@ impl Call<'_> {
         Ok(match outcome {
             Ok(content) => json!({ "content": content, "isError": false }),
             Err(why) => {
-                let why = clean(&public_message(&why, &self.config.runs_dir));
+                let why = clean(&public_message(&why.to_string(), &self.config.runs_dir));
                 let why: String = why.chars().take(MAX_ERROR_CHARS).collect();
                 // These two read stored run data, so their errors can quote page text.
                 let why = if matches!(name, "get_components" | "get_crop") {
@@ -282,15 +316,15 @@ impl Call<'_> {
         })
     }
 
-    fn extract(&self, arguments: ExtractArgs) -> Result<Content, String> {
+    fn extract(&self, arguments: ExtractArgs) -> Result<Content, ToolError> {
         let request = build_request(self.config, arguments)?;
         // Before any request is made. Redirects are checked after navigation, by the engine.
-        traceqa_engine::url_safety::check_navigable(&request.url)?;
+        traceqa_engine::url_safety::check_navigable(&request.url).map_err(ToolError::Refused)?;
         self.config
             .policy
             .check_url_resolving(&request.url)
-            .map_err(|blocked| format!("this server does not open {blocked}"))?;
-        let run = Run::prepare(request).map_err(|e| e.to_string())?;
+            .map_err(ToolError::Blocked)?;
+        let run = Run::prepare(request)?;
         let execution = Execution {
             drivers: &|| self.config.drivers(),
             cancel: self.cancelled,
@@ -331,11 +365,11 @@ impl Call<'_> {
 
 /// Checks the arguments of `extract` and turns them into the engine's request.
 #[cfg(test)]
-pub(crate) fn extract_request(config: &Config, arguments: Value) -> Result<RunStartParams, String> {
+pub(crate) fn extract_request(config: &Config, arguments: Value) -> Result<RunStartParams, ToolError> {
     build_request(config, args(arguments)?)
 }
 
-fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, String> {
+fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, ToolError> {
     let browsers = if args.browsers.is_empty() {
         vec!["chromium".to_string()]
     } else {
@@ -356,12 +390,12 @@ fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, S
             t.cdp_endpoint.is_some() || t.webdriver_url.is_some() || matches!(t.browser.as_str(), "cdp" | "webdriver")
         })
     {
-        return Err(
+        return Err(ToolError::Refused(
             "attaching to a running browser (cdp=...) or a WebDriver server (webdriver=...) is off. \
             The person who started this server can enable it with: traceqa mcp --allow-remote-browsers. \
             Use one of: chromium, chrome, msedge, firefox, webkit, safari."
                 .into(),
-        );
+        ));
     }
     for target in &mut targets {
         target.headless = Some(true);
@@ -392,13 +426,13 @@ fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, S
 
 /// A saved sign-in state, by file name, from the folder the operator chose. The AI never gives
 /// a path, and the answers never hold a path, an OS error or what the file contains.
-pub(crate) fn resolve_state(config: &Config, name: &str) -> Result<StorageState, String> {
+pub(crate) fn resolve_state(config: &Config, name: &str) -> Result<StorageState, ToolError> {
     let Some(state_dir) = &config.state_dir else {
-        return Err(
+        return Err(ToolError::Refused(
             "storage_state is off. The person who started this server can enable it with: \
             traceqa mcp --state-dir <folder with saved states>"
                 .into(),
-        );
+        ));
     };
     let shown: String = clean(name).chars().take(64).collect();
     let missing = || {
@@ -417,7 +451,7 @@ pub(crate) fn resolve_state(config: &Config, name: &str) -> Result<StorageState,
             .collect();
         names.sort();
         names.truncate(20);
-        format!("no state file named {shown}. Available: {}", names.join(", "))
+        refuse!("no state file named {shown}. Available: {}", names.join(", "))
     };
     if !valid_state_name(name) {
         return Err(missing());
@@ -425,7 +459,7 @@ pub(crate) fn resolve_state(config: &Config, name: &str) -> Result<StorageState,
     let path = safe_file_in(state_dir, &state_dir.join(name)).ok_or_else(missing)?;
     let text = fs::read_to_string(path).map_err(|_| missing())?;
     // The contents are a secret, so a parse error names the file and not what is in it.
-    serde_json::from_str(&text).map_err(|_| format!("{shown} is not a storage state file"))
+    serde_json::from_str(&text).map_err(|_| refuse!("{shown} is not a storage state file"))
 }
 
 /// A plain file name: letters, digits, dot, dash and underscore, starting with a letter or
@@ -463,7 +497,7 @@ fn safe_file_in(root: &Path, path: &Path) -> Option<PathBuf> {
 }
 
 impl Call<'_> {
-    fn list_runs(&self, args: ListRunsArgs) -> Result<Content, String> {
+    fn list_runs(&self, args: ListRunsArgs) -> Result<Content, ToolError> {
         let mut runs: Vec<RunManifest> = match fs::read_dir(&self.config.runs_dir) {
             Ok(entries) => entries
                 .filter_map(|entry| read_json(&entry.ok()?.path().join("run.json")))
@@ -494,7 +528,7 @@ impl Call<'_> {
         Ok(reply(json!({ "limit_applied": limit, "runs": runs }), Some(cut)))
     }
 
-    fn get_components(&self, args: ComponentsArgs) -> Result<Content, String> {
+    fn get_components(&self, args: ComponentsArgs) -> Result<Content, ToolError> {
         let (dir, file) = self.components_file(&args.run_id, args.target.as_deref())?;
         if let Some(id) = &args.component_id {
             let mut component = serde_json::to_value(find(&file, id)?).expect("plain data always serialises");
@@ -558,16 +592,16 @@ impl Call<'_> {
         ))
     }
 
-    fn get_crop(&self, args: CropArgs) -> Result<Content, String> {
+    fn get_crop(&self, args: CropArgs) -> Result<Content, ToolError> {
         let (dir, file) = self.components_file(&args.run_id, args.target.as_deref())?;
         let component = find(&file, &args.component_id)?;
         let Some(crop) = &component.crop else {
-            return Err(format!(
+            return Err(refuse!(
                 "{} has no picture. Run extract again with crops: true to get pictures.",
                 component.id
             ));
         };
-        let outside = || format!("{} names a picture outside the runs folder", component.id);
+        let outside = || refuse!("{} names a picture outside the runs folder", component.id);
         let crop_path = Path::new(crop);
         let is_png = crop_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
         if !is_png
@@ -581,16 +615,16 @@ impl Call<'_> {
         // path must stay inside the canonical runs folder, and that path is the one read.
         let path = self.run_dir(&args.run_id)?.join(&dir).join(crop);
         if !path.exists() {
-            return Err(format!("the picture of {} could not be read", component.id));
+            return Err(refuse!("the picture of {} could not be read", component.id));
         }
         let path = safe_file_in(&self.config.runs_dir, &path).ok_or_else(outside)?;
         if fs::metadata(&path).is_ok_and(|m| m.len() > MAX_CROP_BYTES) {
-            return Err(format!(
+            return Err(refuse!(
                 "the picture of {} is too large to return (over 2 MiB)",
                 component.id
             ));
         }
-        let bytes = fs::read(&path).map_err(|_| format!("the picture of {} could not be read", component.id))?;
+        let bytes = fs::read(&path).map_err(|_| refuse!("the picture of {} could not be read", component.id))?;
         let label = if component.name.is_empty() {
             "(no name)"
         } else {
@@ -603,32 +637,32 @@ impl Call<'_> {
     }
 
     /// A run's folder. The id comes from the AI, so it must name a folder directly inside the runs folder.
-    fn run_dir(&self, run_id: &str) -> Result<PathBuf, String> {
+    fn run_dir(&self, run_id: &str) -> Result<PathBuf, ToolError> {
         plain_name(run_id, "run_id")?;
         let dir = self.config.runs_dir.join(run_id);
         if dir.join("run.json").is_file() {
             Ok(dir)
         } else {
-            Err(format!("no run {run_id}. list_runs shows the runs."))
+            Err(ToolError::NoRun(run_id.to_string()))
         }
     }
 
-    fn components_file(&self, run_id: &str, target: Option<&str>) -> Result<(String, ComponentsFile), String> {
+    fn components_file(&self, run_id: &str, target: Option<&str>) -> Result<(String, ComponentsFile), ToolError> {
         let dir = self.run_dir(run_id)?;
         let manifest: RunManifest =
-            read_json(&dir.join("run.json")).ok_or_else(|| format!("run {run_id} is damaged"))?;
+            read_json(&dir.join("run.json")).ok_or_else(|| refuse!("run {run_id} is damaged"))?;
         let names: Vec<&str> = manifest.targets.iter().map(|t| t.dir.as_str()).collect();
         let target = match target {
             Some(target) if names.contains(&target) => target.to_string(),
             Some(target) => {
-                return Err(format!(
+                return Err(refuse!(
                     "run {run_id} has no target {target}. It has: {}",
                     names.join(", ")
                 ))
             }
             None if names.len() == 1 => names[0].to_string(),
             None => {
-                return Err(format!(
+                return Err(refuse!(
                     "run {run_id} has several targets, give one of: {}",
                     names.join(", ")
                 ))
@@ -642,27 +676,30 @@ impl Call<'_> {
         let path = dir.join(&target).join("components.json");
         if !path.is_file() {
             let why = summary.error.as_deref().unwrap_or("it did not finish");
-            return Err(format!("{target} found nothing: {why}"));
+            return Err(refuse!("{target} found nothing: {why}"));
         }
-        let file = read_json(&path).ok_or_else(|| format!("{target} of run {run_id} is damaged"))?;
+        let file = read_json(&path).ok_or_else(|| refuse!("{target} of run {run_id} is damaged"))?;
         Ok((target, file))
     }
 }
 
-fn find<'f>(file: &'f ComponentsFile, id: &str) -> Result<&'f Component, String> {
+fn find<'f>(file: &'f ComponentsFile, id: &str) -> Result<&'f Component, ToolError> {
     file.components
         .iter()
         .find(|c| c.id == id)
-        .ok_or_else(|| format!("no component {id} here. get_components lists them."))
+        .ok_or_else(|| ToolError::NoComponent(id.to_string()))
 }
 
 /// A folder name with no way out of its parent.
-fn plain_name(name: &str, what: &str) -> Result<(), String> {
+fn plain_name(name: &str, what: &str) -> Result<(), ToolError> {
     let plain = !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':']);
     if plain {
         Ok(())
     } else {
-        Err(format!("{what} must be a plain name, got {name:?}"))
+        Err(ToolError::NotPlainName {
+            what: what.to_string(),
+            name: name.to_string(),
+        })
     }
 }
 
@@ -710,8 +747,8 @@ pub(crate) fn public_message(text: &str, runs_dir: &Path) -> String {
 }
 
 /// Arguments with a message the AI can act on when they are wrong.
-fn args<T: DeserializeOwned>(arguments: Value) -> Result<T, String> {
-    serde_json::from_value(arguments).map_err(|e| format!("invalid arguments: {e}"))
+fn args<T: DeserializeOwned>(arguments: Value) -> Result<T, ToolError> {
+    serde_json::from_value(arguments).map_err(ToolError::Arguments)
 }
 
 #[derive(Deserialize)]

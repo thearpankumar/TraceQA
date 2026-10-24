@@ -20,7 +20,7 @@ use traceqa_protocol::types::{
     RunStartParams, RunStartResult,
 };
 
-use crate::driver::{DriverCommand, Drivers};
+use crate::driver::{DriverCommand, Drivers, ErrorKind};
 use crate::run::{Execution, Run, FEATURES};
 
 type Output = Arc<Mutex<Box<dyn Write + Send>>>;
@@ -42,13 +42,13 @@ fn notify(output: &Output, method: &str, params: &impl Serialize) {
     );
 }
 
-fn failure(rpc_code: i64, kind: &str, message: impl Into<String>) -> RpcError {
+fn failure(rpc_code: i64, kind: ErrorKind, message: impl Into<String>) -> RpcError {
     failure_with(rpc_code, kind, false, message)
 }
 
-fn failure_with(rpc_code: i64, kind: &str, retryable: bool, message: impl Into<String>) -> RpcError {
+fn failure_with(rpc_code: i64, kind: ErrorKind, retryable: bool, message: impl Into<String>) -> RpcError {
     let data = RpcErrorData {
-        kind: kind.to_string(),
+        kind: kind.as_str().to_string(),
         retryable,
     };
     RpcError {
@@ -59,7 +59,7 @@ fn failure_with(rpc_code: i64, kind: &str, retryable: bool, message: impl Into<S
 }
 
 fn parse<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, RpcError> {
-    serde_json::from_value(params).map_err(|e| failure(code::INVALID_PARAMS, "invalid_params", e.to_string()))
+    serde_json::from_value(params).map_err(|e| failure(code::INVALID_PARAMS, ErrorKind::InvalidParams, e.to_string()))
 }
 
 fn answer(result: impl Serialize) -> Result<Value, RpcError> {
@@ -146,7 +146,7 @@ fn serve_inner(
                     "request larger than {} MiB was skipped",
                     MAX_REQUEST_LINE / (1024 * 1024)
                 );
-                let result = Err(failure(code::INVALID_REQUEST, "invalid_request", message));
+                let result = Err(failure(code::INVALID_REQUEST, ErrorKind::InvalidRequest, message));
                 send(&output, &Message::Response { id: Id::Null, result });
                 continue;
             }
@@ -189,13 +189,13 @@ fn serve_inner(
                 }
                 None => Err(failure(
                     code::INVALID_PARAMS,
-                    "invalid_params",
+                    ErrorKind::InvalidParams,
                     format!("no running run {}", request.run_id),
                 )),
             }),
             other => Err(failure(
                 code::METHOD_NOT_FOUND,
-                "unsupported",
+                ErrorKind::Unsupported,
                 format!("unknown method {other}"),
             )),
         };
@@ -215,7 +215,7 @@ fn serve_inner(
 
 /// Answers a line that could not be understood. Its id is unknown, so the reply carries none.
 fn refuse_unreadable(output: &Output, reason: String) {
-    let result = Err(failure(code::PARSE_ERROR, "invalid_request", reason));
+    let result = Err(failure(code::PARSE_ERROR, ErrorKind::InvalidRequest, reason));
     send(output, &Message::Response { id: Id::Null, result });
 }
 
@@ -223,7 +223,7 @@ fn hello(hello: EngineHelloParams) -> Result<Value, RpcError> {
     if hello.protocol_version != PROTOCOL_VERSION {
         return Err(failure(
             code::APPLICATION_ERROR,
-            "version_mismatch",
+            ErrorKind::VersionMismatch,
             format!(
                 "engine speaks client protocol {PROTOCOL_VERSION}, client asked for {}",
                 hello.protocol_version
@@ -253,13 +253,14 @@ fn start_run(
         active.fetch_sub(1, Ordering::SeqCst);
         return Err(failure_with(
             code::APPLICATION_ERROR,
-            "busy",
+            ErrorKind::Busy,
             true,
             format!("busy: {max_runs} runs are already going. Wait for one to finish, then try again."),
         ));
     }
     let counted = RunSlot(Arc::clone(active));
-    let run = Run::prepare(request).map_err(|e| failure(code::INVALID_PARAMS, "invalid_params", e.to_string()))?;
+    let run =
+        Run::prepare(request).map_err(|e| failure(code::INVALID_PARAMS, ErrorKind::InvalidParams, e.to_string()))?;
     let run_id = run.id().to_string();
     let accepted = RunStartResult {
         run_id: run_id.clone(),
@@ -491,10 +492,7 @@ mod tests {
             let wait = Arc::clone(&wait);
             let start: Starter = Box::new(move || {
                 let _ = wait.lock().unwrap().recv();
-                Err(DriverError {
-                    kind: "unsupported".into(),
-                    message: "scripted: no browser".into(),
-                })
+                Err(DriverError::new(ErrorKind::Unsupported, "scripted: no browser"))
             });
             Drivers::starting_with(vec![start])
         });

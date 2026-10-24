@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
+use thiserror::Error;
 use traceqa_protocol::contracts::driver_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
 use traceqa_protocol::jsonrpc::{self, Id, Line, Message, RpcError};
 use traceqa_protocol::types::{
@@ -21,6 +22,7 @@ use traceqa_protocol::types::{
     PageGotoResult, PageScreenshotParams, PageScreenshotResult, PageScrollParams, PageScrollResult, RpcErrorData,
     SessionCloseParams, SessionOpenParams, SessionOpenResult, SessionStorageParams, StorageState,
 };
+pub use traceqa_protocol::ErrorKind;
 
 use crate::url_safety::redact_text;
 
@@ -34,19 +36,38 @@ const SLOW: Duration = Duration::from_secs(90);
 /// Added on top of a timeout the driver enforces itself, so the driver reports it first.
 const MARGIN: Duration = Duration::from_secs(15);
 
-#[derive(Debug, Clone, PartialEq)]
+/// A request to a driver failed: the driver said so, or could not be reached.
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error("{message} ({kind})")]
 pub struct DriverError {
-    /// An `RpcErrorData.kind` from the spec, or `transport` when the driver could not be reached.
-    pub kind: String,
-    pub message: String,
+    kind: ErrorKind,
+    message: String,
 }
 
 impl DriverError {
-    fn transport(message: impl Into<String>) -> Self {
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
-            kind: "transport".into(),
-            message: redact_text(&message.into()),
+            kind,
+            message: message.into(),
         }
+    }
+
+    /// An `RpcErrorData.kind` from the spec, or `transport` when the driver could not be reached.
+    pub fn kind(&self) -> &ErrorKind {
+        &self.kind
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// True when trying again later can be expected to work.
+    pub fn is_retryable(&self) -> bool {
+        self.kind.is_retryable()
+    }
+
+    fn transport(message: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Transport, redact_text(&message.into()))
     }
 
     /// The same error with the secret values in any address in its message hidden. Text from a
@@ -58,18 +79,10 @@ impl DriverError {
 
     /// True when the driver itself can no longer be trusted: it did not answer in time, or
     /// the pipe to it broke. Its state is unknown, so it must be replaced, not reused.
-    fn loses_driver(&self) -> bool {
-        self.kind == "timeout" || self.kind == "transport"
+    pub(crate) fn loses_driver(&self) -> bool {
+        matches!(self.kind, ErrorKind::Timeout | ErrorKind::Transport)
     }
 }
-
-impl fmt::Display for DriverError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({})", self.message, self.kind)
-    }
-}
-
-impl std::error::Error for DriverError {}
 
 /// Carries one request to a driver and brings back its result.
 pub trait Transport: Send {
@@ -278,10 +291,10 @@ impl ProcessTransport {
                 Ok(Ok(_)) => {}
                 Ok(Err(garbage)) => return Err(DriverError::transport(format!("driver sent a bad line: {garbage}"))),
                 Err(RecvTimeoutError::Timeout) => {
-                    return Err(DriverError {
-                        kind: "timeout".into(),
-                        message: format!("driver did not answer {method} within {} s", timeout.as_secs()),
-                    });
+                    return Err(DriverError::new(
+                        ErrorKind::Timeout,
+                        format!("driver did not answer {method} within {} s", timeout.as_secs()),
+                    ));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(DriverError::transport(format!("driver exited while handling {method}")));
@@ -297,10 +310,10 @@ fn driver_error(error: RpcError) -> DriverError {
     let data = error
         .data
         .and_then(|data| serde_json::from_value::<RpcErrorData>(data).ok());
-    DriverError {
-        kind: data.map_or_else(|| "internal".to_string(), |d| d.kind),
-        message: error.message,
-    }
+    DriverError::new(
+        data.map_or(ErrorKind::Internal, |d| ErrorKind::from(d.kind)),
+        error.message,
+    )
     .redacted()
 }
 
@@ -340,13 +353,13 @@ impl Driver {
         };
         let info: DriverHelloResult = request(transport.as_mut(), method::DRIVER_HELLO, &hello, SHORT)?;
         if info.protocol_version != PROTOCOL_VERSION {
-            return Err(DriverError {
-                kind: "version_mismatch".into(),
-                message: format!(
+            return Err(DriverError::new(
+                ErrorKind::VersionMismatch,
+                format!(
                     "{} speaks driver protocol {}, this engine speaks {PROTOCOL_VERSION}",
                     info.driver_name, info.protocol_version
                 ),
-            });
+            ));
         }
         Ok(Self {
             transport,
@@ -431,10 +444,10 @@ fn request<P: Serialize, R: DeserializeOwned>(
     // that quotes an address, so what comes out of it is redacted here as well.
     let result = transport.call(method, params, timeout).map_err(DriverError::redacted)?;
     serde_json::from_value(result).map_err(|e| {
-        DriverError {
-            kind: "internal".into(),
-            message: format!("driver answered {method} with something the spec does not allow: {e}"),
-        }
+        DriverError::new(
+            ErrorKind::Internal,
+            format!("driver answered {method} with something the spec does not allow: {e}"),
+        )
         .redacted()
     })
 }
@@ -503,10 +516,10 @@ impl Drivers {
         }
         match found.map(|index| &mut self.slots[index].1) {
             Some(Slot::Running(driver)) => Ok(driver),
-            _ => Err(DriverError {
-                kind: "unsupported".into(),
-                message: format!("no driver can open {browser:?}. Tried: {}", tried.join("; ")),
-            }),
+            _ => Err(DriverError::new(
+                ErrorKind::Unsupported,
+                format!("no driver can open {browser:?}. Tried: {}", tried.join("; ")),
+            )),
         }
     }
 }
@@ -545,7 +558,7 @@ mod tests {
             data: Some(json!({ "kind": "navigation_failed", "retryable": true })),
         };
         let error = driver_error(error);
-        assert_eq!(error.kind, "navigation_failed");
+        assert_eq!(error.kind(), &ErrorKind::NavigationFailed);
         assert_eq!(
             error.message,
             "Page.goto: net::ERR_CONNECTION_REFUSED at https://h/cb?token=REDACTED&page=2"
@@ -556,17 +569,17 @@ mod tests {
         struct Quoting;
         impl Transport for Quoting {
             fn call(&mut self, _: &str, _: Value, _: Duration) -> Result<Value, DriverError> {
-                Err(DriverError {
-                    kind: "navigation_failed".into(),
-                    message: "failed at http://h/?api_key=abc".into(),
-                })
+                Err(DriverError::new(
+                    ErrorKind::NavigationFailed,
+                    "failed at http://h/?api_key=abc",
+                ))
             }
         }
         let failed = request::<_, Empty>(&mut Quoting, "page.goto", &json!({}), SHORT).unwrap_err();
-        assert_eq!(failed.message, "failed at http://h/?api_key=REDACTED");
+        assert_eq!(failed.message(), "failed at http://h/?api_key=REDACTED");
         // And so is what the engine itself reports about a driver line that was not valid.
         let garbage = DriverError::transport("driver sent a bad line: {\"u\":\"https://h/?sig=abc\"");
-        assert!(!garbage.message.contains("abc"), "{}", garbage.message);
+        assert!(!garbage.message().contains("abc"), "{}", garbage.message());
     }
 
     #[test]
@@ -626,7 +639,7 @@ mod tests {
             }
         }
         let error = error.expect("the long line was reported");
-        assert_eq!(error.kind, "transport");
+        assert_eq!(error.kind(), &ErrorKind::Transport);
         assert!(error.loses_driver());
         assert!(
             error.message.len() < 400,
@@ -705,7 +718,44 @@ mod tests {
     fn a_missing_driver_is_reported_with_what_was_tried() {
         let mut drivers = Drivers::new(vec![DriverCommand::parse("traceqa-no-such-driver").unwrap()]);
         let error = drivers.for_browser("firefox").err().unwrap();
-        assert_eq!(error.kind, "unsupported");
+        assert_eq!(error.kind(), &ErrorKind::Unsupported);
         assert!(error.message.contains("traceqa-no-such-driver"), "{}", error.message);
+    }
+
+    #[test]
+    fn loses_driver_only_for_timeout_and_transport() {
+        let loses = |kind: ErrorKind| DriverError::new(kind, "x").loses_driver();
+        assert!(loses(ErrorKind::Timeout));
+        assert!(loses(ErrorKind::Transport));
+        for kind in [
+            ErrorKind::NavigationFailed,
+            ErrorKind::Unsupported,
+            ErrorKind::SessionNotFound,
+            ErrorKind::EvalFailed,
+            ErrorKind::VersionMismatch,
+            ErrorKind::InvalidParams,
+            ErrorKind::InvalidRequest,
+            ErrorKind::BlockedUrl,
+            ErrorKind::Busy,
+            ErrorKind::Internal,
+            ErrorKind::Other("timeout2".into()),
+        ] {
+            assert!(!loses(kind.clone()), "{kind}");
+        }
+    }
+
+    #[test]
+    fn driver_errors_read_as_they_always_did() {
+        let error = DriverError::new(ErrorKind::Timeout, "driver did not answer page.goto within 30 s");
+        assert_eq!(
+            error.to_string(),
+            "driver did not answer page.goto within 30 s (timeout)"
+        );
+        assert_eq!(
+            (error.kind(), error.message()),
+            (&ErrorKind::Timeout, "driver did not answer page.goto within 30 s")
+        );
+        assert!(error.is_retryable());
+        assert!(!DriverError::new(ErrorKind::Unsupported, "x").is_retryable());
     }
 }

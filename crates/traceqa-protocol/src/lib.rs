@@ -4,7 +4,10 @@
 //! Schemas in `spec/`, which are the single source of truth. [`jsonrpc`] is
 //! the line format those types travel in.
 
+pub mod error;
 pub mod jsonrpc;
+
+pub use error::{ErrorKind, ParseError};
 
 /// Every type defined in `spec/*.schema.json`.
 #[allow(clippy::all, clippy::pedantic)]
@@ -32,15 +35,13 @@ impl types::BrowserTarget {
 
     /// Reads the spellings every front end accepts: a browser name, `cdp=ENDPOINT` to attach
     /// to a running browser, or `webdriver=URL` for a WebDriver server or cloud grid.
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
         let (browser, endpoint) = match text.split_once('=') {
             Some((browser, endpoint)) => (browser, Some(endpoint.to_string())),
             None => (text, None),
         };
         if browser.is_empty() || endpoint.as_deref() == Some("") {
-            return Err(format!(
-                "expected a browser name, cdp=ENDPOINT or webdriver=URL, got {text:?}"
-            ));
+            return Err(ParseError::BrowserTarget(text.to_string()));
         }
         let mut target = Self::named(browser);
         if browser == "webdriver" {
@@ -54,13 +55,13 @@ impl types::BrowserTarget {
 
 impl types::Viewport {
     /// Reads `WIDTHxHEIGHT`, such as `1280x800`.
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
         let size = text
             .split_once('x')
             .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
         match size {
             Some((width, height)) if width > 0 && height > 0 => Ok(Self { height, width }),
-            _ => Err(format!("expected WIDTHxHEIGHT such as 1280x800, got {text:?}")),
+            _ => Err(ParseError::Viewport(text.to_string())),
         }
     }
 }

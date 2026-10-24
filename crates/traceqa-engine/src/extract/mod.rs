@@ -32,7 +32,7 @@ use self::heuristics::{
 use self::progress::{timed, Clock};
 pub(crate) use self::progress::{Progress, Sink};
 use self::walk::{at_end, walk_quickly, walk_with_pictures, Screen, Walk};
-use crate::driver::{Driver, DriverError, Drivers, DEFAULT_TIMEOUT_MS};
+use crate::driver::{Driver, DriverError, Drivers, ErrorKind, DEFAULT_TIMEOUT_MS};
 use crate::group::group;
 use crate::run::{Exclusive, RUN_FOLDER_VERSION};
 use crate::url_policy::UrlPolicy;
@@ -135,7 +135,7 @@ pub(crate) fn extract_target(
 
 fn check_cancelled(job: &Job) -> Result<(), EngineError> {
     if job.cancel.load(Ordering::Relaxed) {
-        return Err(EngineError::cancelled());
+        return Err(EngineError::Cancelled);
     }
     Ok(())
 }
@@ -285,12 +285,12 @@ fn open_address(
     // Redirects are only visible after the fact, so a refused place fails the target before
     // anything on the page is read or written down.
     if let Some(blocked) = job.policy.and_then(|policy| policy.check_landing(&page).err()) {
-        return Err(DriverError {
-            kind: "blocked_url".into(),
-            message: format!(
+        return Err(DriverError::new(
+            ErrorKind::BlockedUrl,
+            format!(
                 "the page led to a place this server does not allow: {blocked}. The request had already been made; nothing from the page was read"
             ),
-        }
+        )
         .into());
     }
     // The browser may have been redirected to an address that carries a token: write it down hidden.
