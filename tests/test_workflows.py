@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -71,3 +72,30 @@ def test_no_run_script_interpolates_event_data() -> None:
     for name, wf in all_workflows().items():
         for job, step in steps_of(wf):
             assert "github.event." not in step.get("run", ""), (name, job, step.get("name"))
+
+
+PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
+
+
+def test_every_action_is_pinned_to_a_full_commit_sha() -> None:
+    checked = 0
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            match = re.match(r"\s*(?:-\s+)?uses:\s*(\S+)(.*)$", line)
+            if not match or match.group(1).startswith("./"):
+                continue
+            checked += 1
+            where = f"{path.name}:{number}"
+            assert PINNED.match(match.group(1)), where
+            assert re.match(r"\s*#\s*(v\d[\w.-]*|master)\s*$", match.group(2)), where
+    assert checked >= 10
+
+
+def test_dtolnay_toolchain_steps_name_their_toolchain() -> None:
+    seen = 0
+    for name, wf in all_workflows().items():
+        for job, step in steps_of(wf):
+            if step.get("uses", "").startswith("dtolnay/rust-toolchain@"):
+                seen += 1
+                assert step.get("with", {}).get("toolchain"), (name, job)
+    assert seen >= 3
