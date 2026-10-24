@@ -678,3 +678,126 @@ fn tools_list_hides_storage_state_unless_a_state_dir_is_set() {
     on.stop();
     fs::remove_dir_all(dir).unwrap();
 }
+
+const SECRET: &[u8] = b"TOP-SECRET-FILE-CONTENTS";
+
+/// A folder link that needs no privilege on any system: a symlink on Unix, a junction on Windows.
+fn link_dir(link: &Path, target: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let made = process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink failed: {made:?}");
+    }
+}
+
+fn unlink_dir(link: &Path) {
+    #[cfg(unix)]
+    fs::remove_file(link).unwrap();
+    #[cfg(windows)]
+    fs::remove_dir(link).unwrap();
+}
+
+fn crop_path(runs: &Path) -> PathBuf {
+    runs.join(RUN_ID)
+        .join("firefox-1280x800")
+        .join("crops")
+        .join(format!("{COMPONENT}.png"))
+}
+
+fn assert_refused_without_leaking(answer: &Value, runs: &Path) {
+    assert_eq!(answer["isError"], true, "{answer}");
+    let text = answer.to_string();
+    assert!(text.contains("outside the runs folder"), "{text}");
+    assert!(
+        !text.contains(&base64(SECRET)) && !text.contains("TOP-SECRET"),
+        "{text}"
+    );
+    assert!(!text.contains(runs.to_str().unwrap()), "{text}");
+}
+
+#[test]
+fn get_crop_refuses_a_symlinked_picture() {
+    let runs = runs_folder("crop-link");
+    let outside = std::env::temp_dir().join(format!("traceqa-mcp-secret-{}", process::id()));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.png"), SECRET).unwrap();
+    let crop = crop_path(&runs);
+    // Unix: the picture itself is a symlink. Windows: the crops folder is a junction to the
+    // outside folder (a file symlink needs a privilege), so the picture is reached through a link.
+    #[cfg(unix)]
+    {
+        fs::remove_file(&crop).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.png"), &crop).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        let crops = crop.parent().unwrap().to_path_buf();
+        fs::remove_dir_all(&crops).unwrap();
+        link_dir(&crops, &outside);
+        fs::rename(outside.join("secret.png"), outside.join(format!("{COMPONENT}.png"))).unwrap();
+    }
+    let mut host = Host::start(runs.clone());
+    let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
+    assert_refused_without_leaking(&answer, &runs);
+    host.stop();
+    #[cfg(windows)]
+    unlink_dir(crop.parent().unwrap());
+    fs::remove_dir_all(runs).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
+
+#[test]
+fn get_crop_refuses_a_target_folder_that_is_a_link_out_of_the_runs_folder() {
+    let runs = runs_folder("crop-target-link");
+    let outside = std::env::temp_dir().join(format!("traceqa-mcp-target-{}", process::id()));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(outside.join("crops")).unwrap();
+    fs::write(outside.join("crops").join(format!("{COMPONENT}.png")), SECRET).unwrap();
+    fs::copy(
+        Path::new(EXAMPLES).join("ComponentsFile.shop.json"),
+        outside.join("components.json"),
+    )
+    .unwrap();
+    let target = runs.join(RUN_ID).join("firefox-1280x800");
+    fs::remove_dir_all(&target).unwrap();
+    link_dir(&target, &outside);
+    let mut host = Host::start(runs.clone());
+    let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
+    assert_refused_without_leaking(&answer, &runs);
+    host.stop();
+    unlink_dir(&target);
+    fs::remove_dir_all(runs).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
+
+#[test]
+fn get_crop_still_serves_a_normal_crop() {
+    let runs = runs_folder("crop-normal");
+    let mut host = Host::start(runs.clone());
+    let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
+    assert_eq!(answer["isError"], false, "{answer}");
+    assert_eq!(answer["content"][1]["data"], base64(PICTURE));
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn get_crop_refuses_non_png_names() {
+    let runs = runs_folder("crop-ext");
+    let folder = runs.join(RUN_ID).join("firefox-1280x800");
+    fs::write(folder.join("crops").join("notes.txt"), SECRET).unwrap();
+    change_components(&runs, |file| file["components"][0]["crop"] = json!("crops/notes.txt"));
+    let mut host = Host::start(runs.clone());
+    let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
+    assert_refused_without_leaking(&answer, &runs);
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
