@@ -17,6 +17,16 @@ from traceqa_protocol import models, to_wire
 ROOT = Path(__file__).resolve().parent
 SPEC = ROOT / "spec"
 
+# The CI guards against silently skipped tests (TRACEQA_REQUIRE_BINARY, TRACEQA_NO_UNEXPECTED_SKIPS).
+_guards_spec = importlib.util.spec_from_file_location("ci_guards", ROOT / "tests" / "support" / "ci_guards.py")
+_guards = importlib.util.module_from_spec(_guards_spec)
+_guards_spec.loader.exec_module(_guards)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.pluginmanager.register(_guards, "traceqa-ci-guards")
+
+
 COMPONENT_ID = re.compile(r"^c_[0-9a-f]{12}$")
 
 

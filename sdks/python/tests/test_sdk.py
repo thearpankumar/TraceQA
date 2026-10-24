@@ -11,7 +11,9 @@ import traceqa
 from traceqa_protocol import models
 
 ROOT = Path(__file__).resolve().parents[3]
-BINARY = Path(os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / "traceqa")
+BINARY = Path(
+    os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
+)
 
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
 
