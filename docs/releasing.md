@@ -68,9 +68,10 @@ target and publish. GitHub creates the tag, and the workflow runs the same way.
 
 | Job | What it does |
 |---|---|
-| Check the version | Fails unless the tag is `v` followed by the version in every package. A tag that does not match never ships. |
-| Build | Builds the release binary on Linux, macOS and Windows, checks that it starts and reports the tagged version, and packages it with the README and the licence. |
-| Publish | Writes `SHA256SUMS.txt` and creates the GitHub release with the three archives, release notes generated from the merged pull requests, and the pre-release mark below `1.0.0`. |
+| Check the version | Fails unless the tag points at a commit on `master` and is `v` followed by the version in every package. A tag that does not match never ships. |
+| Audit the dependencies | Runs `cargo audit` (known vulnerabilities) and `cargo deny check` (licences, banned crates, sources, see `deny.toml`). A failure stops the release before any binary is built. |
+| Build | Builds the release binary on Linux, macOS and Windows with the compiler named by `RUST_TOOLCHAIN` in the workflow, checks that it starts and reports the tagged version, and packages it with the README and the licence. It can read the repository and nothing else. |
+| Publish | Runs in the `release` environment. Writes `SHA256SUMS.txt`, signs a build provenance attestation for each archive and for `SHA256SUMS.txt`, and creates the GitHub release with the three archives, release notes generated from the merged pull requests, and the pre-release mark below `1.0.0`. This is the only job that can write. |
 
 The published files:
 
@@ -80,6 +81,36 @@ The published files:
 | `traceqa-v0.2.0-macos-arm64.tar.gz` | Macs with Apple processors |
 | `traceqa-v0.2.0-windows-x86_64.zip` | Windows |
 | `SHA256SUMS.txt` | Checksums, to confirm a download is complete and unchanged |
+
+## Verifying a download
+
+Every archive and `SHA256SUMS.txt` carries a build provenance attestation: a
+statement signed through GitHub that this repository's Release workflow built
+that exact file. With the GitHub CLI:
+
+```sh
+gh attestation verify traceqa-v0.2.0-linux-x86_64.tar.gz --repo thearpankumar/TraceQA
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+The first command proves where the file came from; the second proves the
+download is complete. To report a vulnerability, see `SECURITY.md`.
+
+The first release made with this workflow is the first real test of the tag
+path, which cannot be run without tagging. After it, run both commands above on
+all three archives and fix the workflow before the next release if anything fails.
+
+### Release setup the workflow cannot do
+
+- Add required reviewers to the `release` environment (Settings, Environments).
+  The workflow creates the environment on first use without any protection.
+  Also limit it to the `v*` tags.
+- Raise `RUST_TOOLCHAIN` (top of `release.yml`) in a pull request when a new
+  stable compiler is wanted. Run `rustc --version` locally with that version,
+  and `cargo test --locked`, first.
+- Tags must be on `master`. A tag on any other commit fails the first job.
+
+## Code signing and drivers
 
 The binaries are not code-signed yet. macOS quarantines a downloaded binary
 until `xattr -d com.apple.quarantine traceqa` is run, and Windows SmartScreen
