@@ -27,7 +27,7 @@ pub use traceqa_protocol::ErrorKind;
 use crate::url_safety::redact_text;
 
 /// Time a page load or a script gets when the caller names none.
-pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 /// Time allowed for calls that should be quick. Page loads and scripts pass their own.
 const SHORT: Duration = Duration::from_secs(30);
@@ -203,7 +203,7 @@ pub struct ProcessTransport {
 /// The longest line the engine accepts from a driver. A collector result for a very large
 /// page is tens of MiB, so the limit is generous; its job is to stop a driver that never
 /// sends a newline from using all the memory. A longer line makes the driver count as lost.
-pub const MAX_DRIVER_LINE: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_DRIVER_LINE: usize = 64 * 1024 * 1024;
 
 /// How many messages from the driver may wait to be read. When the engine is busy the
 /// reader thread blocks, so the driver's pipe fills and the driver slows down instead of
@@ -269,7 +269,7 @@ impl ProcessTransport {
     }
 
     /// As [`spawn`](Self::spawn), with another limit on the length of a line from the driver.
-    pub fn spawn_with_limit(command: &DriverCommand, max_line: usize) -> Result<Self, DriverError> {
+    pub(crate) fn spawn_with_limit(command: &DriverCommand, max_line: usize) -> Result<Self, DriverError> {
         let mut process = Command::new(&command.program);
         process.args(&command.args);
         Self::start(process, command, max_line)
@@ -582,8 +582,12 @@ fn request<P: Serialize, R: DeserializeOwned>(
     })
 }
 
-/// Starts one driver and completes the handshake with it.
+/// Starts one driver and completes the handshake with it. Public only for tests that script
+/// their drivers (feature `test-support`).
+#[cfg(any(test, feature = "test-support"))]
 pub type Starter = Box<dyn Fn() -> Result<Driver, DriverError> + Send>;
+#[cfg(not(any(test, feature = "test-support")))]
+type Starter = Box<dyn Fn() -> Result<Driver, DriverError> + Send>;
 
 /// How many times in a row a driver may fail to start before it is given up on.
 const MAX_START_ATTEMPTS: u32 = 2;
@@ -612,11 +616,16 @@ impl Drivers {
                 move || ProcessTransport::spawn(&command).and_then(|transport| Driver::connect(Box::new(transport)));
             Box::new(start) as Starter
         });
-        Self::starting_with(starters.collect())
+        Self::from_starters(starters.collect())
     }
 
     /// Drivers that are started some other way. Tests use this to supply scripted drivers.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn starting_with(starters: Vec<Starter>) -> Self {
+        Self::from_starters(starters)
+    }
+
+    fn from_starters(starters: Vec<Starter>) -> Self {
         Self {
             slots: starters.into_iter().map(|start| (start, Slot::NotStarted)).collect(),
         }

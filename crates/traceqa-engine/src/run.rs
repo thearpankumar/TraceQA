@@ -22,7 +22,7 @@ use crate::url_safety::{check_navigable, redact};
 pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_protocol::contracts::run_folder::VERSION;
 
 /// Features this engine can run.
-pub const FEATURES: [&str; 1] = ["extract"];
+pub(crate) const FEATURES: [&str; 1] = ["extract"];
 
 /// Drivers used when none are configured: from PATH, else the copies `traceqa install` made.
 const DEFAULT_DRIVERS: [&str; 2] = ["traceqa-driver-playwright", "traceqa-driver-webdriver"];
