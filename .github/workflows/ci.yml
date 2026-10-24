@@ -204,6 +204,8 @@ jobs:
       TRACEQA_REQUIRE_CHROMEDRIVER: "1"
       # A missing binary fails the tests that need it instead of skipping them (tests/support/ci_guards.py).
       TRACEQA_REQUIRE_BINARY: "1"
+      # A test skipped for a reason that is not on the allow-list in tests/support/ci_guards.py fails the run.
+      TRACEQA_NO_UNEXPECTED_SKIPS: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

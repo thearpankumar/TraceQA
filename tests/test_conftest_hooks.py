@@ -89,3 +89,34 @@ def test_require_binary_turns_binary_skips_into_failures(
 def test_require_binary_leaves_other_skips_alone(suite: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRACEQA_REQUIRE_BINARY", "1")
     run(suite, SKIP_BECAUSE).assert_outcomes(skipped=1)
+
+
+def test_unexpected_skips_fail_the_run_and_are_named(suite: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRACEQA_NO_UNEXPECTED_SKIPS", "1")
+    result = run(suite, SUITE)
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    lines = result.stdout.lines
+    listed = "\n".join(lines[lines.index("Unexpected skips:") + 1 :])
+    assert "test_because" in listed
+    assert "because" in listed
+    assert "test_allowed" not in listed
+    assert "test_xfail" not in listed
+
+
+def test_allow_listed_skips_pass(suite: pytest.Pytester, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRACEQA_NO_UNEXPECTED_SKIPS", "1")
+    source = (
+        "import pytest\n\n\n"
+        "@pytest.mark.skipif(True, reason='set TRACEQA_TEST_SAFARI=1 to drive real Safari')\n"
+        "def test_a():\n    pass\n\n\n"
+        'def test_b():\n    pytest.skip("the WebDriver driver has no hook to run a script before the page\'s")\n\n\n'
+        "@pytest.mark.xfail(reason='x')\ndef test_c():\n    assert False\n"
+    )
+    result = run(suite, source)
+    assert result.ret == pytest.ExitCode.OK
+    result.assert_outcomes(skipped=2, xfailed=1)
+
+
+def test_skips_are_ignored_when_the_variable_is_unset(suite: pytest.Pytester) -> None:
+    result = run(suite, SKIP_BECAUSE)
+    assert result.ret == pytest.ExitCode.OK
