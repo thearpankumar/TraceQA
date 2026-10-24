@@ -741,7 +741,21 @@ mod tests {
 
     #[test]
     fn run_start_after_shutdown_is_refused() {
-        let out_dir = std::env::temp_dir().join("traceqa-serve-after-shutdown");
+        /// Removes the folder when the test ends, also when an assertion panics.
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        // One folder per process, so parallel test processes do not meet; any leftover from a
+        // crashed earlier run is cleared first, and a folder of another process is left alone.
+        let out_dir = std::env::temp_dir().join(format!("traceqa-serve-after-shutdown-{}", std::process::id()));
+        let stale = std::env::temp_dir().join(format!("traceqa-serve-after-shutdown-{}", u32::MAX));
+        std::fs::create_dir_all(&stale).unwrap();
+        let _stale = Cleanup(stale);
+        let _ = std::fs::remove_dir_all(&out_dir);
+        let _cleanup = Cleanup(out_dir.clone());
         let replies = converse(&[
             request(1, "engine.shutdown", serde_json::json!({})),
             two_target_start(2, &out_dir),
