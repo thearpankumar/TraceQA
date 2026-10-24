@@ -12,13 +12,14 @@ use traceqa_engine::driver::Drivers;
 use traceqa_engine::{Execution, Run};
 use traceqa_protocol::jsonrpc::{code, RpcError};
 use traceqa_protocol::types::{
-    BrowserTarget, Component, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, Viewport,
+    BrowserTarget, Component, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, StorageState,
+    Viewport,
 };
 
 use crate::Config;
 
 /// What `tools/list` returns. The descriptions are what the AI reads to choose a tool.
-pub fn list(_config: &Config) -> Value {
+pub fn list(config: &Config) -> Value {
     let mut tools = json!([
         {
             "name": "extract",
@@ -58,10 +59,6 @@ pub fn list(_config: &Config) -> Value {
                         "description": "How many screens to scroll through. 0 reads the page without scrolling."
                     },
                     "timeout_ms": { "type": "integer", "minimum": 0, "description": "Time allowed for the page to load." },
-                    "storage_state": {
-                        "type": "string",
-                        "description": "Path of a state file (Playwright's storageState format, as `traceqa login` saves) holding cookies and stored values, for pages behind a sign-in. Its contents are never shown."
-                    }
                 },
                 "required": ["url"],
                 "additionalProperties": false
@@ -117,6 +114,13 @@ pub fn list(_config: &Config) -> Value {
             }
         }
     ]);
+    // Without a state folder the AI is not told that the option exists.
+    if config.state_dir.is_some() {
+        tools[0]["inputSchema"]["properties"]["storage_state"] = json!({
+            "type": "string",
+            "description": "The name of a saved sign-in state file the operator provided, for example shop.state.json, for pages behind a sign-in. A name only, never a path. Its contents are never shown."
+        });
+    }
     for tool in tools.as_array_mut().into_iter().flatten() {
         let extract = tool["name"] == "extract";
         let title = match tool["name"].as_str().unwrap_or_default() {
@@ -337,14 +341,11 @@ fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, S
     for target in &mut targets {
         target.headless = Some(true);
     }
-    let storage_state = match &args.storage_state {
-        Some(path) => {
-            let text = fs::read_to_string(path).map_err(|e| format!("could not read the state file {path}: {e}"))?;
-            // The contents are a secret, so a parse error names the file and not what is in it.
-            Some(serde_json::from_str(&text).map_err(|_| format!("{path} is not a storage state file"))?)
-        }
-        None => None,
-    };
+    let storage_state = args
+        .storage_state
+        .as_deref()
+        .map(|name| resolve_state(config, name))
+        .transpose()?;
     let request = RunStartParams {
         feature: "extract".into(),
         url: args.url,
@@ -362,6 +363,78 @@ fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, S
         storage_state,
     };
     Ok(request)
+}
+
+/// A saved sign-in state, by file name, from the folder the operator chose. The AI never gives
+/// a path, and the answers never hold a path, an OS error or what the file contains.
+pub(crate) fn resolve_state(config: &Config, name: &str) -> Result<StorageState, String> {
+    let Some(state_dir) = &config.state_dir else {
+        return Err(
+            "storage_state is off. The person who started this server can enable it with: \
+            traceqa mcp --state-dir <folder with saved states>"
+                .into(),
+        );
+    };
+    let shown: String = clean(name).chars().take(64).collect();
+    let missing = || {
+        let mut names: Vec<String> = fs::read_dir(state_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                // file_type() does not follow links, so a link is not offered.
+                if !entry.file_type().ok()?.is_file() {
+                    return None;
+                }
+                let name = entry.file_name().into_string().ok()?;
+                (name.ends_with(".json") && valid_state_name(&name)).then_some(name)
+            })
+            .collect();
+        names.sort();
+        names.truncate(20);
+        format!("no state file named {shown}. Available: {}", names.join(", "))
+    };
+    if !valid_state_name(name) {
+        return Err(missing());
+    }
+    let path = safe_file_in(state_dir, &state_dir.join(name)).ok_or_else(missing)?;
+    let text = fs::read_to_string(path).map_err(|_| missing())?;
+    // The contents are a secret, so a parse error names the file and not what is in it.
+    serde_json::from_str(&text).map_err(|_| format!("{shown} is not a storage state file"))
+}
+
+/// A plain file name: letters, digits, dot, dash and underscore, starting with a letter or
+/// digit, not ending in a dot, and not a Windows device name (on any system, so a state folder
+/// works the same everywhere).
+fn valid_state_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let plain = chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && !name.ends_with('.');
+    let stem = name.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|p| {
+            stem.strip_prefix(p)
+                .is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+        });
+    plain && !device
+}
+
+/// The real path of `path` when it is a regular file (not a link) inside `root`, otherwise
+/// `None`. Both sides are made canonical before they are compared, which also catches a link or
+/// junction on the way (Windows canonical paths carry a `\\?\` prefix on both). A local attacker
+/// who can write to `root` could still swap the file between this check and the read; the
+/// caller reads from the returned path to keep that window small.
+fn safe_file_in(root: &Path, path: &Path) -> Option<PathBuf> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return None;
+    }
+    let real = fs::canonicalize(path).ok()?;
+    real.starts_with(fs::canonicalize(root).ok()?).then_some(real)
 }
 
 impl Call<'_> {
