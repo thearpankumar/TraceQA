@@ -592,4 +592,59 @@ mod tests {
         assert_eq!(components[1].path, "frame \"newsletter\"");
         assert_eq!(components[1].instances[0].box_.x, 100.0);
     }
+
+    #[test]
+    fn the_first_templated_control_of_an_item_is_star_and_the_next_is_numbered_from_one() {
+        // Two links per card, both named by the product: same role, same place, told apart by order.
+        let elements: Vec<Located> = (0..4)
+            .flat_map(|i| {
+                let path = vec![step("list", "ul", None), step("listitem", "li", Some((i, 4)))];
+                [
+                    element("link", &format!("Title {i}"), path.clone()),
+                    element("link", &format!("Image of {i}"), path),
+                ]
+            })
+            .collect();
+        let components = group(elements);
+        assert_eq!(components.len(), 2);
+        let path = &components[0].path;
+        assert_eq!(components[0].id, fingerprint::component_id("link", "*", path));
+        assert_eq!(components[1].id, fingerprint::component_id("link", "*#1", path));
+        assert_eq!(components[0].instances[2].name, "Title 2");
+        assert_eq!(components[1].instances[2].name, "Image of 2");
+    }
+
+    #[test]
+    fn unnamed_siblings_are_keyed_by_their_position_counted_from_zero() {
+        let components = group(vec![
+            element("button", "", vec![]),
+            element("button", "", vec![]),
+            element("button", "", vec![]),
+        ]);
+        let ids: Vec<&str> = components.iter().map(|c| c.id.as_str()).collect();
+        let expected: Vec<String> = (0..3)
+            .map(|n| fingerprint::component_id("button", &format!("<button>#{n}"), ""))
+            .collect();
+        assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn one_low_confidence_instance_makes_the_component_low_and_signals_are_listed_once() {
+        let mut weak = element("button", "Go", vec![]);
+        weak.element.interactive = InteractiveEvidence {
+            confidence: Confidence::Low,
+            signals: vec!["native".into(), "cursor".into()],
+        };
+        let strong = element("button", "Go", vec![]);
+        let components = group(vec![strong, weak, element("button", "Go", vec![])]);
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].instances.len(), 3);
+        // The first instance was High; the later Low one wins, and a later High one does not undo it.
+        assert_eq!(components[0].confidence, Confidence::Low);
+        // "native" came from all three instances and is kept once; "cursor" was new.
+        assert_eq!(components[0].signals, ["native", "cursor"]);
+        // Instances that are all High leave the component High.
+        let calm = group(vec![element("button", "Go", vec![]), element("button", "Go", vec![])]);
+        assert_eq!(calm[0].confidence, Confidence::High);
+    }
 }
