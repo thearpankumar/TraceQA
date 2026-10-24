@@ -260,6 +260,26 @@ Safari, only the cookies and stored values of the site the window ends on are
 saved. `--headless` saves as soon as the page has loaded, for scripts and tests
 where the page signs in by itself.
 
+How FILE is written:
+
+- `--save` is checked before the browser opens. If FILE is a directory, or its
+  folder does not exist, the command stops at once with exit code 2, so you do
+  not sign in for nothing. A bad address exits with 2 as well: it must be an
+  `http` or `https` address, and must not hold a user name or password
+  (`https://user:pass@host/`). Sign in in the window instead.
+- The state goes to a hidden temporary file next to FILE, which is made
+  readable by its owner alone before anything is written to it, and is then
+  moved over FILE. FILE is never readable by others, not even briefly. A
+  failure leaves no temporary file behind. An existing FILE is replaced, and
+  ends up owner-only even if it was not before. A link is replaced by the new
+  file, not written through.
+- On Linux and macOS the mode is `600`. On Windows the file's access list is
+  set to the owner alone (`OWNER RIGHTS`, with inherited entries removed) by
+  running `icacls` from the Windows folder. That also takes away the access
+  that SYSTEM and administrators would otherwise have: an administrator can
+  still take ownership of the file. If the access list cannot be set, nothing
+  is saved and the command fails.
+
 ### A state file by hand
 
 When a site only checks a stored value, the file can be written by hand:
