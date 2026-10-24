@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import anyio
@@ -92,6 +94,40 @@ def test_hidden_elements_are_left_out_unless_asked_for(shop_url: str, tmp_path: 
             default = data(await client.call_tool("extract", {"url": shop_url}))
             everything = data(await client.call_tool("extract", {"url": shop_url, "include_hidden": True}))
             assert default["targets"][0]["components"] < everything["targets"][0]["components"] == 37
+
+    anyio.run(conversation)
+
+
+def test_a_bad_state_dir_stops_the_server_with_exit_2(tmp_path: Path) -> None:
+    done = subprocess.run(
+        [str(BINARY), "mcp", "--out", str(tmp_path / "runs"), "--state-dir", str(tmp_path / "missing")],
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 2 and "is not a folder" in done.stderr
+
+
+def test_storage_state_takes_a_name_in_the_state_dir_and_refuses_a_path(shop_url: str, tmp_path: Path) -> None:
+    states = tmp_path / "states"
+    states.mkdir()
+    shutil.copy(ROOT / "spec" / "examples" / "StorageState.signed-in.json", states / "shop.state.json")
+
+    async def conversation() -> None:
+        params = StdioServerParameters(
+            command=str(BINARY),
+            args=["mcp", "--out", str(tmp_path / "runs"), "--state-dir", str(states)],
+            env=dict(os.environ),
+        )
+        async with Client(params) as client:
+            extract = (await client.list_tools()).tools[0]
+            assert "storage_state" in extract.input_schema["properties"]
+            data(await client.call_tool("extract", {"url": shop_url, "storage_state": "shop.state.json"}))
+            by_path = {"url": shop_url, "storage_state": str(states / "shop.state.json")}
+            refused = await client.call_tool("extract", by_path)
+            assert refused.is_error and "no state file named" in refused.content[0].text
+            assert str(states) not in refused.content[0].text
 
     anyio.run(conversation)
 

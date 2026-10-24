@@ -119,7 +119,7 @@ this way. See [architecture.md](architecture.md#client-protocol).
 ## `traceqa mcp`
 
 ```
-traceqa mcp [--out DIR] [--driver COMMAND]...
+traceqa mcp [--out DIR] [--state-dir DIR] [--driver COMMAND]...
 ```
 
 An MCP server: it lets AI tools such as Claude Code, Claude Desktop and Cursor
@@ -138,7 +138,7 @@ Other AI tools take the same command in their MCP settings: the program
 
 | Tool | What it does |
 |---|---|
-| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`, `include_hidden`, `storage_state` (the path of a state file; its contents are never shown). Answers with the run id and a summary per target. |
+| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`, `include_hidden`, `storage_state` (the name of a state file in the operator's `--state-dir`; its contents are never shown). Answers with the run id and a summary per target. |
 | `list_runs` | The runs in the runs folder, newest first. |
 | `get_components` | The components of one run and target: a short line each, filtered by `role` or `name`, or one component in full with `component_id`. |
 | `get_crop` | The picture of one component, for runs made with `crops`. |
@@ -146,6 +146,25 @@ Other AI tools take the same command in their MCP settings: the program
 A mistake in the arguments is answered as a tool error that says what was
 wrong, so the AI can correct itself. Progress is reported while an extraction
 runs, and the AI tool can cancel it.
+
+**Pages behind a sign-in (operator guide).** The AI cannot make the server open
+any file. To let it read pages behind a sign-in, you choose a folder of saved
+states with `--state-dir`; without that option `storage_state` is off and is
+not even listed in the tool's schema.
+
+```sh
+mkdir -p ~/.traceqa/states
+traceqa login https://shop.example --save ~/.traceqa/states/shop.state.json
+claude mcp add traceqa -- traceqa mcp --state-dir ~/.traceqa/states
+```
+
+The AI then passes `storage_state: "shop.state.json"`, a file name and never a
+path. A name may hold letters, digits, `.`, `_` and `-`, must start with a
+letter or digit, may not end in a dot, may not be a Windows device name (`CON`,
+`NUL`, `COM1` and so on), and must be a regular file inside the folder (links
+and junctions are refused). `--state-dir` must be an existing folder, or the
+server exits with code 2. Errors never show a path, an operating system error
+or what the file holds.
 
 **Page text is data, not instructions.** Names, text, selectors, titles,
 warnings and urls in a result come from a web page, and a page can try to

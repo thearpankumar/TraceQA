@@ -53,6 +53,10 @@ struct McpArgs {
     /// Where runs are written and read.
     #[arg(long, default_value = "runs")]
     out: String,
+    /// A folder of saved sign-in states (see `traceqa login --save`). With it, the AI can name
+    /// a file in this folder as `storage_state`; without it, the AI cannot use sign-ins at all.
+    #[arg(long, value_name = "DIR")]
+    state_dir: Option<PathBuf>,
     #[command(flatten)]
     drivers: DriverArgs,
 }
@@ -152,9 +156,20 @@ fn mcp(args: McpArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let state_dir = match args.state_dir.as_deref().map(std::fs::canonicalize).transpose() {
+        Ok(dir) if dir.as_ref().is_none_or(|dir| dir.is_dir()) => dir,
+        _ => {
+            eprintln!(
+                "traceqa: --state-dir {} is not a folder",
+                args.state_dir.as_deref().unwrap_or(Path::new("")).display()
+            );
+            return ExitCode::from(2);
+        }
+    };
     let config = traceqa_mcp::Config {
         runs_dir,
         drivers: driver_commands(&args.drivers.drivers),
+        state_dir,
     };
     // Stdout belongs to the protocol. Everything for people goes to stderr, which hosts log.
     match traceqa_mcp::serve(BufReader::new(io::stdin()), Box::new(io::stdout()), config) {

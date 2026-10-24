@@ -25,12 +25,20 @@ struct Host {
 
 impl Host {
     fn start(runs_dir: PathBuf) -> Self {
+        Self::start_with(runs_dir, None)
+    }
+
+    fn start_with(runs_dir: PathBuf, state_dir: Option<PathBuf>) -> Self {
         let (server_input, input) = io::pipe().unwrap();
         let (output, server_output) = io::pipe().unwrap();
         // No such driver exists, so a run fails its targets without opening a browser.
         let drivers = vec![DriverCommand::parse("traceqa-no-such-driver").unwrap()];
         let server = thread::spawn(move || {
-            let config = Config { runs_dir, drivers };
+            let config = Config {
+                runs_dir,
+                drivers,
+                state_dir,
+            };
             serve(BufReader::new(server_input), Box::new(server_output), config).unwrap();
         });
         Self {
@@ -219,12 +227,12 @@ fn mistakes_come_back_as_tool_errors_the_ai_can_read() {
         (
             "extract",
             json!({ "url": "https://x.test", "storage_state": "/no/such/state.json" }),
-            "could not read the state file",
+            "storage_state is off",
         ),
         (
             "extract",
             json!({ "url": "https://x.test", "storage_state": bad_state.display().to_string() }),
-            "is not a storage state file",
+            "storage_state is off",
         ),
     ];
     for (tool, arguments, expected) in failing {
@@ -374,6 +382,7 @@ fn extract_asks_the_engine_for_visible_elements_only_unless_include_hidden_is_se
     let config = Config {
         runs_dir: std::env::temp_dir(),
         drivers: Vec::new(),
+        state_dir: None,
     };
     let hidden = |arguments: Value| {
         let request = extract_request(&config, arguments).unwrap();
@@ -514,4 +523,158 @@ fn stored_error_text_is_cleaned_and_marked_untrusted() {
         assert!(!text.contains(bad), "{bad:?} left in {text}");
     }
     host.stop();
+}
+
+/// A folder of saved states: one real, one that is not a state file.
+fn state_folder(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("traceqa-mcp-states-{name}-{}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::copy(
+        Path::new(EXAMPLES).join("StorageState.signed-in.json"),
+        dir.join("shop.state.json"),
+    )
+    .unwrap();
+    fs::write(dir.join("bad.json"), r#"{"token": "secret-token-123"}"#).unwrap();
+    dir
+}
+
+fn config_with(state_dir: Option<PathBuf>) -> Config {
+    Config {
+        runs_dir: std::env::temp_dir(),
+        drivers: Vec::new(),
+        state_dir: state_dir.map(|dir| fs::canonicalize(dir).unwrap()),
+    }
+}
+
+#[test]
+fn storage_state_is_refused_without_a_state_dir() {
+    use crate::tools::resolve_state;
+    let why = resolve_state(&config_with(None), "shop.state.json").err().unwrap();
+    assert!(why.contains("--state-dir"), "{why}");
+    assert!(!why.contains(std::env::temp_dir().to_str().unwrap()), "{why}");
+}
+
+#[test]
+fn storage_state_rejects_separators_dotdot_absolute_drive_and_stream_names() {
+    use crate::tools::resolve_state;
+    let dir = state_folder("names");
+    // A real file just outside the folder, which a traversal would reach.
+    fs::write(dir.parent().unwrap().join("outside.json"), "{}").unwrap();
+    let config = config_with(Some(dir.clone()));
+    let long = format!("{}.json", "a".repeat(200));
+    let names = [
+        "../outside.json",
+        "a/b.json",
+        "a\\b.json",
+        "/etc/passwd",
+        "C:\\x.json",
+        "x.json:stream",
+        "",
+        ".",
+        "..",
+        ".hidden.json",
+        "CON",
+        "nul.json",
+        "com1.txt",
+        "LPT9",
+        "a. ",
+        "a.",
+        "a b.json",
+        &long,
+    ];
+    for name in names {
+        let why = resolve_state(&config, name)
+            .err()
+            .unwrap_or_else(|| panic!("{name:?} was accepted"));
+        assert!(why.contains("no state file named"), "{name:?}: {why}");
+        assert!(!why.contains(dir.to_str().unwrap()), "{name:?}: {why}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn storage_state_rejects_a_symlink_inside_the_state_dir() {
+    use crate::tools::resolve_state;
+    let dir = state_folder("link");
+    let outside = std::env::temp_dir().join(format!("traceqa-mcp-outside-{}", process::id()));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    fs::copy(dir.join("shop.state.json"), outside.join("real.json")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(outside.join("real.json"), dir.join("evil.json")).unwrap();
+    // A junction needs no privilege on Windows. It is a folder, so it is no state file either.
+    #[cfg(windows)]
+    {
+        let made = process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(dir.join("evil.json"))
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink failed: {made:?}");
+    }
+    let why = resolve_state(&config_with(Some(dir.clone())), "evil.json")
+        .err()
+        .unwrap();
+    assert!(why.contains("no state file named"), "{why}");
+    assert!(resolve_state(&config_with(Some(dir.clone())), "shop.state.json").is_ok());
+    // Remove the link first, so deleting the folder cannot follow it.
+    #[cfg(windows)]
+    fs::remove_dir(dir.join("evil.json")).unwrap();
+    fs::remove_dir_all(dir).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
+
+#[test]
+fn storage_state_reads_a_named_file_and_never_echoes_its_contents_or_os_errors() {
+    use crate::tools::resolve_state;
+    let dir = state_folder("read");
+    let config = config_with(Some(dir.clone()));
+    assert!(resolve_state(&config, "shop.state.json").is_ok());
+
+    let broken = resolve_state(&config, "bad.json").err().unwrap();
+    assert!(broken.contains("is not a storage state file"), "{broken}");
+    assert!(!broken.contains("secret-token-123"), "{broken}");
+
+    let missing = resolve_state(&config, "nope.json").err().unwrap();
+    assert!(missing.contains("no state file named nope.json"), "{missing}");
+    assert!(
+        missing.contains("shop.state.json") && missing.contains("bad.json"),
+        "{missing}"
+    );
+    for why in [&broken, &missing] {
+        assert!(!why.contains(dir.to_str().unwrap()), "{why}");
+        assert!(!why.to_lowercase().contains("os error"), "{why}");
+    }
+
+    // End to end through the tool: a name works, a path is refused.
+    let mut host = Host::start_with(runs_folder("state-e2e"), Some(dir.clone()));
+    let ok = host.call(
+        "extract",
+        json!({ "url": "https://x.test", "storage_state": "shop.state.json" }),
+    );
+    assert_eq!(ok["isError"], false, "{ok}");
+    let path = dir.join("shop.state.json").display().to_string();
+    let refused = host.call("extract", json!({ "url": "https://x.test", "storage_state": path }));
+    assert_eq!(refused["isError"], true);
+    host.stop();
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn tools_list_hides_storage_state_unless_a_state_dir_is_set() {
+    let storage = |host: &mut Host| {
+        let tools = host.request("tools/list", json!({}))["result"]["tools"].clone();
+        tools[0]["inputSchema"]["properties"]["storage_state"].clone()
+    };
+    let mut off = Host::start(runs_folder("schema-off"));
+    assert!(storage(&mut off).is_null());
+    off.stop();
+    let dir = state_folder("schema-on");
+    let mut on = Host::start_with(runs_folder("schema-on"), Some(dir.clone()));
+    let property = storage(&mut on);
+    assert!(property["description"].as_str().unwrap().contains("shop.state.json"));
+    on.stop();
+    fs::remove_dir_all(dir).unwrap();
 }
