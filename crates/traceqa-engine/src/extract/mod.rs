@@ -27,7 +27,8 @@ use traceqa_recorder::now_rfc3339;
 use self::crops::{save_component_crops, screenshot};
 use self::frames::{read_frames, Reading};
 use self::heuristics::{
-    covered_warning, landing_warnings, mark_changed_names, names_of, stored_session_warnings, Removals, NAME_WATCH,
+    covered_warning, landing_warnings, mark_changed_names, names_of, requests_failed_warning, stored_session_warnings,
+    Removals, NAME_WATCH,
 };
 use self::progress::{timed, Clock};
 pub(crate) use self::progress::{Progress, Sink};
@@ -212,6 +213,7 @@ fn read_page(
         );
     }
 
+    let failed_requests = requests_failed_warning(&reading);
     let Reading {
         elements,
         title,
@@ -226,6 +228,7 @@ fn read_page(
         ));
     }
     warnings.extend(removals.warning());
+    warnings.extend(failed_requests);
     progress.emit(
         "elements.collected",
         Some(job.name),
