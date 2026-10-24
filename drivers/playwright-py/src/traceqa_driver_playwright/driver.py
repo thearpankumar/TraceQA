@@ -501,6 +501,15 @@ def settle(page: Page, limit_s: float, *, animations: bool = True) -> None:
     )
 
 
+def not_installed(text: str) -> bool:
+    """True when Playwright's launch error says the browser is not on this machine.
+
+    A bundled browser that was never downloaded says "Executable doesn't exist"; a system
+    channel such as chrome or msedge says it "is not found".
+    """
+    return "Executable doesn't exist" in text or ("distribution" in text and "is not found" in text)
+
+
 class PlaywrightDriver(BaseDriver[Session]):
     NAME = NAME
     VERSION = VERSION
@@ -563,6 +572,10 @@ class PlaywrightDriver(BaseDriver[Session]):
             if browser is not None:
                 with contextlib.suppress(PlaywrightError):
                     browser.close()
+            if target.browser in BROWSERS and not_installed(error.message):
+                raise RpcError(
+                    "unsupported", f"{target.browser} is not installed. Run: traceqa install {target.browser}"
+                ) from error
             raise RpcError("internal", f"could not open {target.browser}: {first_line(error.message)}") from error
 
         session_id = self._new_session_id()

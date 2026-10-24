@@ -79,7 +79,9 @@ def start_safaridriver() -> tuple[subprocess.Popen[bytes], str]:
     """Start Apple's WebDriver server for Safari on a free port and wait until it answers."""
     program = shutil.which("safaridriver")
     if program is None:
-        raise RpcError("unsupported", "safaridriver was not found. Safari can only be driven on macOS.")
+        raise RpcError(
+            "unsupported", "safari needs safaridriver, which ships with macOS. It was not found on this machine."
+        )
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]

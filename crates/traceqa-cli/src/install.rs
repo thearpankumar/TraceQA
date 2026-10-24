@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use clap::Args;
-use traceqa_engine::driver::{Driver, DriverCommand, ProcessTransport};
+use traceqa_engine::driver::{Driver, DriverCommand, DriverError, ErrorKind, ProcessTransport};
 use traceqa_engine::{driver_commands, home};
+use traceqa_protocol::types::{BrowserTarget, SessionOpenParams, Viewport};
 
 /// The Python packages that make up the drivers, and where they sit in the repository.
 const PACKAGES: [(&str, &str); 3] = [
@@ -348,35 +349,99 @@ pub fn doctor(explicit: &[String]) -> ExitCode {
     }
 
     println!("\nDrivers:");
-    let mut browsers = Vec::new();
+    let mut working = Vec::new();
+    let mut missing = Vec::new();
+    let mut other_problems = 0;
+    let mut any_driver = false;
     for command in driver_commands(explicit) {
         println!("  {command}");
         println!("    {}", origin(&command));
         let connected = ProcessTransport::spawn(&command).and_then(|transport| Driver::connect(Box::new(transport)));
-        match connected {
-            Ok(driver) => {
-                let info = &driver.info;
-                println!(
-                    "    works: {} {}, opens {}",
-                    info.driver_name,
-                    info.driver_version,
-                    info.browsers.join(", ")
-                );
-                browsers.extend(info.browsers.iter().cloned());
+        let mut driver = match connected {
+            Ok(driver) => driver,
+            Err(error) => {
+                println!("    does not start: {}", error.message());
+                continue;
             }
-            Err(error) => println!("    does not start: {error}"),
+        };
+        any_driver = true;
+        println!(
+            "    works: {} {}, opens {}",
+            driver.info.driver_name,
+            driver.info.driver_version,
+            driver.info.browsers.join(", ")
+        );
+        // Opening a browser is the only sure way to know it is installed: a channel such as
+        // msedge lives outside TraceQA's folder. Each launch takes a second or two, so every
+        // browser gets its line as soon as it is known.
+        let names: Vec<String> = driver.info.browsers.clone();
+        for name in names.iter().filter(|name| can_probe(name)) {
+            match probe_browser(&mut driver, name) {
+                Ok(()) => {
+                    println!("    {name}: ok");
+                    working.push(name.clone());
+                }
+                Err(error) if *error.kind() == ErrorKind::Unsupported => {
+                    println!("    {name}: not installed -> {}", error.message());
+                    missing.push(name.clone());
+                }
+                Err(error) => {
+                    println!("    {name}: does not open: {}", error.message());
+                    other_problems += 1;
+                }
+            }
         }
     }
 
-    if browsers.is_empty() {
-        println!("\nNo driver works. Run: traceqa install");
-        ExitCode::FAILURE
-    } else {
-        browsers.sort();
-        browsers.dedup();
-        println!("\nReady. Browsers available: {}", browsers.join(", "));
-        ExitCode::SUCCESS
+    if working.is_empty() {
+        if !any_driver {
+            println!("\nNo driver works. Run: traceqa install");
+        } else {
+            println!("\nNo browser opens.");
+            print_missing(&missing);
+            if other_problems > 0 {
+                println!("See the lines above for the browsers that failed for another reason.");
+            }
+        }
+        return ExitCode::FAILURE;
     }
+    working.sort();
+    working.dedup();
+    println!("\nReady. Browsers that work: {}", working.join(", "));
+    print_missing(&missing);
+    ExitCode::SUCCESS
+}
+
+fn print_missing(missing: &[String]) {
+    if !missing.is_empty() {
+        println!(
+            "Not installed: {}. Run: traceqa install {}",
+            missing.join(", "),
+            missing.join(" ")
+        );
+    }
+}
+
+/// Browsers that open by themselves. `cdp` and `webdriver` need an address, and Safari exists
+/// only on macOS.
+fn can_probe(browser: &str) -> bool {
+    !matches!(browser, "cdp" | "webdriver") && (browser != "safari" || cfg!(target_os = "macos"))
+}
+
+/// Opens a headless window of `browser` and closes it again.
+fn probe_browser(driver: &mut Driver, browser: &str) -> Result<(), DriverError> {
+    let mut target = BrowserTarget::named(browser);
+    target.headless = Some(true);
+    let session = driver.open_session(&SessionOpenParams {
+        target,
+        viewport: Viewport {
+            width: 1280,
+            height: 800,
+        },
+        locale: None,
+        storage_state: None,
+    })?;
+    driver.close_session(&session.session_id)
 }
 
 #[cfg(test)]

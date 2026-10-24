@@ -180,3 +180,83 @@ def test_the_table_and_the_timings(shop_url: str, tmp_path: Path) -> None:
     assert "TARGET" in result.stdout and "chromium-1280x800" in result.stdout and "completed" in result.stdout
     assert "SCREENS" in result.stdout and "LOAD" in result.stdout
     assert f"Run folder: {folder}" in result.stdout
+
+
+# ---- doctor ------------------------------------------------------------------------------
+
+HALF_INSTALLED_DRIVER = ROOT / "tests" / "support" / "half_installed_driver.py"
+
+
+def doctor(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
+    environment = {key: value for key, value in os.environ.items() if key != "TRACEQA_DRIVERS"} | env
+    return subprocess.run(
+        [str(BINARY), "doctor", *args],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
+    )
+
+
+def no_jargon(output: str) -> None:
+    assert "(transport)" not in output and "program not found" not in output
+
+
+def test_doctor_with_no_browsers_installed_names_each_one_to_install(tmp_path: Path) -> None:
+    empty = tmp_path / "no-browsers"
+    empty.mkdir()
+    result = doctor(PLAYWRIGHT_BROWSERS_PATH=str(empty))
+    # A system Chrome or Edge is outside the empty folder, so it may still open: the exit code
+    # is 0 exactly when some browser did.
+    some_browser_opens = ": ok" in result.stdout
+    assert result.returncode == (0 if some_browser_opens else 1), result.stdout
+    for browser in ("chromium", "firefox", "webkit"):
+        assert f"{browser}: not installed" in result.stdout
+        assert f"traceqa install {browser}" in result.stdout
+    assert ("Ready" in result.stdout) == some_browser_opens and "Not installed:" in result.stdout
+    no_jargon(result.stdout)
+
+
+def test_doctor_with_working_browsers_exits_0_and_lists_them() -> None:
+    result = doctor()
+    assert result.returncode == 0, result.stdout
+    assert "chromium: ok" in result.stdout and "Ready. Browsers that work:" in result.stdout
+    no_jargon(result.stdout)
+
+
+def test_doctor_names_the_browsers_that_are_missing_while_others_work() -> None:
+    result = doctor("--driver", f'"{sys.executable}" "{HALF_INSTALLED_DRIVER}"')
+    assert result.returncode == 0, result.stdout
+    assert "alpha: ok" in result.stdout and "beta: not installed" in result.stdout
+    assert "Ready. Browsers that work: alpha" in result.stdout
+    assert "Not installed: beta. Run: traceqa install beta" in result.stdout
+
+
+def test_doctor_with_a_driver_that_is_not_there_says_so_plainly() -> None:
+    result = doctor("--driver", "traceqa-no-such-driver")
+    assert result.returncode == 1
+    assert "it is not installed or not on PATH. Run: traceqa install" in result.stdout
+    no_jargon(result.stdout)
+
+
+def test_extract_with_a_missing_browser_fails_the_target_with_the_install_command(
+    shop_url: str, tmp_path: Path
+) -> None:
+    empty = tmp_path / "no-browsers"
+    empty.mkdir()
+    environment = os.environ | {"PLAYWRIGHT_BROWSERS_PATH": str(empty)}
+    result = subprocess.run(
+        [str(BINARY), "extract", shop_url, "--out", str(tmp_path / "runs"), "--json"],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 1
+    error = json.loads(result.stdout)["targets"][0]["error"]
+    assert "chromium is not installed. Run: traceqa install chromium" in error
+    assert "Executable doesn't exist" not in error
