@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: prototype keys</title>
+<style>body { font: 14px sans-serif; } div, p { margin: 6px 0; }</style>
+<body>
+<h1>Names that exist on every object</h1>
+<p>The collector looks roles and tags up in tables by strings the page chooses. A table
+that inherits from Object.prototype answers "constructor" with a function.</p>
+
+<div><input id="pk-type-constructor" type="constructor" aria-label="Type constructor" data-expect="role=textbox; name=Type constructor; source=aria-label"></div>
+<div><input id="pk-type-proto" type="__proto__" aria-label="Type proto" data-expect="role=textbox; name=Type proto"></div>
+<div><input id="pk-type-hasown" type="hasOwnProperty" aria-label="Type hasOwnProperty" data-expect="role=textbox"></div>
+<div><input id="pk-type-tostring" type="toString" aria-label="Type toString" data-expect="role=textbox"></div>
+
+<div><div id="pk-role-constructor" role="constructor" tabindex="0" aria-label="Role constructor"
+  data-expect="role=constructor; confidence=low; signals=tabindex; name=Role constructor"></div></div>
+<div><div id="pk-role-proto" role="__proto__" tabindex="0" aria-label="Role proto"
+  data-expect="role=__proto__; confidence=low; signals=tabindex"></div></div>
+<div><button id="pk-button-role-proto" role="__proto__" aria-label="Button with role proto" data-expect="role=__proto__; confidence=high; signals=native; name=Button with role proto">Button with role proto</button></div>
+<div><button id="pk-button-role-constructor" role="Constructor" aria-label="Button with role constructor" data-expect="role=constructor; name=Button with role constructor">Button with role constructor</button></div>
+
+<constructor><button id="pk-in-constructor-tag" data-expect="role=button; name=In a constructor element">In a constructor element</button></constructor>
+<tostring><button id="pk-in-tostring-tag" data-expect="role=button; name=In a toString element">In a toString element</button></tostring>
+<hasownproperty><a id="pk-in-hasown-tag" href="#x" data-expect="role=link; name=In a hasOwnProperty element">In a hasOwnProperty element</a></hasownproperty>
+
+<div id="pk-plain" data-expect="absent">Nothing to list here</div>
+</body>
+</html>

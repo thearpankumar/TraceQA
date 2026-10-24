@@ -75,5 +75,6 @@ marked.
 | `hostile.html` | A page whose first script replaces `Array.prototype.map`, `getBoundingClientRect`, `getComputedStyle`, `Set.prototype.has` and `String.prototype.trim`. Every element must still be read correctly where the driver can run a script before the page's (the Playwright driver), and the result must carry a `collector_tampered` warning. Not run in Safari, where the WebDriver driver has no such hook. |
 | `covered.html` | Covered by a banner, a backdrop or an overlay, and the cases that are not covering: clicks passing through, partial overlap, own content, own label |
 | `labels.html` | Which labels belong to a control: `for`, wrapping, several labels, a `for` that points at something not labelable or at a duplicate id, a label in a shadow root. Guards the collector's own label lookup against the browser's `labels` |
+| `prototype-keys.html` | Roles, input types and tag names that exist on every object (`constructor`, `__proto__`, `hasOwnProperty`, `toString`): the collector's lookup tables must not answer them with inherited functions |
 
 Performance on a large page is tested separately, in `collector/tests/test_large_dom.py`.
