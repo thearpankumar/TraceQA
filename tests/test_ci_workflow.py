@@ -30,6 +30,12 @@ def test_runs_on_demand_and_weekly() -> None:
     assert fields[0] not in ("0", "*/5", "*/15", "30"), "avoid the busiest minutes of the hour"
 
 
+def test_only_pull_requests_cancel_older_runs() -> None:
+    cancel = load_ci()["concurrency"]["cancel-in-progress"]
+    assert isinstance(cancel, str)
+    assert "github.event_name == 'pull_request'" in cancel
+
+
 def test_changes_job_uses_the_tested_script() -> None:
     steps = load_ci()["jobs"]["changes"]["steps"]
     filter_step = next(step for step in steps if step.get("id") == "filter")

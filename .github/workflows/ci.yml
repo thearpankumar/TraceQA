@@ -11,10 +11,11 @@ on:
   schedule:
     - cron: "17 4 * * 1"
 
-# A newer push to the same branch makes the older run pointless.
+# A newer push to the same pull request makes the older run pointless. Pushes to master are never
+# cancelled, so every commit on master keeps its own result; scheduled and manual runs queue.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
