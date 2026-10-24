@@ -16,25 +16,30 @@ import {
   type RunEventParams,
   type RunManifest,
   type RunStartParams,
-  type RunStartResult,
   type RunStatus,
   type StorageState,
   type TargetSummary,
 } from "./protocol.js";
+import {
+  EngineExitedError,
+  EngineProtocolError,
+  EngineRefusedError,
+  EngineStartError,
+  TraceQAError,
+  excerpt,
+} from "./errors.js";
+import {
+  parseComponentsFile,
+  parseHelloResult,
+  parseRunDone,
+  parseRunEvent,
+  parseStartResult,
+} from "./validate.js";
 
 export const BINARY_ENV = "TRACEQA_BIN";
 
-/** The engine refused a request, or could not be started or reached. */
-export class TraceQAError extends Error {
-  /** The `kind` from the engine's error data, for example `invalid_params`, when it sent one. */
-  readonly kind: string | undefined;
-
-  constructor(message: string, kind?: string) {
-    super(message);
-    this.name = "TraceQAError";
-    this.kind = kind;
-  }
-}
+/** How long `close()` waits for the engine to exit on its own before it kills it. */
+const DEFAULT_CLOSE_TIMEOUT_MS = 30_000;
 
 /** A browser name, `cdp=ENDPOINT`, `webdriver=URL`, or a full target. */
 export type Browser = string | BrowserTarget;
@@ -108,10 +113,14 @@ export class ExtractResult {
     let text: string;
     try {
       text = await readFile(join(this.runFolder, targetDir, "components.json"), "utf8");
-    } catch {
-      throw new TraceQAError(`${targetDir} produced no components.json. Check its status and error in \`targets\`.`);
+    } catch (error) {
+      throw new TraceQAError(
+        `${targetDir} produced no components.json. Check its status and error in \`targets\`.`,
+        undefined,
+        { cause: error },
+      );
     }
-    return JSON.parse(text) as ComponentsFile;
+    return parseComponentsFile(text);
   }
 }
 
@@ -122,7 +131,9 @@ async function readStorageState(state: string | StorageState): Promise<StorageSt
   try {
     text = await readFile(state, "utf8");
   } catch (error) {
-    throw new TraceQAError(`could not read ${state}: ${(error as NodeJS.ErrnoException).code ?? "error"}`);
+    throw new TraceQAError(`could not read ${state}: ${(error as NodeJS.ErrnoException).code ?? "error"}`, undefined, {
+      cause: error,
+    });
   }
   let parsed: Partial<StorageState>;
   try {
@@ -153,17 +164,9 @@ export function toTarget(browser: Browser): BrowserTarget {
 }
 
 interface RpcError {
-  code: number;
-  message: string;
-  data?: { kind?: string };
-}
-
-interface Incoming {
-  id?: number | string | null;
-  method?: string;
-  params?: { runId?: string } & Record<string, unknown>;
-  result?: unknown;
-  error?: RpcError;
+  code?: unknown;
+  message?: unknown;
+  data?: { kind?: unknown } | null;
 }
 
 interface Pending {
@@ -180,8 +183,8 @@ interface RunListener {
 /** The engine's stderr is left on ours: it holds human-readable logs only. */
 type EngineProcess = ChildProcessByStdio<Writable, Readable, null>;
 
-/** The pipe to one engine process: requests out, answers and run notifications in. */
-class Connection {
+/** The pipe to one engine process: requests out, answers and run notifications in. @internal */
+export class Connection {
   private nextId = 0;
   private readonly pending = new Map<number, Pending>();
   private readonly runs = new Map<string, RunListener>();
@@ -192,8 +195,14 @@ class Connection {
     // The engine may already have gone when we write. That is reported through `gone` instead.
     process.stdin.on("error", () => {});
     createInterface({ input: process.stdout, crlfDelay: Infinity }).on("line", (line) => this.receive(line));
-    this.exited = new Promise((done) => process.on("close", () => done()));
-    void this.exited.then(() => this.lose(new TraceQAError("the engine exited unexpectedly")));
+    this.exited = new Promise((done) => {
+      process.on("close", (code) => {
+        const exitCode = code ?? undefined;
+        const suffix = exitCode === undefined ? "" : ` with code ${exitCode}`;
+        this.lose(new EngineExitedError(`the engine exited unexpectedly${suffix}`, exitCode));
+        done();
+      });
+    });
   }
 
   /** Fails everything still waiting. The first reason wins. */
@@ -215,7 +224,12 @@ class Connection {
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
         resolve: (result) => {
-          accepted?.(result as T);
+          try {
+            accepted?.(result as T);
+          } catch (error) {
+            reject(error); // an answer of the wrong shape: the caller hears of it, and so does the connection
+            throw error;
+          }
           resolve(result as T);
         },
         reject,
@@ -236,32 +250,79 @@ class Connection {
     return [...this.runs.keys()];
   }
 
-  /** Ends the engine's input and waits for it to exit. The engine finishes its runs first. */
-  async close(): Promise<void> {
+  /**
+   * Ends the engine's input and waits for it to exit. The engine finishes its runs first. An
+   * engine that has not exited after `timeoutMs` is killed.
+   */
+  async close(timeoutMs: number = DEFAULT_CLOSE_TIMEOUT_MS): Promise<void> {
     this.process.stdin.end();
-    await this.exited;
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), timeoutMs);
+      timer.unref();
+    });
+    const hung = await Promise.race([this.exited.then(() => false), timedOut]);
+    clearTimeout(timer);
+    if (hung) {
+      this.process.kill();
+      await this.exited;
+    }
   }
 
   private receive(line: string): void {
-    let message: Incoming;
     try {
-      message = JSON.parse(line) as Incoming;
-    } catch {
-      return; // not ours to answer: the engine only writes protocol lines
+      this.dispatch(line);
+    } catch (error) {
+      // The stream can no longer be trusted, so nothing after this line is either.
+      this.lose(error instanceof Error ? error : new EngineProtocolError(String(error)));
     }
+  }
+
+  private dispatch(line: string): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch (error) {
+      throw new EngineProtocolError(`the engine sent a line that is not JSON: ${excerpt(line)}`, { cause: error });
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new EngineProtocolError(`the engine sent a message that is not a JSON object: ${excerpt(line)}`);
+    }
+    const message = parsed as {
+      id?: unknown;
+      method?: unknown;
+      params?: unknown;
+      result?: unknown;
+      error?: unknown;
+    };
     if (message.method === undefined) {
       if (typeof message.id !== "number") return;
       const waiting = this.pending.get(message.id);
       if (!waiting) return;
       this.pending.delete(message.id);
-      if (message.error) waiting.reject(new TraceQAError(message.error.message, message.error.data?.kind));
+      if (message.error !== undefined) waiting.reject(this.refusal(message.error, line));
       else waiting.resolve(message.result);
       return;
     }
-    const run = this.runs.get(message.params?.runId ?? "");
+    if (message.method !== "run.event" && message.method !== "run.done") return;
+    const runId = (message.params as { runId?: unknown } | null | undefined)?.runId;
+    const run = typeof runId === "string" ? this.runs.get(runId) : undefined;
     if (!run) return;
-    if (message.method === "run.event") run.event(message.params as unknown as RunEventParams);
-    else if (message.method === "run.done") run.done(message.params as unknown as RunDoneParams);
+    if (message.method === "run.event") run.event(parseRunEvent(message.params));
+    else run.done(parseRunDone(message.params));
+  }
+
+  private refusal(value: unknown, line: string): Error {
+    const error = value as RpcError | null;
+    if (typeof error !== "object" || error === null || typeof error.message !== "string") {
+      return new EngineProtocolError(`the engine sent an error answer without a message: ${excerpt(line)}`);
+    }
+    const kind = error.data?.kind;
+    return new EngineRefusedError(
+      error.message,
+      typeof kind === "string" ? kind : undefined,
+      typeof error.code === "number" ? error.code : undefined,
+    );
   }
 }
 
@@ -273,12 +334,21 @@ function startProcess(binary: string | undefined, drivers: readonly string[]): P
     child.once("spawn", () => resolve(child));
     child.once("error", (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT" && binary === undefined && !process.env[BINARY_ENV]) {
-        reject(new TraceQAError(`the traceqa engine was not found. Put it on PATH, set ${BINARY_ENV}, or pass binary.`));
+        reject(
+          new EngineStartError(`the traceqa engine was not found. Put it on PATH, set ${BINARY_ENV}, or pass binary.`, {
+            cause: error,
+          }),
+        );
       } else {
-        reject(new TraceQAError(`could not start ${command}: ${error.message}`));
+        reject(new EngineStartError(`could not start ${command}: ${error.message}`, { cause: error }));
       }
     });
   });
+}
+
+export interface CloseOptions {
+  /** How long to wait for the engine to exit on its own before it is killed. Default 30000. */
+  timeoutMs?: number;
 }
 
 /** A running engine process. Make several calls on one process, then `close()` it. */
@@ -289,20 +359,29 @@ export class Engine {
   ) {}
 
   static async start(options: EngineOptions = {}): Promise<Engine> {
-    const connection = new Connection(await startProcess(options.binary, options.drivers ?? []));
+    return Engine.attach(await startProcess(options.binary, options.drivers ?? []));
+  }
+
+  /** Talks to an engine process that is already running. For tests with a stand-in. @internal */
+  static async attach(process: EngineProcess): Promise<Engine> {
+    const connection = new Connection(process);
     const hello: EngineHelloParams = { protocolVersion: CLIENT_PROTOCOL_VERSION, clientName: "traceqa-typescript" };
     try {
-      return new Engine(connection, await connection.call<EngineHelloResult>("engine.hello", hello));
+      const info = parseHelloResult(await connection.call<unknown>("engine.hello", hello));
+      return new Engine(connection, info);
     } catch (error) {
       await connection.close(); // the engine was started, so it must not be left behind
       throw error;
     }
   }
 
-  /** Stop the engine. Runs that are still going are cancelled first. */
-  async close(): Promise<void> {
+  /**
+   * Stop the engine. Runs that are still going are cancelled first. An engine that has not
+   * exited after `timeoutMs` (default 30000) is killed.
+   */
+  async close(options: CloseOptions = {}): Promise<void> {
     for (const runId of this.connection.activeRuns()) this.cancel(runId);
-    await this.connection.close();
+    await this.connection.close(options.timeoutMs);
   }
 
   /**
@@ -326,16 +405,16 @@ export class Engine {
       url,
       targets,
       viewports: (options.viewports ?? [[1280, 800]]).map(([width, height]) => ({ width, height })),
-      outDir: options.outDir === undefined ? undefined : resolve(options.outDir),
-      parallel: options.parallel,
+      ...(options.outDir === undefined ? {} : { outDir: resolve(options.outDir) }),
+      ...(options.parallel === undefined ? {} : { parallel: options.parallel }),
       options: {
         crops: options.crops ?? false,
         includeHidden: options.includeHidden ?? true,
-        maxScrollSteps: options.maxScrollSteps,
-        timeoutMs: options.timeoutMs,
-        settleMs: options.settleMs,
+        ...(options.maxScrollSteps === undefined ? {} : { maxScrollSteps: options.maxScrollSteps }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(options.settleMs === undefined ? {} : { settleMs: options.settleMs }),
       },
-      storageState,
+      ...(storageState === undefined ? {} : { storageState }),
     };
 
     return new Promise<ExtractResult>((resolveRun, rejectRun) => {
@@ -344,7 +423,8 @@ export class Engine {
       const finish = () => signal?.removeEventListener("abort", cancel);
       signal?.addEventListener("abort", cancel, { once: true });
 
-      const started = this.connection.call<RunStartResult>("run.start", request, (accepted) => {
+      const started = this.connection.call<unknown>("run.start", request, (answer) => {
+        const accepted = parseStartResult(answer);
         runId = accepted.runId;
         this.connection.listen(accepted.runId, {
           event: (params) => {

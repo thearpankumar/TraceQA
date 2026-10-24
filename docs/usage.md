@@ -480,8 +480,37 @@ the `TRACEQA_BIN` environment variable and then `traceqa` on `PATH`.
 | `result.manifest` | The full run manifest. |
 
 A browser that fails does not raise an exception. Inspect `result.status` and
-each target's `status` and `error`. `TraceQAError` is raised when the engine
-cannot be started or refuses the request.
+each target's `status` and `error`.
+
+### Errors
+
+Every error is a `TraceQAError`, which has a `kind` (the engine's, when it sent
+one). The engine's own failures are subclasses:
+
+| Class | When |
+|---|---|
+| `EngineStartError` | The engine was not found, or could not be started. |
+| `EngineExitedError` | The pipe closed or the process died. `exit_code` is set when known. |
+| `EngineRefusedError` | The engine answered a request with an error. Has `kind` and `code`. |
+| `EngineProtocolError` | The engine sent a line that is not JSON, or a message of the wrong shape. The message quotes at most the first 80 characters of the line. |
+
+A plain `TraceQAError` is a mistake in the call: a bad browser string, a bad
+storage state file, `components()` on a run with several targets. Errors chain
+with `raise ... from`, so the original exception is in `__cause__`.
+
+### Cancel, close and one run at a time
+
+`engine.cancel()` may be called from any thread. It cancels the running
+extraction, which then returns with status `cancelled`; it does nothing when no
+run is active. Ctrl+C inside `extract` cancels the run before
+`KeyboardInterrupt` propagates.
+
+An `Engine` runs one extraction at a time, on purpose: a second `extract` while
+another is active raises `TraceQAError`. Use one `Engine` per concurrent run.
+
+`engine.close(timeout=30.0)` cancels a run that is still going, closes the
+engine's input and waits up to `timeout` seconds for it to exit, then kills it.
+Leaving a `with` block calls it.
 
 ## TypeScript SDK
 
@@ -510,6 +539,18 @@ try {
 
 One engine can run several extractions at the same time: start them with
 `Promise.all`. Each run's events go only to its own `onEvent`.
+
+`engine.close({ timeoutMs })` cancels runs that are still going, ends the
+engine's input and waits up to `timeoutMs` (default 30000) for it to exit, then
+kills it.
+
+Errors are the Python ones, with the same names and camel-case fields:
+`TraceQAError` (a caller's mistake, and the base of the others),
+`EngineStartError`, `EngineExitedError` (`exitCode`), `EngineRefusedError`
+(`kind`, `code`) and `EngineProtocolError`. The original error is in `cause`.
+A protocol error fails the whole connection, because the stream can no longer be
+trusted. `components()` checks the file it reads and rejects with
+`EngineProtocolError` when a required field is missing.
 
 The options are the Python ones in camel case: `browsers`, `viewports`
 (`[width, height]` pairs), `outDir`, `headless`, `crops`, `includeHidden`,
