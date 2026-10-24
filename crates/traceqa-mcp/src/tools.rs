@@ -8,7 +8,6 @@ use std::sync::atomic::AtomicBool;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use traceqa_engine::driver::Drivers;
 use traceqa_engine::{Execution, Run};
 use traceqa_protocol::jsonrpc::{code, RpcError};
 use traceqa_protocol::types::{
@@ -292,9 +291,8 @@ impl Call<'_> {
             .check_url_resolving(&request.url)
             .map_err(|blocked| format!("this server does not open {blocked}"))?;
         let run = Run::prepare(request).map_err(|e| e.to_string())?;
-        let commands = self.config.drivers.clone();
         let execution = Execution {
-            drivers: &|| Drivers::new(commands.clone()),
+            drivers: &|| self.config.drivers(),
             cancel: self.cancelled,
             policy: Some(&self.config.policy),
         };

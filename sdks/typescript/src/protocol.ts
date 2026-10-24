@@ -747,7 +747,7 @@ message: string
  */
 export interface RpcErrorData {
 /**
- * Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, internal.
+ * Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal.
  */
 kind: string
 retryable: boolean

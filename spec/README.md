@@ -38,6 +38,10 @@ Limits on what a driver sends:
   the driver's pipe, so a driver that floods notifications is slowed down, not
   buffered.
 - Error messages that quote a bad line show at most 200 characters of it.
+- A client request line longer than 8 MiB (`MAX_REQUEST_LINE`) is skipped and
+  answered with code `-32600` and a `null` id; the engine reads the next line.
+- At most `--max-runs` runs go at once (default 4). A `run.start` beyond that is
+  answered with an error whose `data.kind` is `busy` and `retryable` is true.
 - A driver's stderr is inherited, not read by the engine: it is the driver's own
   log channel and is never buffered or stored.
 
