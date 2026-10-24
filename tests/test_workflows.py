@@ -102,6 +102,60 @@ def test_pull_requests_on_the_self_hosted_pool_use_isolated_tool_homes() -> None
         assert "rm -rf target" in steps[-1]["run"]
 
 
+def test_release_publish_job_alone_can_write() -> None:
+    release = load("release.yml")
+    assert release["permissions"] == {"contents": "read"}
+    for name, job in release["jobs"].items():
+        perms = job.get("permissions", {})
+        if name == "publish":
+            assert perms == {"contents": "write", "id-token": "write", "attestations": "write"}
+        else:
+            assert not perms, name
+
+
+def test_release_uses_the_release_environment_and_a_pinned_toolchain() -> None:
+    release = load("release.yml")
+    assert release["jobs"]["publish"]["environment"] == "release"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", release["env"]["RUST_TOOLCHAIN"])
+    toolchain_steps = [
+        step for _, step in steps_of(release) if step.get("uses", "").startswith("dtolnay/rust-toolchain@")
+    ]
+    assert toolchain_steps
+    for step in toolchain_steps:
+        assert step["with"]["toolchain"] == "${{ env.RUST_TOOLCHAIN }}"
+
+
+def test_release_checks_the_tag_is_on_master() -> None:
+    steps = load("release.yml")["jobs"]["check"]["steps"]
+    checkout = steps[0]
+    assert checkout["with"]["fetch-depth"] == 0
+    script = "\n".join(s.get("run", "") for s in steps)
+    assert "merge-base --is-ancestor" in script and "origin/master" in script
+
+
+def test_release_builds_wait_for_the_audit_job() -> None:
+    jobs = load("release.yml")["jobs"]
+    assert "check" in jobs["audit"]["needs"]
+    assert "audit" in jobs["build"]["needs"]
+    script = "\n".join(s.get("run", "") for s in jobs["audit"]["steps"])
+    assert "cargo audit" in script and "cargo deny" in script
+
+
+def test_release_attests_every_asset_in_the_publish_job_only() -> None:
+    jobs = load("release.yml")["jobs"]
+    for name, job in jobs.items():
+        uses = [s.get("uses", "") for s in job["steps"]]
+        attests = [u for u in uses if u.startswith("actions/attest@")]
+        assert bool(attests) == (name == "publish"), name
+    publish = jobs["publish"]["steps"]
+    attest = next(s for s in publish if s.get("uses", "").startswith("actions/attest@"))
+    assert attest["with"]["subject-path"] == "dist/*"
+    names = [s.get("name") for s in publish]
+    assert names.index("Checksums") < publish.index(attest) < names.index("Create the release")
+    assert publish.index(attest) == names.index("Attest the build provenance")
+    assert "--verify-tag" in publish[-1]["run"]
+
+
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
 
 

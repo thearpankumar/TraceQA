@@ -1,0 +1,44 @@
+# cargo-deny policy. Run with `cargo deny --locked check`; CI runs it in the audit workflow and
+# before every release. https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# The systems the release binaries are built for.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+version = 2
+# Report unmaintained and unsound crates as well as vulnerabilities.
+unmaintained = "all"
+unsound = "all"
+# Nothing is ignored. If an advisory has to be waived, add its id here with a reason and a date.
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+# A wildcard version is a dependency on whatever is newest. The workspace crates depend on each
+# other by path without a version, and cargo-deny only exempts path dependencies of crates marked
+# `publish = false`, which these are not yet. Once they are, change this to "deny".
+wildcards = "warn"
+allow-wildcard-paths = true
+
+[licenses]
+version = 2
+# Exactly what Cargo.lock needs, from `cargo deny list`. Every other licence in the tree
+# (0BSD, BSD-3-Clause, Zlib, Unlicense) is only one side of an OR with these. A new licence
+# fails the check and needs a decision and a comment here.
+allow = [
+    "Apache-2.0", # this workspace, and most of its dependencies (dual-licensed with MIT)
+    "MIT",        # most of the tree
+    "Unicode-3.0", # unicode-ident's data tables
+]
+confidence-threshold = 0.9
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
