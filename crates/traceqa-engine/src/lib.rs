@@ -32,7 +32,7 @@ pub mod url_policy;
 mod url_safety;
 mod util;
 
-pub use run::{driver_commands, EngineError, Execution, Run};
+pub use run::{driver_commands, Abort, EngineError, Execution, Run};
 pub use url_policy::UrlPolicy;
 /// Refuses an address a run may not be started on. The MCP server asks before it accepts a call.
 pub use url_safety::check_navigable;

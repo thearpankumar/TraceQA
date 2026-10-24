@@ -685,7 +685,7 @@ class Event(BaseModel):
     run_id: str = Field(..., alias="runId")
     type: str = Field(
         ...,
-        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.finished, run.finished, error.",
+        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error.",
     )
     target: str | None = Field(
         None,

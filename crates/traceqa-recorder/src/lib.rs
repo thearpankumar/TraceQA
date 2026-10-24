@@ -4,6 +4,7 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -87,13 +88,33 @@ impl RunWriter {
     }
 }
 
-/// Writes pretty JSON through a temporary file, so a reader never sees half a file.
+/// Writes `run.json` into `dir` the way [`RunWriter::write_manifest`] does, without the writer.
+/// For the one caller that must save the manifest while the writer is out of reach.
+pub fn write_manifest_in(dir: &Path, manifest: &RunManifest) -> io::Result<()> {
+    write_json(&dir.join("run.json"), manifest)
+}
+
+/// Makes every temporary name of this process different, so two writers of one file never share one.
+static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Writes pretty JSON through a temporary file, so a reader never sees half a file. The temporary
+/// file is named after the process and a counter, so two writers of the same file (the end of the
+/// run and an abort) can never write to, or move, each other's file.
 fn write_json(path: &Path, value: &impl Serialize) -> io::Result<()> {
     let mut text = serde_json::to_string_pretty(value)?;
     text.push('\n');
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, text)?;
-    fs::rename(temporary, path)
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        TEMPORARY_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let temporary = path.with_file_name(name);
+    let written = fs::write(&temporary, text).and_then(|()| fs::rename(&temporary, path));
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
 }
 
 fn unix_time() -> (u64, u32) {
@@ -139,6 +160,30 @@ mod tests {
             RunWriter::create(&out, "r_test").err().map(|e| e.kind()),
             Some(io::ErrorKind::AlreadyExists)
         );
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn writers_of_one_file_never_share_a_temporary_name() {
+        let out = std::env::temp_dir().join(format!("traceqa-recorder-tmp-{}", new_run_id()));
+        fs::create_dir_all(&out).unwrap();
+        let path = out.join("run.json");
+        std::thread::scope(|scope| {
+            for writer in 0..8 {
+                let path = &path;
+                scope.spawn(move || {
+                    for round in 0..25 {
+                        write_json(path, &serde_json::json!({ "writer": writer, "round": round })).unwrap();
+                    }
+                });
+            }
+        });
+        let names: Vec<String> = fs::read_dir(&out)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["run.json"], "no temporary file is left behind");
+        assert!(serde_json::from_str::<Value>(&fs::read_to_string(&path).unwrap()).is_ok());
         fs::remove_dir_all(out).unwrap();
     }
 }
