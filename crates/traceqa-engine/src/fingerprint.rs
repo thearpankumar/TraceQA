@@ -312,4 +312,38 @@ mod tests {
             "region \"founders\""
         );
     }
+
+    #[test]
+    fn repeat_count_exactly_three_drops_the_name() {
+        assert_eq!(
+            step_key(&step("article", "article", Some("Card"), Some((0, 3)))),
+            "article"
+        );
+    }
+
+    #[test]
+    fn repeat_count_two_keeps_the_name() {
+        assert_eq!(
+            step_key(&step("article", "article", Some("Card"), Some((0, 2)))),
+            "article \"card\""
+        );
+    }
+
+    #[test]
+    fn every_landmark_keeps_its_name_when_repeated() {
+        for role in LANDMARKS {
+            assert_eq!(
+                step_key(&step(role, "section", Some("Part"), Some((1, 9)))),
+                format!("{role} \"part\"")
+            );
+        }
+    }
+
+    #[test]
+    fn a_backslash_and_a_quote_in_a_step_name_are_both_escaped() {
+        assert_eq!(
+            step_key(&step("list", "ul", Some("a\\b\"c"), None)),
+            "list \"a\\\\b\\\"c\""
+        );
+    }
 }

@@ -24,3 +24,6 @@ dist/
 *.state.json
 storage-state*.json
 state.json
+
+# cargo-mutants output
+mutants.out*
