@@ -93,9 +93,11 @@ fn analyse(elements: &[Located]) -> Vec<Analysed> {
         .map(|(located, placed)| {
             let path_key = fingerprint::path_key(located.frame_step.as_deref(), &located.element.path);
             let slot = placed.as_ref().and_then(|placed| {
-                let shape = &controls[&(placed.container.as_str(), placed.item)];
-                let is_card = shape.len() >= 2
-                    && items_shaped[&(placed.container.as_str(), shape.as_slice())] >= REPEAT_THRESHOLD;
+                // Every placement was counted above, so both lookups succeed. `?` keeps a refactor
+                // that skips one from panicking: the element is then simply no card control.
+                let shape = controls.get(&(placed.container.as_str(), placed.item))?;
+                let shaped = items_shaped.get(&(placed.container.as_str(), shape.as_slice()))?;
+                let is_card = shape.len() >= 2 && *shaped >= REPEAT_THRESHOLD;
                 let ordinal = seen.entry((&placed.container, placed.item, &placed.inner)).or_insert(0);
                 *ordinal += 1;
                 is_card.then(|| (placed.container.clone(), placed.inner.clone(), *ordinal - 1))
@@ -296,6 +298,18 @@ mod tests {
             .iter()
             .map(|c| (c.role.clone(), c.name.clone(), c.instances.len()))
             .collect()
+    }
+
+    #[test]
+    fn analyse_survives_an_unplaced_element() {
+        // Four cards, and one element that sits in no repeated group, in the middle of them.
+        let mut elements = cards("list", 4, |i| format!("Item {i}"));
+        elements.insert(3, element("link", "Home", vec![step("banner", "header", None)]));
+        let analysed = analyse(&elements);
+        assert_eq!(analysed.len(), 9);
+        assert!(analysed[3].slot.is_none());
+        let carded: Vec<bool> = analysed.iter().map(|a| a.slot.is_some()).collect();
+        assert_eq!(carded, [true, true, true, false, true, true, true, true, true]);
     }
 
     #[test]

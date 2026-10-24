@@ -673,7 +673,9 @@ impl Drivers {
                     driver.info.browsers.join(", ")
                 )),
                 Slot::Failed { error, .. } => tried.push(error.message.clone()),
-                Slot::NotStarted => unreachable!("every slot was started above"),
+                // Every slot was started (or failed to start) just above, so none is left here. If that
+                // ever changed, a slot that is not started has nothing to offer or to report.
+                Slot::NotStarted => {}
             }
         }
         match found.map(|index| &mut self.slots[index].1) {

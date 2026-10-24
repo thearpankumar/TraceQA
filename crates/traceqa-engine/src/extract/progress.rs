@@ -52,7 +52,7 @@ pub(super) struct Clock {
 
 impl Clock {
     pub(super) fn timings(&self) -> Timings {
-        let ms = |spent: Duration| spent.as_millis() as u64;
+        let ms = crate::util::ms;
         Timings {
             open_ms: ms(self.open),
             load_ms: ms(self.load),
