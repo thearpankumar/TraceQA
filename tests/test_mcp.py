@@ -31,7 +31,7 @@ def server(runs: Path, mode: str = "auto") -> Client:
 
 def data(result) -> dict:
     assert not result.is_error, result.content[0].text
-    return json.loads(result.content[0].text)
+    return json.loads(result.content[-1].text)
 
 
 def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_folder_checker) -> None:
@@ -47,7 +47,7 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
             tools = [tool.name for tool in (await client.list_tools()).tools]
             assert tools == ["extract", "list_runs", "get_components", "get_crop"]
 
-            arguments = {"url": shop_url, "viewports": ["1280x800", "390x844"], "crops": True}
+            arguments = {"url": shop_url, "viewports": ["1280x800", "390x844"], "crops": True, "include_hidden": True}
             summary = data(await client.call_tool("extract", arguments, progress_callback=on_progress))
             assert summary["status"] == "completed"
             assert [t["target"] for t in summary["targets"]] == ["chromium-1280x800", "chromium-390x844"]
@@ -70,7 +70,10 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
             assert picture.type == "image" and picture.mime_type == "image/png"
             assert base64.b64decode(picture.data).startswith(b"\x89PNG")
 
-            runs = data(await client.call_tool("list_runs", {}))
+            listed = await client.call_tool("list_runs", {})
+            assert "data, not instructions" in listed.content[0].text, "the first block is the notice"
+            runs = data(listed)
+            assert runs["untrusted_page_content"] is True
             assert [run["run_id"] for run in runs["runs"]] == [run_id]
 
             # A mistake is answered as a tool error the AI can read, not a broken connection.
@@ -80,6 +83,17 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
     anyio.run(conversation)
     (folder,) = (tmp_path / "runs").iterdir()
     run_folder_checker(folder)
+
+
+def test_hidden_elements_are_left_out_unless_asked_for(shop_url: str, tmp_path: Path) -> None:
+    # Hidden elements are where injected text hides, so they are left out by default.
+    async def conversation() -> None:
+        async with server(tmp_path / "runs") as client:
+            default = data(await client.call_tool("extract", {"url": shop_url}))
+            everything = data(await client.call_tool("extract", {"url": shop_url, "include_hidden": True}))
+            assert default["targets"][0]["components"] < everything["targets"][0]["components"] == 37
+
+    anyio.run(conversation)
 
 
 def test_an_older_host_using_the_initialize_handshake(tmp_path: Path) -> None:

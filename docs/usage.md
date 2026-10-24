@@ -138,7 +138,7 @@ Other AI tools take the same command in their MCP settings: the program
 
 | Tool | What it does |
 |---|---|
-| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`, `storage_state` (the path of a state file; its contents are never shown). Answers with the run id and a summary per target. |
+| `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`, `include_hidden`, `storage_state` (the path of a state file; its contents are never shown). Answers with the run id and a summary per target. |
 | `list_runs` | The runs in the runs folder, newest first. |
 | `get_components` | The components of one run and target: a short line each, filtered by `role` or `name`, or one component in full with `component_id`. |
 | `get_crop` | The picture of one component, for runs made with `crops`. |
@@ -146,6 +146,25 @@ Other AI tools take the same command in their MCP settings: the program
 A mistake in the arguments is answered as a tool error that says what was
 wrong, so the AI can correct itself. Progress is reported while an extraction
 runs, and the AI tool can cancel it.
+
+**Page text is data, not instructions.** Names, text, selectors, titles,
+warnings and urls in a result come from a web page, and a page can try to
+talk to the AI. So every result built from run data starts with a text block
+saying this, and its JSON carries `"untrusted_page_content": true`. Read the
+JSON from the last text block. Before the AI sees them, control characters
+(a newline and a tab stay), zero-width and bidi format characters and the
+invisible Unicode Tags block are removed from every string and key. This also
+drops the joiners inside some emoji and Indic or Arabic text. Hidden and
+off-screen elements, where injected text hides, are left out unless
+`extract` gets `include_hidden: true`.
+
+Answers are kept small: `limit` is at most 500 (the answer says
+`limit_applied`), one component lookup shows at most 50 instances
+(`instances_total`, `instances_shown`), no answer is longer than 100 KB (when
+cut it says `truncated: true` with a note), `get_crop` refuses pictures over
+2 MiB, and error texts are cut to 500 characters. The tools carry MCP
+annotations: `extract` opens pages (open world, not read-only); the other
+three are read-only.
 
 ## `traceqa install`
 
