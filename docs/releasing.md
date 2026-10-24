@@ -153,6 +153,39 @@ gh api repos/actions/checkout/commits/v4.4.0 --jq .sha
 from a fork. `zizmor` with a GitHub token (`GH_TOKEN`) runs the online
 `impostor-commit` check that catches this.
 
+## Dependency audits and updates
+
+The Audit workflow (`.github/workflows/audit.yml`) runs every Monday, on demand,
+and whenever `Cargo.lock`, `uv.lock`, `sdks/typescript/package-lock.json` or
+`deny.toml` change. It always uses GitHub-hosted machines and can only read.
+It runs `cargo audit`, `cargo deny check` (policy in `deny.toml`: licences,
+sources, duplicate and wildcard versions), `npm audit --audit-level=high` and
+`pip-audit` on the exported `uv.lock`. A new licence in the tree fails the
+check; decide, then add it to `deny.toml` with a comment. Run the same checks
+locally:
+
+```sh
+cargo audit && cargo deny --locked check
+(cd sdks/typescript && npm audit --audit-level=high --package-lock-only)
+uv export --frozen --no-hashes --no-emit-workspace --no-header > requirements.txt
+uvx pip-audit==2.10.1 -r requirements.txt --no-deps --disable-pip
+```
+
+`.github/dependabot.yml` opens weekly update pull requests for Cargo, Python
+(`uv`), npm and GitHub Actions, with minor and patch updates grouped and a
+seven-day wait for new releases. Dependabot configuration errors show only on
+GitHub (Insights, Dependency graph, Dependabot); check there after changing it.
+`.github/CODEOWNERS` names the owner for the workflows, `deny.toml`, scripts, the
+MCP server and the lock files.
+
+### Repository settings the files cannot make
+
+Owner actions, under Settings:
+
+- Enable private vulnerability reporting (Code security), which `SECURITY.md` points to.
+- Enable Dependabot alerts and Dependabot security updates.
+- Protect `master`: require the `CI` check and review from code owners.
+
 ## Self-hosted runner checklist
 
 CI can run on a self-hosted machine, named by the repository variable
