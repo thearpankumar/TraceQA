@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any
-from pydantic import BaseModel, ConfigDict, Field, RootModel
 from enum import Enum
-
-
-class Model(RootModel[Any]):
-    root: Any
 
 
 class EngineHelloParams(BaseModel):
