@@ -545,20 +545,27 @@ impl Call<'_> {
                 component.id
             ));
         };
-        if Path::new(crop)
-            .components()
-            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        let outside = || format!("{} names a picture outside the runs folder", component.id);
+        let crop_path = Path::new(crop);
+        let is_png = crop_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
+        if !is_png
+            || crop_path
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
         {
-            return Err(format!("{} names a picture outside its folder", component.id));
+            return Err(outside());
         }
+        // The file, or a folder on the way to it, may be a link to somewhere else. The canonical
+        // path must stay inside the canonical runs folder, and that path is the one read.
         let path = self.run_dir(&args.run_id)?.join(&dir).join(crop);
+        let path = safe_file_in(&self.config.runs_dir, &path).ok_or_else(outside)?;
         if fs::metadata(&path).is_ok_and(|m| m.len() > MAX_CROP_BYTES) {
             return Err(format!(
                 "the picture of {} is too large to return (over 2 MiB)",
                 component.id
             ));
         }
-        let bytes = fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        let bytes = fs::read(&path).map_err(|_| format!("the picture of {} could not be read", component.id))?;
         let label = if component.name.is_empty() {
             "(no name)"
         } else {
