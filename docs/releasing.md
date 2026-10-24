@@ -77,7 +77,7 @@ target and publish. GitHub creates the tag, and the workflow runs the same way.
 |---|---|
 | Check the version | Fails unless the tag points at a commit on `master` and is `v` followed by the version in every package. A tag that does not match never ships. |
 | Audit the dependencies | Runs `cargo audit` (known vulnerabilities) and `cargo deny check` (licences, banned crates, sources, see `deny.toml`). A failure stops the release before any binary is built. |
-| Build | Builds the release binary on Linux, macOS and Windows with the compiler named by `RUST_TOOLCHAIN` in the workflow, checks that it starts and reports the tagged version, and packages it with the README and the licence. It can read the repository and nothing else. |
+| Build | Builds the release binary on Linux, macOS and Windows with the compiler named by `RUST_TOOLCHAIN` in the workflow, sets `TRACEQA_RELEASE_COMMIT` to the tagged commit (`github.sha`) so the installer's pinned commit never depends on tree state, checks that it starts and reports the tagged version, and packages it with the README and the licence. It can read the repository and nothing else. |
 | Publish | Runs in the `release` environment. Writes `SHA256SUMS.txt`, signs a build provenance attestation for each archive and for `SHA256SUMS.txt`, and creates the GitHub release with the three archives, release notes generated from the merged pull requests, and the pre-release mark below `1.0.0`. This is the only job that can write. |
 
 The published files:

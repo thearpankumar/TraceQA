@@ -303,3 +303,11 @@ def test_gitattributes_pins_lf_and_marks_binaries() -> None:
             if not any(Path(name).match(g) for g in binary_globs):
                 uncovered.append(name)
     assert not uncovered, f"binary files without a binary rule in .gitattributes: {uncovered}"
+
+
+def test_release_build_pins_the_commit_explicitly() -> None:
+    # The installer pins the commit the binary was built from; it must not depend on tree state.
+    steps = [s for _, s in steps_of(load("release.yml")) if "cargo build --release" in s.get("run", "")]
+    assert steps
+    for step in steps:
+        assert step.get("env", {}).get("TRACEQA_RELEASE_COMMIT") == "${{ github.sha }}"
