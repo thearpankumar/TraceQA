@@ -162,6 +162,11 @@ A driver may also send `driver.log` notifications.
 The engine holds a list of driver commands and no browser names. For a
 requested browser it starts each driver in turn, reads the browsers listed in
 its `driver.hello` response and uses the first driver that lists the browser.
+A driver that stops answering is replaced on the next request. A driver that failed
+to start for a reason that may pass (it did not answer `driver.hello` in time, or its
+pipe broke) is started once more on a later request, and given up on after two
+failures in a row. One that is missing, not allowed to run or speaks another protocol
+version is not started again.
 
 ### Capabilities
 
