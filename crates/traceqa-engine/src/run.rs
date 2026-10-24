@@ -898,6 +898,7 @@ fn unique_name(used: &mut HashSet<String>, target: &BrowserTarget, viewport: &Vi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn request(feature: &str, url: &str, targets: usize) -> RunStartParams {
         RunStartParams {
@@ -989,22 +990,34 @@ mod tests {
 
     #[test]
     fn a_waiter_for_an_exclusive_browser_notices_cancel_within_a_slice() {
-        let exclusive = Exclusive::default();
+        let exclusive = Arc::new(Exclusive::default());
         let never = AtomicBool::new(false);
-        let cancel = AtomicBool::new(false);
-        let _held = exclusive.hold("safari", &never).unwrap();
-        thread::scope(|scope| {
-            scope.spawn(|| {
-                thread::sleep(std::time::Duration::from_millis(100));
-                cancel.store(true, Ordering::SeqCst);
-            });
-            let started = Instant::now();
-            assert!(exclusive.hold("safari", &cancel).is_none());
-            let waited = started.elapsed();
-            assert!(waited < std::time::Duration::from_millis(900), "waited {waited:?}");
-        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let held = exclusive.hold("safari", &never).unwrap();
+        // The waiter runs on its own thread so that a `hold` which ignores `cancel` (the bug this
+        // guards against) turns into a failed test after 5 s instead of a hung test run.
+        let (done, outcome) = std::sync::mpsc::channel();
+        let waiter = {
+            let (exclusive, cancel) = (Arc::clone(&exclusive), Arc::clone(&cancel));
+            thread::spawn(move || {
+                let started = Instant::now();
+                let gave_up = exclusive.hold("safari", &cancel).is_none();
+                let _ = done.send((gave_up, started.elapsed()));
+            })
+        };
+        thread::sleep(std::time::Duration::from_millis(100));
+        cancel.store(true, Ordering::SeqCst);
+        let result = outcome.recv_timeout(std::time::Duration::from_secs(5));
+        let Ok((gave_up, waited)) = result else {
+            // Let a waiter that does notice cancel end; the thread is leaked if it does not.
+            drop(held);
+            panic!("the waiter did not return within 5 s of cancel: Exclusive::hold must look at cancel every CANCEL_SLICE (L8)");
+        };
+        waiter.join().unwrap();
+        assert!(gave_up, "a cancelled waiter must get None");
+        assert!(waited < std::time::Duration::from_millis(900), "waited {waited:?}");
         // A cancelled waiter took nothing: once the holder is done the browser is free again.
-        drop(_held);
+        drop(held);
         assert!(exclusive.hold("safari", &never).is_some());
     }
 
