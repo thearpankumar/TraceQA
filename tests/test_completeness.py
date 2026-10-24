@@ -159,3 +159,20 @@ def test_fixture_servers_have_a_deep_backlog(shop_url: str, trouble: str) -> Non
         server.shutdown()
         server.server_close()
     assert port > 0
+
+
+def test_bench_frame_prefix_respects_step_name_escaping() -> None:
+    bench = load_by_path("bench_run", ROOT / "bench" / "run.py")
+    assert bench.frame_prefix('frame "pay" > form "card"') == 'frame "pay"'
+    # A frame called a" > main "b: the quotes are escaped, so the " > " inside is not a step boundary.
+    escaped = r'frame "a\" > main \"b"'
+    assert bench.frame_prefix(escaped + " > button") == escaped
+    assert bench.frame_prefix(r'frame "c:\\dir" > button') == r'frame "c:\\dir"'
+    assert bench.frame_prefix('button "go"') is None
+    # A form that is called "frame x" is a form, not a frame.
+    assert bench.frame_prefix('form "frame x" > button') is None
+    assert bench.frame_prefix('main > frame "late"') is None
+    # The manifest's frame name is written the way the recipe writes it.
+    assert bench.frame_step("Pay") == 'frame "pay"'
+    assert bench.frame_step('a" > main "b') == escaped
+    assert bench.frame_step(r"c:\dir") == r'frame "c:\\dir"'
