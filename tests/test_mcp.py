@@ -105,6 +105,7 @@ def test_a_bad_state_dir_stops_the_server_with_exit_2(tmp_path: Path) -> None:
     done = subprocess.run(
         [str(BINARY), "mcp", "--out", str(tmp_path / "runs"), "--state-dir", str(tmp_path / "missing")],
         input="",
+        check=False,
         capture_output=True,
         text=True,
         timeout=60,

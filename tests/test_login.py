@@ -26,7 +26,9 @@ pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine f
 
 
 def traceqa(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(BINARY), *args], capture_output=True, text=True, encoding="utf-8", timeout=180)
+    return subprocess.run(
+        [str(BINARY), *args], check=False, capture_output=True, text=True, encoding="utf-8", timeout=180
+    )
 
 
 def test_a_scheme_that_is_not_http_exits_2(tmp_path: Path) -> None:

@@ -12,10 +12,20 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from playwright.sync_api import Browser, BrowserContext, Frame, Page, Playwright, sync_playwright
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    FloatRect,
+    Frame,
+    Page,
+    Playwright,
+    ViewportSize,
+    sync_playwright,
+)
 from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import StorageState as PlaywrightStorageState
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from traceqa_protocol import BaseDriver, models, to_wire
 from traceqa_protocol.driver import check_scroll_target, installed_version, png_dimensions, scrolled_to_end
@@ -454,7 +464,7 @@ class PlaywrightDriver(BaseDriver[Session]):
             os.environ.setdefault("PW_TEST_SCREENSHOT_NO_FONTS_READY", "1")
             self._playwright = sync_playwright().start()
         target = params.target
-        viewport = {"width": params.viewport.width, "height": params.viewport.height}
+        viewport = ViewportSize(width=params.viewport.width, height=params.viewport.height)
         browser = None
         try:
             if target.browser == CDP:
@@ -471,7 +481,9 @@ class PlaywrightDriver(BaseDriver[Session]):
                 raise RpcError("unsupported", f"this driver cannot open {target.browser!r}")
             state = playwright_state(params.storage_state)
             try:
-                context = browser.new_context(viewport=viewport, locale=params.locale, storage_state=state)
+                context = browser.new_context(
+                    viewport=viewport, locale=params.locale, storage_state=cast(PlaywrightStorageState | None, state)
+                )
                 owns_context = True
             except PlaywrightError:
                 # Some remote browsers only expose the context they started with.
@@ -625,9 +637,9 @@ class PlaywrightDriver(BaseDriver[Session]):
         page = self._session(params.session_id).page
         path = Path(params.path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        clip = None
+        clip: FloatRect | None = None
         if params.clip is not None:
-            clip = {"x": params.clip.x, "y": params.clip.y, "width": params.clip.w, "height": params.clip.h}
+            clip = FloatRect(x=params.clip.x, y=params.clip.y, width=params.clip.w, height=params.clip.h)
         try:
             # With a clip, full_page makes Playwright read the clip in page coordinates.
             page.screenshot(path=str(path), full_page=bool(params.full_page) or clip is not None, clip=clip)

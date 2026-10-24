@@ -51,7 +51,7 @@ def extract(tmp_path: Path, run_folder_checker):
     def run(url: str, *args: str) -> Result:
         out = tmp_path / "runs"
         command = [str(BINARY), "extract", url, "--out", str(out), *args]
-        process = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=180)
+        process = subprocess.run(command, check=False, capture_output=True, text=True, encoding="utf-8", timeout=180)
         return Result(process, out, run_folder_checker)
 
     return run
@@ -198,5 +198,5 @@ def test_ctrl_c_cancels_the_run_and_leaves_nothing_running(trouble: str, tmp_pat
     # Ctrl-C and are closed by the engine, so no browser dies under a target.
     statuses = [target.status.value for target in manifest.targets]
     assert "cancelled" in statuses and set(statuses) <= {"completed", "cancelled"}, statuses
-    left = subprocess.run(["pgrep", "-g", str(process.pid)], capture_output=True, text=True).stdout.split()
+    left = subprocess.run(["pgrep", "-g", str(process.pid)], check=False, capture_output=True, text=True).stdout.split()
     assert left == [], "Ctrl-C left processes running"

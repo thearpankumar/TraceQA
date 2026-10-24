@@ -227,6 +227,7 @@ export class Connection {
           try {
             accepted?.(result as T);
           } catch (error) {
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the caller gets the original failure, not a copy
             reject(error); // an answer of the wrong shape: the caller hears of it, and so does the connection
             throw error;
           }
@@ -434,6 +435,7 @@ export class Engine {
               this.connection.forget(accepted.runId);
               this.cancel(accepted.runId);
               finish();
+              // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the caller gets the original failure, not a copy
               rejectRun(error);
             }
           },
@@ -451,6 +453,7 @@ export class Engine {
       });
       started.catch((error: unknown) => {
         finish();
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the caller gets the original failure, not a copy
         rejectRun(error);
       });
     });
