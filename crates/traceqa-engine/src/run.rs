@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use serde_json::json;
 use thiserror::Error;
+use traceqa_protocol::supervise::guard;
 use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, TargetSummary, Viewport};
 use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
 
@@ -155,36 +156,66 @@ impl Run {
 
         let sink = Mutex::new(Sink { writer, listener });
         let progress = Progress { sink: &sink };
-        progress.emit(
-            "run.started",
-            None,
-            format!(
-                "Extracting {} in {} browser and viewport combinations, {workers} at a time",
-                manifest.url,
-                jobs.len()
-            ),
-            json!({ "targets": jobs.len(), "parallel": workers }),
-        );
+        // Filled in as targets end, so what finished is not lost if something panics.
+        let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
 
-        let exclusive = Exclusive::default();
-        let shared = Shared {
-            params: &params,
-            run_id: &run_id,
-            progress,
-            exclusive: &exclusive,
-            cancel: execution.cancel,
-            policy: execution.policy,
+        // A panic anywhere in the run (a worker, a driver) must still leave a finished run folder
+        // and an answer for the caller, so the work is supervised.
+        let supervised = guard(|| {
+            progress.emit(
+                "run.started",
+                None,
+                format!(
+                    "Extracting {} in {} browser and viewport combinations, {workers} at a time",
+                    manifest.url,
+                    jobs.len()
+                ),
+                json!({ "targets": jobs.len(), "parallel": workers }),
+            );
+
+            let exclusive = Exclusive::default();
+            let shared = Shared {
+                params: &params,
+                run_id: &run_id,
+                progress,
+                exclusive: &exclusive,
+                cancel: execution.cancel,
+                policy: execution.policy,
+            };
+            let worker_panic = run_workers(&jobs, workers, &shared, execution, &finished);
+            retry_timed_out(&jobs, &finished, workers, &shared, execution);
+            worker_panic
+        });
+
+        let finished = finished.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // The first panic wins: a worker's own words, else the supervisor's.
+        let internal_error = match supervised {
+            Ok(None) => None,
+            Ok(Some(message)) | Err(message) => Some(internal_error_text(&message)),
         };
-        let mut finished = run_workers(&jobs, workers, &shared, execution);
-        retry_timed_out(&jobs, &mut finished, workers, &shared, execution);
-        // In the order they were asked for, whatever order they finished in.
-        manifest.targets = finished.into_iter().map(|outcome| outcome.summary).collect();
+        if let Some(text) = &internal_error {
+            eprintln!("traceqa: run {run_id}: {text}");
+            progress.emit("error", None, format!("Run failed: {text}"), json!({}));
+        }
+        // In the order they were asked for, whatever order they finished in. A target that never
+        // finished, because the run panicked, failed.
+        manifest.targets = jobs
+            .iter()
+            .zip(finished)
+            .map(|(job, outcome)| match outcome {
+                Some(outcome) => outcome.summary,
+                None => unfinished_summary(job, internal_error.as_deref()),
+            })
+            .collect();
 
         for message in disagreements(&manifest.targets) {
             progress.emit("warning", None, message, json!({ "code": "browsers_disagree" }));
         }
 
         manifest.status = roll_up_status(&manifest.targets);
+        if internal_error.is_some() {
+            manifest.status = RunStatus::Failed;
+        }
         manifest.finished_at = Some(now_rfc3339());
         progress.emit(
             "run.finished",
@@ -198,6 +229,72 @@ impl Run {
             .writer;
         save(&writer, &manifest);
         manifest
+    }
+}
+
+/// What a failed run says when it panicked. The text is bounded, and is the only place the
+/// panic's own words reach a run folder.
+fn internal_error_text(message: &str) -> String {
+    let short: String = message.chars().take(200).collect();
+    format!("internal error: {short}")
+}
+
+/// The manifest of a run whose supervisor itself panicked, so `execute` never returned one (a
+/// listener that panics while the run folder is being closed). It is `run.json` as last saved,
+/// marked failed and written back, so the folder never stays `running`.
+pub(crate) fn failed_after_panic(folder: &Path, run_id: &str, message: &str) -> RunManifest {
+    let path = folder.join("run.json");
+    let mut manifest = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<RunManifest>(&text).ok())
+        .unwrap_or_else(|| RunManifest {
+            format_version: RUN_FOLDER_VERSION,
+            run_id: run_id.to_string(),
+            feature: FEATURES[0].to_string(),
+            url: String::new(),
+            status: RunStatus::Running,
+            started_at: now_rfc3339(),
+            finished_at: None,
+            engine_version: crate::VERSION.to_string(),
+            targets: Vec::new(),
+        });
+    eprintln!("traceqa: run {run_id}: {}", internal_error_text(message));
+    manifest.status = RunStatus::Failed;
+    manifest.finished_at.get_or_insert_with(now_rfc3339);
+    for target in manifest.targets.iter_mut().filter(|t| t.status == RunStatus::Running) {
+        target.status = RunStatus::Failed;
+        target.error = Some(internal_error_text(message));
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&manifest) {
+        let temporary = folder.join("run.json.tmp");
+        if std::fs::write(&temporary, text)
+            .and_then(|()| std::fs::rename(&temporary, &path))
+            .is_err()
+        {
+            eprintln!("traceqa: could not write run.json after a panic");
+        }
+    }
+    manifest
+}
+
+/// A target that never reached an end: the run was stopped by a panic, or never got to it.
+fn unfinished_summary(job: &Planned, internal_error: Option<&str>) -> TargetSummary {
+    TargetSummary {
+        dir: job.name.clone(),
+        target: job.target.clone(),
+        viewport: job.viewport.clone(),
+        browser: None,
+        status: RunStatus::Failed,
+        component_count: 0,
+        instance_count: 0,
+        warning_count: 0,
+        duration_ms: 0,
+        timings: None,
+        error: Some(
+            internal_error
+                .unwrap_or("internal error: the target did not finish")
+                .to_string(),
+        ),
     }
 }
 
@@ -252,50 +349,66 @@ fn plan(params: &RunStartParams) -> (Vec<Planned<'_>>, usize) {
     (jobs, workers)
 }
 
-/// Runs the jobs on `workers` threads, each with drivers of its own, and returns how each went
-/// in the order of `jobs`.
-fn run_workers(jobs: &[Planned], workers: usize, shared: &Shared, execution: &Execution) -> Vec<Finished> {
+/// Runs the jobs on `workers` threads, each with drivers of its own, and records how each went
+/// in `finished`, in the order of `jobs`. A worker that panics stops alone: the others go on, and
+/// what finished stays in `finished`. Returns the message of the first panic, if there was one.
+fn run_workers(
+    jobs: &[Planned],
+    workers: usize,
+    shared: &Shared,
+    execution: &Execution,
+    finished: &Mutex<Vec<Option<Finished>>>,
+) -> Option<String> {
     let next = AtomicUsize::new(0);
-    let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
+    let panicked: Mutex<Option<String>> = Mutex::new(None);
     thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
-                // A driver process serves one browser at a time, so each worker has its own.
-                let mut drivers = (execution.drivers)();
-                while let Some((index, job)) = claim(&next, jobs) {
-                    let outcome = run_target(job, shared, &mut drivers);
-                    finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
+                let worked = guard(|| {
+                    // A driver process serves one browser at a time, so each worker has its own.
+                    let mut drivers = (execution.drivers)();
+                    while let Some((index, job)) = claim(&next, jobs) {
+                        let outcome = run_target(job, shared, &mut drivers);
+                        finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
+                    }
+                });
+                if let Err(message) = worked {
+                    panicked
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .get_or_insert(message);
                 }
             });
         }
     });
-    finished
-        .into_inner()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .into_iter()
-        .map(|outcome| outcome.expect("every job is claimed by a worker"))
-        .collect()
+    panicked.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// The targets to run a second time: only when several ran at once, and only those that failed
 /// because the browser or its driver did not answer in time.
-fn timed_out_targets(workers: usize, finished: &[Finished]) -> Vec<usize> {
+fn timed_out_targets(workers: usize, finished: &[Option<Finished>]) -> Vec<usize> {
     if workers <= 1 {
         return Vec::new();
     }
-    (0..finished.len()).filter(|&index| finished[index].timed_out).collect()
+    (0..finished.len())
+        .filter(|&index| finished[index].as_ref().is_some_and(|outcome| outcome.timed_out))
+        .collect()
 }
 
 /// A page that is heavy to render can time out only because several browsers were rendering it
 /// at once. Such a target gets a second go with the machine to itself.
 fn retry_timed_out(
     jobs: &[Planned],
-    finished: &mut [Finished],
+    finished: &Mutex<Vec<Option<Finished>>>,
     workers: usize,
     shared: &Shared,
     execution: &Execution,
 ) {
-    for index in timed_out_targets(workers, finished) {
+    let again = timed_out_targets(
+        workers,
+        &finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+    );
+    for index in again {
         if execution.cancel.load(Ordering::Relaxed) {
             break;
         }
@@ -309,7 +422,8 @@ fn retry_timed_out(
             ),
             json!({}),
         );
-        finished[index] = run_target(job, shared, &mut (execution.drivers)());
+        let outcome = run_target(job, shared, &mut (execution.drivers)());
+        finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
     }
 }
 
@@ -697,7 +811,8 @@ mod tests {
             summary: summary_with(RunStatus::Failed),
             timed_out,
         };
-        let results = [finished(false), finished(true), finished(false), finished(true)];
+        let finished = |timed_out| Some(finished(timed_out));
+        let results = [finished(false), finished(true), finished(false), finished(true), None];
         assert_eq!(timed_out_targets(2, &results), [1, 3]);
         // A target that had the machine to itself already got its fair chance.
         assert!(timed_out_targets(1, &results).is_empty());

@@ -90,6 +90,7 @@ impl Transport for Scripted {
             return Err(DriverError::new(ErrorKind::Timeout, "the page did not load in time"));
         }
         if let Some((_, kind)) = self.fail.filter(|(failing, _)| *failing == method) {
+            assert!(kind != "panic", "scripted driver exploded");
             return Err(DriverError::new(ErrorKind::from(kind), self.fail_text));
         }
         Ok(match method {
@@ -972,4 +973,31 @@ fn a_failing_goto_with_a_token_in_its_error_leaves_no_token_in_the_run_folder() 
     for event in &outcome.events {
         assert!(!serde_json::to_string(event).unwrap().contains("SEKRET"), "{event:?}");
     }
+}
+
+#[test]
+fn a_panicking_driver_ends_in_a_failed_run_folder() {
+    let outcome = run(true, Some(("page.goto", "panic")), false);
+    assert_eq!(outcome.manifest.status, RunStatus::Failed);
+    let target = &outcome.manifest.targets[0];
+    assert_eq!(target.status, RunStatus::Failed);
+    let error = target.error.as_deref().unwrap();
+    assert!(error.starts_with("internal error: "), "{error}");
+    assert!(error.contains("scripted driver exploded"), "{error}");
+
+    // run.json says failed, not running, and is the manifest that was returned.
+    let on_disk: RunManifest =
+        serde_json::from_str(&fs::read_to_string(outcome.folder.join("run.json")).unwrap()).unwrap();
+    assert_eq!(on_disk, outcome.manifest);
+    assert!(on_disk.finished_at.is_some());
+
+    // events.jsonl has the failure and ends with run.finished, and matches what was sent live.
+    let logged: Vec<Event> = fs::read_to_string(outcome.folder.join("events.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(logged, outcome.events);
+    assert_eq!(logged.last().unwrap().type_, "run.finished");
+    assert!(logged.iter().any(|event| event.type_ == "error"));
 }

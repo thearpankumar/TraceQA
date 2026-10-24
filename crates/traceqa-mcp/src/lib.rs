@@ -20,6 +20,7 @@ use serde_json::{json, Value};
 use traceqa_engine::driver::DriverCommand;
 pub use traceqa_engine::UrlPolicy;
 use traceqa_protocol::jsonrpc::{self, code, Id, Line, Message, RpcError, MAX_REQUEST_LINE};
+use traceqa_protocol::supervise::guard;
 
 /// MCP versions this server speaks, newest first. A client asking for one of these gets it;
 /// any other client is offered the newest and decides for itself.
@@ -300,7 +301,21 @@ fn start_call(
             cancelled: &cancelled,
             report: &report,
         };
-        let result = call.run(&params);
+        // A panic in a tool must not leave the host waiting for an answer that never comes. The
+        // panic text may hold page data, so the host gets a generic error and the text goes to stderr.
+        let result = guard(|| call.run(&params)).unwrap_or_else(|message| {
+            let tool = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            let tool: String = tool
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .take(40)
+                .collect();
+            eprintln!("traceqa: internal error in tool {tool}: {message}");
+            Ok(json!({
+                "content": [{ "type": "text", "text": format!("internal error in tool {tool}") }],
+                "isError": true
+            }))
+        });
         // The slot is freed before the answer goes out, so a host that sends its next call as
         // soon as it reads this answer is never told "busy" for a call that has already ended.
         drop(slot);

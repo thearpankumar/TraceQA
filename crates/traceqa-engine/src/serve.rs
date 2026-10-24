@@ -15,13 +15,14 @@ use serde::Serialize;
 use serde_json::Value;
 use traceqa_protocol::contracts::client_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
 use traceqa_protocol::jsonrpc::{self, code, Id, Line, Message, RpcError, MAX_REQUEST_LINE};
+use traceqa_protocol::supervise::guard;
 use traceqa_protocol::types::{
     EngineHelloParams, EngineHelloResult, Event, RpcErrorData, RunCancelParams, RunDoneParams, RunEventParams,
     RunStartParams, RunStartResult,
 };
 
 use crate::driver::{DriverCommand, Drivers, ErrorKind};
-use crate::run::{Execution, Run, FEATURES};
+use crate::run::{failed_after_panic, Execution, Run, FEATURES};
 
 type Output = Arc<Mutex<Box<dyn Write + Send>>>;
 
@@ -291,7 +292,11 @@ fn start_run(
                 cancel: &cancel,
                 policy: None,
             };
-            let manifest = run.execute(&execution, &mut on_event);
+            // `execute` supervises its own work; this is the second belt, for a panic that gets
+            // out of it, so the client is always told the run is done.
+            let folder = run.folder().to_path_buf();
+            let manifest = guard(|| run.execute(&execution, &mut on_event))
+                .unwrap_or_else(|message| failed_after_panic(&folder, &run_id, &message));
             drop(counted);
             let done = RunDoneParams {
                 run_id: run_id.clone(),
@@ -456,6 +461,95 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    /// Writes into `Captured`, but panics on every `run.event` line, like a listener that breaks.
+    struct PanicsOnEvents(Captured);
+
+    impl Write for PanicsOnEvents {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            assert!(
+                !String::from_utf8_lossy(bytes).contains("\"run.event\""),
+                "the event listener broke"
+            );
+            self.0.write(bytes)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_panicking_run_still_answers_run_done_and_stays_cancellable() {
+        let out_dir = std::env::temp_dir().join(format!("traceqa-serve-panic-{}", std::process::id()));
+        let start = request(
+            1,
+            "run.start",
+            serde_json::json!({
+                "feature": "extract",
+                "url": "https://shop.test",
+                "targets": [{ "browser": "firefox" }],
+                "viewports": [{ "width": 1280, "height": 800 }],
+                "outDir": out_dir,
+            }),
+        );
+        let hello = request(
+            3,
+            "engine.hello",
+            serde_json::json!({ "protocolVersion": PROTOCOL_VERSION }),
+        );
+        let (server_input, mut input) = io::pipe().unwrap();
+        let captured = Captured::default();
+        let server = thread::spawn({
+            let captured = captured.clone();
+            move || {
+                let make: MakeDrivers = Arc::new(|| Drivers::starting_with(vec![]));
+                serve_inner(
+                    io::BufReader::new(server_input),
+                    Box::new(PanicsOnEvents(captured)),
+                    &make,
+                    &ServeOptions::default(),
+                )
+                .unwrap();
+            }
+        });
+        writeln!(input, "{start}").unwrap();
+        let started = std::time::Instant::now();
+        let done = loop {
+            let replies = replies_in(&captured);
+            if let Some(done) = replies.iter().find(|reply| reply["method"] == "run.done") {
+                break done.clone();
+            }
+            assert!(started.elapsed().as_secs() < 20, "no run.done: {replies:?}");
+            thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(done["params"]["status"], "failed", "{done}");
+        let folder = replies_in(&captured)[0]["result"]["runFolder"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let on_disk: Value =
+            serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(&folder).join("run.json")).unwrap())
+                .unwrap();
+        assert_eq!(on_disk["status"], "failed");
+
+        // The server still answers, and a cancel for the finished run is refused, not hung on.
+        writeln!(
+            input,
+            "{}",
+            request(2, "run.cancel", serde_json::json!({ "runId": done["params"]["runId"] }))
+        )
+        .unwrap();
+        writeln!(input, "{hello}").unwrap();
+        drop(input);
+        server.join().unwrap();
+        let replies = replies_in(&captured);
+        assert!(replies
+            .iter()
+            .any(|reply| reply["id"] == 3 && reply["result"]["engineVersion"].is_string()));
+        assert!(replies.iter().any(|reply| reply["id"] == 2));
+        let _ = std::fs::remove_dir_all(out_dir);
     }
 
     #[test]
