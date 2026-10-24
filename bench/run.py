@@ -22,10 +22,12 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +54,24 @@ def start_shop() -> str:
     return f"http://127.0.0.1:{port}/"
 
 
+# The first step of a path inside a frame: frame "<label>". The label escapes \ and " (spec/fingerprint.md).
+FRAME_STEP = re.compile(r'^frame "((?:[^"\\]|\\.)*)"')
+
+
+def frame_prefix(path: str) -> str | None:
+    """The frame step a component path starts with, or None for a path in the main page. It is not a split
+    on " > ": a frame label can hold that text, because the recipe escapes the quote that would end it."""
+    found = FRAME_STEP.match(path)
+    return found.group(0) if found else None
+
+
+def frame_step(name: str) -> str:
+    """The frame step the recipe writes for a frame called `name`: NFC, trimmed, inner white space
+    collapsed, lower-cased, then backslash and quote escaped."""
+    label = " ".join(unicodedata.normalize("NFC", name).split()).lower()
+    return 'frame "' + label.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def matches(expected: dict[str, Any], found: dict[str, Any]) -> bool:
     if found["role"] != expected["role"]:
         return False
@@ -75,8 +95,7 @@ def problems(expected: dict[str, Any], found: dict[str, Any], viewport: str) -> 
     check("disabled", expected.get("disabled", 0), sum(not i["state"]["enabled"] for i in instances))
     check("shadow", bool(expected.get("shadow")), all(i["inShadowDom"] for i in instances))
     frame = expected.get("frame")
-    in_frame = found["path"].split(" > ")[0] if found["path"].startswith("frame ") else None
-    check("frame", f'frame "{frame}"' if frame else None, in_frame)
+    check("frame", frame_step(frame) if frame else None, frame_prefix(found["path"]))
     return out
 
 
