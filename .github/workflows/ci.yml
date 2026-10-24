@@ -4,6 +4,12 @@ on:
   push:
     branches: [master]
   pull_request:
+  # A manual run, and a weekly one on the default branch, test everything: the changes job cannot
+  # tell what changed for either and says so. The weekly run catches drift (new browser, toolchain
+  # or dependency releases) when nobody has pushed.
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
 
 # A newer push to the same branch makes the older run pointless.
 concurrency:
@@ -15,7 +21,7 @@ permissions:
 
 jobs:
   # Decides whether the push changes anything that can break. A change to documentation only
-  # (Markdown files, docs/, the licence) skips the jobs below, and the CI job still reports.
+  # (README.md, LICENSE and Markdown files under docs/; see scripts/ci_changed.py) skips the jobs below, and the CI job still reports.
   #
   # It also decides where every other job runs, once, so that no other job names the self-hosted
   # pool. The pool is a persistent machine; code from a fork, or freshly updated third-party
@@ -49,28 +55,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
-        run: |
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            base="$PR_BASE_SHA"
-          else
-            base="$PUSH_BEFORE"
-          fi
-          # A new branch, a force push or a missing commit: test everything rather than guess.
-          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
-              || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            echo "Cannot tell what changed; testing everything."
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed="$(git diff --name-only "$base" HEAD)"
-          echo "Changed files:"; echo "$changed"
-          # A here-string, not a pipe: with pipefail, grep -q stopping early can fail a pipe.
-          if grep -qvE '(\.md$|^docs/|^LICENSE$)' <<< "$changed"; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Documentation only; the tests are skipped."
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
+        run: python3 scripts/ci_changed.py
 
   # Style and generated code. These do not depend on the operating system, so they run once.
   lint:
@@ -311,7 +296,8 @@ jobs:
         run: rm -rf target .venv node_modules sdks/typescript/node_modules
 
   # The one check to require before merging. It passes when the jobs above passed, or were
-  # skipped because only documentation changed, and fails when any of them failed.
+  # skipped because only documentation changed, and fails when any of them failed. Branch protection
+  # must require this job (CI), not the jobs above: a skipped job counts as passed there.
   ci:
     name: CI
     needs: [changes, lint, msrv, test]
