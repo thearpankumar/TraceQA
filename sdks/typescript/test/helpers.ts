@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,32 @@ const exe = process.platform === "win32" ? ".exe" : "";
 /** The engine under test: TRACEQA_BIN, or the debug build. */
 export const BINARY = process.env.TRACEQA_BIN || join(ROOT, "target", "debug", `traceqa${exe}`);
 export const HAVE_BINARY = existsSync(BINARY);
+
+/** The folder of the workspace's virtual environment that holds python and the driver scripts (`uv sync` makes it). */
+export const VENV_BIN = join(ROOT, ".venv", process.platform === "win32" ? "Scripts" : "bin");
+
+/**
+ * The Python for the fixture servers: TRACEQA_PYTHON, else the workspace's `.venv`, else `python` on PATH.
+ */
+export function pythonCommand(): string {
+  if (process.env.TRACEQA_PYTHON) return process.env.TRACEQA_PYTHON;
+  const venvPython = join(VENV_BIN, `python${exe}`);
+  return existsSync(venvPython) ? venvPython : "python";
+}
+
+/**
+ * Puts the workspace's venv folder first on PATH, once, so the engine finds the drivers and the
+ * fixture servers find their Python without `uv run`. Does nothing when the folder is missing or
+ * already first (CI adds it itself), so it is safe to call again.
+ */
+export function useWorkspaceTools(): void {
+  if (!existsSync(VENV_BIN)) return;
+  const parts = (process.env.PATH ?? "").split(delimiter);
+  if (parts[0] === VENV_BIN) return;
+  process.env.PATH = [VENV_BIN, ...parts.filter((part) => part !== VENV_BIN)].join(delimiter);
+}
+
+useWorkspaceTools();
 
 /** A fresh folder that is removed when the process exits. */
 export function tempDir(): string {
@@ -28,8 +54,8 @@ export interface Shop {
 }
 
 /**
- * Serves the Buggy Shop on free ports, with the same script the Python tests use. `python` must
- * be the workspace's, which `uv run` puts first on PATH together with the drivers.
+ * Serves the Buggy Shop on free ports, with the same script the Python tests use, under the
+ * workspace's Python (see pythonCommand). Rejects after 30 seconds instead of waiting forever.
  */
 export function startShop(): Promise<Shop> {
   return serve(join(ROOT, "fixtures", "buggy-shop", "serve.py"));
@@ -40,12 +66,23 @@ export function startTrouble(): Promise<Shop> {
   return serve(join(ROOT, "fixtures", "trouble", "serve.py"));
 }
 
+const SERVE_TIMEOUT_MS = 30_000;
+
 function serve(script: string): Promise<Shop> {
-  const child: ChildProcess = spawn("python", [script, "--port", "0"], { stdio: ["ignore", "pipe", "inherit"] });
+  const child: ChildProcess = spawn(pythonCommand(), [script, "--port", "0"], { stdio: ["ignore", "pipe", "inherit"], windowsHide: true });
   return new Promise((resolveShop, reject) => {
-    child.once("error", (error) => reject(new Error(`could not start the shop: ${error.message}. Run under uv run.`)));
-    child.once("exit", (code) => reject(new Error(`the shop exited with ${code}`)));
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`the shop did not print its address within ${SERVE_TIMEOUT_MS / 1000} s. Run \`uv sync\` first, or set TRACEQA_PYTHON.`));
+    }, SERVE_TIMEOUT_MS);
+    const fail = (error: Error): void => {
+      clearTimeout(timer);
+      reject(error);
+    };
+    child.once("error", (error) => fail(new Error(`could not start the shop: ${error.message}. Run \`uv sync\` first, or set TRACEQA_PYTHON.`)));
+    child.once("exit", (code) => fail(new Error(`the shop exited with ${code}`)));
     createInterface({ input: child.stdout! }).once("line", (line) => {
+      clearTimeout(timer);
       const url = /https?:\/\/\S+\//.exec(line)?.[0];
       if (!url) return reject(new Error(`unexpected first line from the shop: ${line}`));
       resolveShop({ url, stop: () => child.kill() });

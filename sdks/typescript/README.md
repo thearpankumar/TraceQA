@@ -48,9 +48,12 @@ npm ci
 npm run gen          # regenerate src/protocol.ts from spec/
 npm run gen:check    # fail if src/protocol.ts is out of date
 npm run typecheck
-uv run npm test      # from the repository root's environment, after cargo build
+npm test             # after `uv sync` and `cargo build` at the repository root
 ```
 
-`uv run` puts the browser drivers and the workspace's Python on `PATH`. The
-tests need both: they start the Buggy Shop and run the real engine. They also
+The tests need the workspace's Python and the browser drivers: they start the
+Buggy Shop and run the real engine. They find both in the repository's `.venv`
+(`uv sync` makes it) without `uv run` or a `PATH` edit; `TRACEQA_PYTHON` names
+another Python. A first test file checks this and fails within seconds with
+"Run `uv sync` first" instead of hanging. They also
 play back `spec/transcripts/` against the stand-in engine, `traceqa-replay`.

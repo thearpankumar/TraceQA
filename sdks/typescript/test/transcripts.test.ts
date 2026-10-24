@@ -61,7 +61,7 @@ describe("recorded conversations", { skip: existsSync(REPLAY) ? false : "build t
     const recorded = engineSaid("extract").filter((message) => message.method === "run.event");
     assert.deepEqual(events, recorded.map((message) => message.params!.event));
     assert.equal(result.status, "completed");
-    assert.match(result.runFolder, /^\/work\/runs\/r_/);
+    assert.match(result.runFolder, /^[\\/]work[\\/]runs[\\/]r_/);
     assert.deepEqual(
       result.targets.map((target) => target.dir),
       ["chromium-1280x800", "chromium-390x844"],
