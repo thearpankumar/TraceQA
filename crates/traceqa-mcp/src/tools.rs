@@ -264,7 +264,7 @@ impl Call<'_> {
         Ok(match outcome {
             Ok(content) => json!({ "content": content, "isError": false }),
             Err(why) => {
-                let why = clean(&why);
+                let why = clean(&public_message(&why, &self.config.runs_dir));
                 let why: String = why.chars().take(MAX_ERROR_CHARS).collect();
                 // These two read stored run data, so their errors can quote page text.
                 let why = if matches!(name, "get_components" | "get_crop") {
@@ -286,7 +286,8 @@ impl Call<'_> {
             cancel: self.cancelled,
         };
         let report = self.report;
-        let mut on_event = |event: &Event| report(event.seq + 1, &event.message);
+        let runs_dir = &self.config.runs_dir;
+        let mut on_event = |event: &Event| report(event.seq + 1, &public_message(&event.message, runs_dir));
         let manifest = run.execute(&execution, &mut on_event);
 
         let targets: Vec<Value> = manifest
@@ -300,7 +301,7 @@ impl Call<'_> {
                     "instances": t.instance_count,
                     "warnings": t.warning_count,
                     "seconds": (t.duration_ms as f64 / 100.0).round() / 10.0,
-                    "error": t.error,
+                    "error": t.error.as_deref().map(|e| public_message(e, runs_dir)),
                 })
             })
             .collect();
@@ -441,7 +442,7 @@ impl Call<'_> {
     fn list_runs(&self, args: ListRunsArgs) -> Result<Content, String> {
         let mut runs: Vec<RunManifest> = match fs::read_dir(&self.config.runs_dir) {
             Ok(entries) => entries
-                .filter_map(|entry| read_json(&entry.ok()?.path().join("run.json")).ok())
+                .filter_map(|entry| read_json(&entry.ok()?.path().join("run.json")))
                 .collect(),
             Err(_) => Vec::new(), // no runs yet
         };
@@ -466,10 +467,7 @@ impl Call<'_> {
             array: "runs",
             shown: "shown",
         };
-        Ok(reply(
-            json!({ "runs_dir": self.config.runs_dir, "limit_applied": limit, "runs": runs }),
-            Some(cut),
-        ))
+        Ok(reply(json!({ "limit_applied": limit, "runs": runs }), Some(cut)))
     }
 
     fn get_components(&self, args: ComponentsArgs) -> Result<Content, String> {
@@ -558,6 +556,9 @@ impl Call<'_> {
         // The file, or a folder on the way to it, may be a link to somewhere else. The canonical
         // path must stay inside the canonical runs folder, and that path is the one read.
         let path = self.run_dir(&args.run_id)?.join(&dir).join(crop);
+        if !path.exists() {
+            return Err(format!("the picture of {} could not be read", component.id));
+        }
         let path = safe_file_in(&self.config.runs_dir, &path).ok_or_else(outside)?;
         if fs::metadata(&path).is_ok_and(|m| m.len() > MAX_CROP_BYTES) {
             return Err(format!(
@@ -584,16 +585,14 @@ impl Call<'_> {
         if dir.join("run.json").is_file() {
             Ok(dir)
         } else {
-            Err(format!(
-                "no run {run_id} in {}. list_runs shows the runs there.",
-                self.config.runs_dir.display()
-            ))
+            Err(format!("no run {run_id}. list_runs shows the runs."))
         }
     }
 
     fn components_file(&self, run_id: &str, target: Option<&str>) -> Result<(String, ComponentsFile), String> {
         let dir = self.run_dir(run_id)?;
-        let manifest: RunManifest = read_json(&dir.join("run.json"))?;
+        let manifest: RunManifest =
+            read_json(&dir.join("run.json")).ok_or_else(|| format!("run {run_id} is damaged"))?;
         let names: Vec<&str> = manifest.targets.iter().map(|t| t.dir.as_str()).collect();
         let target = match target {
             Some(target) if names.contains(&target) => target.to_string(),
@@ -621,7 +620,8 @@ impl Call<'_> {
             let why = summary.error.as_deref().unwrap_or("it did not finish");
             return Err(format!("{target} found nothing: {why}"));
         }
-        Ok((target, read_json(&path)?))
+        let file = read_json(&path).ok_or_else(|| format!("{target} of run {run_id} is damaged"))?;
+        Ok((target, file))
     }
 }
 
@@ -642,9 +642,47 @@ fn plain_name(name: &str, what: &str) -> Result<(), String> {
     }
 }
 
-fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
-    let text = fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("{} is not valid: {e}", path.display()))
+/// Reads a JSON file, or `None`. No reason is given, because the reason would name a path.
+fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+/// A message with no local path in it, safe to show to the AI. The runs folder is named by a
+/// placeholder, and any other absolute path (`/x`, `C:\x`, `C:/x`, `\\host\x`) is hidden up to
+/// the next quote, comma, semicolon, colon-and-space, bracket or line end. A path with spaces in
+/// it may hide a little more than the path; that is the safe side.
+pub(crate) fn public_message(text: &str, runs_dir: &Path) -> String {
+    let runs = runs_dir.display().to_string();
+    let text = if runs.is_empty() {
+        text.to_string()
+    } else {
+        text.replace(&runs, "<runs folder>")
+    };
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let at_start = i == 0 || matches!(chars[i - 1], ' ' | '\t' | '\n' | '"' | '\'' | '(' | '[' | '=' | '`');
+        let rest = &chars[i..];
+        let drive = matches!(rest, [d, ':', '\\' | '/', ..] if d.is_ascii_alphabetic());
+        let unc = matches!(rest, ['\\', '\\', ..]);
+        let root = matches!(rest, ['/', next, ..] if *next != '/' && !next.is_whitespace());
+        if at_start && (drive || unc || root) {
+            out.push_str("<path>");
+            while i < chars.len() {
+                let stop = matches!(chars[i], '"' | '\'' | ',' | ';' | ')' | ']' | '\n' | '`')
+                    || (chars[i] == ':' && chars.get(i + 1) == Some(&' '));
+                if stop {
+                    break;
+                }
+                i += 1;
+            }
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Arguments with a message the AI can act on when they are wrong.
