@@ -25,6 +25,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: version
         name: The tag matches every package's version
         run: echo "version=$(python3 scripts/check_version.py "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
@@ -51,6 +53,8 @@ jobs:
       ARCHIVE: traceqa-${{ github.ref_name }}-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build the release binary
@@ -58,10 +62,12 @@ jobs:
 
       - name: The binary starts and reports this version
         shell: bash
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           reported="$(target/release/${{ matrix.binary }} --version)"
           echo "$reported"
-          [ "$reported" = "traceqa ${{ needs.check.outputs.version }}" ]
+          [ "$reported" = "traceqa $VERSION" ]
           target/release/${{ matrix.binary }} extract --help > /dev/null
           target/release/${{ matrix.binary }} mcp --help > /dev/null
 
