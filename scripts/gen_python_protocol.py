@@ -10,6 +10,7 @@ contributes its $defs to one shared namespace.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,18 @@ def load_spec() -> tuple[dict, dict]:
     return definitions, contracts
 
 
+# datamodel-codegen emits `Field(..., alias="camelName")`. Type checkers (dataclass_transform) read only
+# `alias=` as the __init__ parameter name, so they would reject the snake_case keywords the code uses.
+# validation_alias/serialization_alias keep the wire names for pydantic and leave the field names
+# as the synthesized parameters. --use-default-kwarg emits `default=None`, because only the keyword
+# form counts as a default for them. populate_by_name keeps both spellings valid at runtime.
+ALIAS = re.compile(r'(?<![\w])alias="(\w+)"')
+
+
+def split_aliases(source: str) -> str:
+    return ALIAS.sub(r'validation_alias="\1", serialization_alias="\1"', source)
+
+
 def render_models(definitions: dict) -> str:
     bundle = {"$schema": "http://json-schema.org/draft-07/schema#", "definitions": definitions}
     with tempfile.TemporaryDirectory() as tmp:
@@ -67,6 +80,7 @@ def render_models(definitions: dict) -> str:
                 "--target-python-version", "3.10",
                 "--snake-case-field",
                 "--allow-population-by-field-name",
+                "--use-default-kwarg",
                 "--use-standard-collections",
                 "--use-union-operator",
                 "--use-schema-description",
@@ -79,7 +93,7 @@ def render_models(definitions: dict) -> str:
             ],
             check=True,
         )  # fmt: skip
-        return target.read_text(encoding="utf-8")
+        return split_aliases(target.read_text(encoding="utf-8"))
 
 
 def render_contracts(contracts: dict) -> str:
