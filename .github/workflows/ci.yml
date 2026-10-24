@@ -16,23 +16,44 @@ permissions:
 jobs:
   # Decides whether the push changes anything that can break. A change to documentation only
   # (Markdown files, docs/, the licence) skips the jobs below, and the CI job still reports.
+  #
+  # It also decides where every other job runs, once, so that no other job names the self-hosted
+  # pool. The pool is a persistent machine; code from a fork, or freshly updated third-party
+  # code from Dependabot, must never reach it. This job itself always runs on a GitHub-hosted
+  # machine, so a pull request cannot influence where it runs.
+  #
+  #   event                          runner
+  #   push to master                 vars.RUNNER_LABELS
+  #   pull request from this repo    vars.RUNNER_LABELS
+  #   pull request from a fork       ubuntu-latest (GitHub-hosted)
+  #   pull request by Dependabot     ubuntu-latest (GitHub-hosted)
+  #   vars.RUNNER_LABELS not set     ubuntu-latest (GitHub-hosted)
+  #
+  # The value is JSON: the labels array of the variable, or the quoted string. Jobs read it with
+  # fromJSON. `!= 'pull_request'` rather than `== 'push'` keeps schedule and manual runs on the pool.
   changes:
     name: Changes
-    runs-on: ${{ vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      runner: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.RUNNER_LABELS || '"ubuntu-latest"' }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - id: filter
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
           else
-            base="${{ github.event.before }}"
+            base="$PUSH_BEFORE"
           fi
           # A new branch, a force push or a missing commit: test everything rather than guess.
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
@@ -56,10 +77,12 @@ jobs:
     name: Lint
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ${{ vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -101,7 +124,7 @@ jobs:
     name: Test (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && (vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest') || matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(needs.changes.outputs.runner) || matrix.os }}
     timeout-minutes: 45
     strategy:
       # One system failing should not hide what the others do.
@@ -117,6 +140,8 @@ jobs:
       TRACEQA_REQUIRE_CHROMEDRIVER: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v5
@@ -192,7 +217,7 @@ jobs:
     name: CI
     needs: [changes, lint, test]
     if: always()
-    runs-on: ${{ vars.RUNNER_LABELS && fromJSON(vars.RUNNER_LABELS) || 'ubuntu-latest' }}
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner || '"ubuntu-latest"') }}
     timeout-minutes: 5
     steps:
       - name: Result

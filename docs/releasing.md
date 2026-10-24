@@ -102,3 +102,25 @@ in version `0.2.0` fetches the drivers of `v0.2.0`, so the two always match.
 Merging a pull request puts code on `master` and publishes nothing. A release
 happens only when a tag is pushed, so several pull requests can be merged and
 then released together under one version.
+
+## Self-hosted runner checklist
+
+CI can run on a self-hosted machine, named by the repository variable
+`RUNNER_LABELS` (a JSON array such as `["self-hosted","linux"]`). The workflow
+sends a job there only for pushes to `master` and for pull requests from this
+repository that Dependabot did not open. Pull requests from forks, Dependabot
+pull requests, and every run when the variable is unset use GitHub-hosted
+`ubuntu-latest`. The `Changes` job decides this once, and it always runs on a
+GitHub-hosted machine. A persistent machine keeps state between jobs, so
+GitHub advises against self-hosted runners for public repositories.
+
+The workflow cannot enforce the settings outside the repository. These are
+owner actions:
+
+- Use ephemeral (just-in-time) runners, one job per machine, so nothing
+  survives a job. This is the real fix for cross-run poisoning.
+- On AWS, require IMDSv2 with a hop limit of 1 (or block the metadata
+  service), and attach no instance role to the machine.
+- Limit the runner group to this repository, and do not give it to forks.
+- Keep the fork pull request approval policy at "Require approval for all
+  external contributors".
