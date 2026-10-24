@@ -82,6 +82,13 @@ impl DriverError {
     pub(crate) fn loses_driver(&self) -> bool {
         matches!(self.kind, ErrorKind::Timeout | ErrorKind::Transport)
     }
+
+    /// True when starting the driver failed in a way that may pass: it did not answer hello in
+    /// time, or its pipe broke. A driver that is missing, not allowed to run, or speaks another
+    /// protocol version will fail the same way again.
+    fn is_transient_start_failure(&self) -> bool {
+        self.loses_driver()
+    }
 }
 
 /// Carries one request to a driver and brings back its result.
@@ -238,7 +245,7 @@ impl ProcessTransport {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .map_err(|e| DriverError::transport(format!("could not start `{command}`: {e}")))?;
+            .map_err(|e| spawn_error(command, &e))?;
         let stdin = child.stdin.take().expect("stdin was piped");
         let stdout = child.stdout.take().expect("stdout was piped");
 
@@ -252,6 +259,17 @@ impl ProcessTransport {
             unresponsive: false,
         })
     }
+}
+
+/// Why a driver program could not be started. A program that is not there, or may not be run,
+/// stays that way, so it is `unsupported` and [`Drivers`] does not try it again. Any other
+/// failure to spawn may pass, so it is `transport`.
+fn spawn_error(command: &DriverCommand, error: &std::io::Error) -> DriverError {
+    let kind = match error.kind() {
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied => ErrorKind::Unsupported,
+        _ => ErrorKind::Transport,
+    };
+    DriverError::new(kind, redact_text(&format!("could not start `{command}`: {error}")))
 }
 
 impl Transport for ProcessTransport {
@@ -455,8 +473,11 @@ fn request<P: Serialize, R: DeserializeOwned>(
 /// Starts one driver and completes the handshake with it.
 pub type Starter = Box<dyn Fn() -> Result<Driver, DriverError> + Send>;
 
+/// How many times in a row a driver may fail to start before it is given up on.
+const MAX_START_ATTEMPTS: u32 = 2;
+
 /// The configured drivers. Each is started the first time a browser might need it, and
-/// started again if it stops answering.
+/// started again if it stops answering or failed to start for a reason that may pass.
 pub struct Drivers {
     slots: Vec<(Starter, Slot)>,
 }
@@ -464,7 +485,11 @@ pub struct Drivers {
 enum Slot {
     NotStarted,
     Running(Driver),
-    Failed(String),
+    /// Starting failed. `attempts` counts the failures in a row.
+    Failed {
+        error: DriverError,
+        attempts: u32,
+    },
 }
 
 impl Drivers {
@@ -494,10 +519,26 @@ impl Drivers {
             if matches!(slot, Slot::Running(driver) if driver.is_lost()) {
                 *slot = Slot::NotStarted;
             }
+            // A start that failed for a reason that may pass gets another go on the next call, up to
+            // the bound. Never inside this call: a retry on a cold machine costs up to the hello timeout.
+            let earlier_attempts = match slot {
+                Slot::Failed { error, attempts }
+                    if error.is_transient_start_failure() && *attempts < MAX_START_ATTEMPTS =>
+                {
+                    Some(*attempts)
+                }
+                _ => None,
+            };
+            if earlier_attempts.is_some() {
+                *slot = Slot::NotStarted;
+            }
             if matches!(slot, Slot::NotStarted) {
                 *slot = match start() {
                     Ok(driver) => Slot::Running(driver),
-                    Err(error) => Slot::Failed(error.message),
+                    Err(error) => Slot::Failed {
+                        error,
+                        attempts: earlier_attempts.unwrap_or(0) + 1,
+                    },
                 };
             }
             match slot {
@@ -510,7 +551,7 @@ impl Drivers {
                     driver.info.driver_name,
                     driver.info.browsers.join(", ")
                 )),
-                Slot::Failed(why) => tried.push(why.clone()),
+                Slot::Failed { error, .. } => tried.push(error.message.clone()),
                 Slot::NotStarted => unreachable!("every slot was started above"),
             }
         }
@@ -720,6 +761,96 @@ mod tests {
         let error = drivers.for_browser("firefox").err().unwrap();
         assert_eq!(error.kind(), &ErrorKind::Unsupported);
         assert!(error.message.contains("traceqa-no-such-driver"), "{}", error.message);
+    }
+
+    /// A driver that answers hello and offers firefox.
+    struct Hello;
+    impl Transport for Hello {
+        fn call(&mut self, method: &str, _: Value, _: Duration) -> Result<Value, DriverError> {
+            assert_eq!(method, "driver.hello");
+            Ok(json!({
+                "driverName": "scripted", "driverVersion": "0", "protocolVersion": PROTOCOL_VERSION,
+                "browsers": ["firefox"], "exclusiveBrowsers": []
+            }))
+        }
+    }
+
+    /// A starter that fails with `kind` for the first `failures` starts and then succeeds, and
+    /// the count of starts it has been asked for.
+    fn flaky(failures: usize, kind: ErrorKind) -> (Starter, Arc<AtomicUsize>) {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&starts);
+        let start: Starter = Box::new(move || {
+            if counted.fetch_add(1, Ordering::SeqCst) < failures {
+                Err(DriverError::new(kind.clone(), "scripted start failure"))
+            } else {
+                Driver::connect(Box::new(Hello))
+            }
+        });
+        (start, starts)
+    }
+
+    #[test]
+    fn a_driver_that_fails_to_start_once_is_started_again() {
+        let (start, starts) = flaky(1, ErrorKind::Timeout);
+        let mut drivers = Drivers::starting_with(vec![start]);
+        let error = drivers.for_browser("firefox").err().unwrap();
+        assert!(error.message.contains("scripted start failure"), "{}", error.message);
+        assert_eq!(starts.load(Ordering::SeqCst), 1, "no retry inside the same call");
+        assert!(drivers.for_browser("firefox").is_ok());
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
+        // Once running it is left alone.
+        assert!(drivers.for_browser("firefox").is_ok());
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_not_found_driver_is_not_retried() {
+        for kind in [ErrorKind::Unsupported, ErrorKind::VersionMismatch, ErrorKind::Internal] {
+            let (start, starts) = flaky(usize::MAX, kind);
+            let mut drivers = Drivers::starting_with(vec![start]);
+            for _ in 0..4 {
+                assert!(drivers.for_browser("firefox").is_err());
+            }
+            assert_eq!(starts.load(Ordering::SeqCst), 1);
+        }
+        // The real spawn of a program that is not there is permanent, too.
+        let command = DriverCommand::parse("traceqa-no-such-driver").unwrap();
+        let error = ProcessTransport::spawn(&command).err().unwrap();
+        assert_eq!(error.kind(), &ErrorKind::Unsupported);
+        assert!(error.message().contains("could not start `traceqa-no-such-driver`"));
+    }
+
+    #[test]
+    fn a_driver_that_keeps_failing_gives_up_after_the_bound() {
+        let (start, starts) = flaky(usize::MAX, ErrorKind::Transport);
+        let mut drivers = Drivers::starting_with(vec![start]);
+        for _ in 0..10 {
+            assert!(drivers.for_browser("firefox").is_err());
+        }
+        let total = starts.load(Ordering::SeqCst);
+        assert!((2..=3).contains(&total), "started {total} times");
+        // The latest error is still reported with what was tried.
+        let error = drivers.for_browser("firefox").err().unwrap();
+        assert!(
+            error.message.contains("Tried: scripted start failure"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn the_retry_is_per_call_not_a_busy_loop() {
+        let (first, first_starts) = flaky(usize::MAX, ErrorKind::Timeout);
+        let (second, second_starts) = flaky(usize::MAX, ErrorKind::Timeout);
+        let mut drivers = Drivers::starting_with(vec![first, second]);
+        assert!(drivers.for_browser("firefox").is_err());
+        // One attempt for each driver in one call, whatever the bound.
+        assert_eq!(first_starts.load(Ordering::SeqCst), 1);
+        assert_eq!(second_starts.load(Ordering::SeqCst), 1);
+        assert!(drivers.for_browser("firefox").is_err());
+        assert_eq!(first_starts.load(Ordering::SeqCst), 2);
+        assert_eq!(second_starts.load(Ordering::SeqCst), 2);
     }
 
     #[test]
