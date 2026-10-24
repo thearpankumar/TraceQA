@@ -15,6 +15,10 @@ from them, so the sides cannot drift apart.
 | `fingerprint-vectors.json` | Shared test vectors for the recipe | The engine's unit tests and the collector test (`tests/test_fingerprint_vectors.py`) |
 | `transcripts/` | Recorded client conversations | Every client is tested against them. See `transcripts/README.md`. |
 
+Every `$ref` must be `#/$defs/Name` or `file.schema.json#/$defs/Name`, and each `$defs` name
+must be unique across files: the three generators flatten refs to the last segment.
+`scripts/check_spec_refs.py` enforces this in CI.
+
 ## How messages travel
 
 Both protocols are JSON-RPC 2.0, one message per line.
