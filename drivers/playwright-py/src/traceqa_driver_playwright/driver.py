@@ -18,14 +18,14 @@ from playwright.sync_api import Browser, BrowserContext, Frame, Page, Playwright
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from traceqa_protocol import BaseDriver, models, to_wire
-from traceqa_protocol.driver import check_scroll_target, png_dimensions, scrolled_to_end
+from traceqa_protocol.driver import check_scroll_target, installed_version, png_dimensions, scrolled_to_end
 from traceqa_protocol.frames import is_cross_origin
 from traceqa_protocol.rpc import Channel, RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
 from traceqa_protocol.urls import without_query
 
 NAME = "traceqa-driver-playwright"
-VERSION = "0.1.0"
+VERSION = installed_version(NAME)
 DEFAULT_TIMEOUT_MS = 30_000
 # How long to wait for a page to come to rest: after loading it, and after each scroll.
 SETTLE_AFTER_LOAD_S = 5.0

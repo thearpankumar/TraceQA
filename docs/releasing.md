@@ -36,6 +36,13 @@ tagged.
    | `sdks/python/pyproject.toml` | `version` |
    | `sdks/typescript/package.json` | `"version"` |
 
+   The three Python packages that depend on `traceqa-protocol` pin it exactly
+   (`traceqa-protocol==X.Y.Z` in `dependencies` of `drivers/playwright-py`,
+   `drivers/webdriver-py` and `sdks/python`), so change those pins too. The drivers
+   report the version of their installed package, so no version is written in
+   their code. `check_version.py` fails on a pin that disagrees, on a literal
+   `VERSION` in a driver, and on a Cargo path dependency that carries a version.
+
    Then run `cargo build` and `uv lock`, so `Cargo.lock` and `uv.lock` carry the
    new version too, and merge the pull request.
 

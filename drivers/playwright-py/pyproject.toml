@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "TraceQA browser driver for Chromium, Edge, Firefox, WebKit and CDP endpoints, built on Playwright."
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["playwright>=1.47", "traceqa-protocol"]
+dependencies = ["playwright>=1.47", "traceqa-protocol==0.1.0"]
 
 [project.scripts]
 traceqa-driver-playwright = "traceqa_driver_playwright.__main__:main"

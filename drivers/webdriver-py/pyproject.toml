@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "TraceQA browser driver for real Safari and for any W3C WebDriver server or cloud grid."
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["traceqa-protocol"]
+dependencies = ["traceqa-protocol==0.1.0"]
 
 [project.scripts]
 traceqa-driver-webdriver = "traceqa_driver_webdriver.__main__:main"
