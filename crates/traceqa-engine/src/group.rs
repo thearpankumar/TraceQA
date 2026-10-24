@@ -117,7 +117,8 @@ fn unnamed_key(element: &RawElement, position: usize) -> String {
     if let Some(test_id) = element.attrs.get("data-testid") {
         return format!("testid:{test_id}");
     }
-    if let Some(id) = element.attrs.get("id") {
+    // A generated id (":r1:", "radix-12345") differs on every page load, so it is no better than none.
+    if let Some(id) = element.attrs.get("id").filter(|id| fingerprint::is_stable_attr_id(id)) {
         return format!("id:{id}");
     }
     match element.attrs.get("type") {
@@ -443,6 +444,44 @@ mod tests {
         let components = group(vec![cart, menu]);
         assert_eq!(components.len(), 2);
         assert_ne!(components[0].id, components[1].id);
+    }
+
+    fn unnamed_with_id(id: &str) -> Located {
+        let mut located = element("button", "", vec![]);
+        located.element.attrs.insert("id".into(), id.into());
+        located
+    }
+
+    #[test]
+    fn an_unnamed_control_with_a_generated_id_is_keyed_by_position() {
+        // The same page loaded twice: the framework hands out ':r1:' then ':r7:'.
+        let first = group(vec![unnamed_with_id(":r1:")]);
+        let second = group(vec![unnamed_with_id(":r7:")]);
+        assert_eq!(first[0].id, second[0].id);
+
+        // A readable id still tells the control apart from a sibling without one.
+        let toggle = group(vec![unnamed_with_id("search-toggle"), element("button", "", vec![])]);
+        assert_eq!(toggle.len(), 2);
+        assert_ne!(toggle[0].id, toggle[1].id);
+        let again = group(vec![unnamed_with_id("search-toggle")]);
+        assert_eq!(toggle[0].id, again[0].id);
+    }
+
+    #[test]
+    fn unstable_id_falls_through_to_tag_type_position() {
+        let mut typed = unnamed_with_id("_x");
+        typed.element.attrs.insert("type".into(), "submit".into());
+        let bare = element("button", "", vec![]);
+        let mut typed_without_id = element("button", "", vec![]);
+        typed_without_id.element.attrs.insert("type".into(), "submit".into());
+        // An unstable id is as good as no id: the keys are the tag, type and position.
+        assert_eq!(
+            unnamed_key(&typed.element, 0),
+            unnamed_key(&typed_without_id.element, 0)
+        );
+        assert_eq!(unnamed_key(&typed.element, 0), "<button[submit]>#0");
+        assert_eq!(unnamed_key(&unnamed_with_id(":r1:").element, 2), "<button>#2");
+        assert_eq!(unnamed_key(&bare.element, 1), "<button>#1");
     }
 
     #[test]

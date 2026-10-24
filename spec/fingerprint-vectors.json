@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "about": "Shared test vectors for spec/fingerprint.md. The Rust engine reads this file in its unit tests (crates/traceqa-engine/src/fingerprint.rs) and tests/test_fingerprint_vectors.py checks the collector against the stableId section in real browsers.",
+  "stableId": [
+    { "id": "submit", "stable": true },
+    { "id": "nav-main", "stable": true },
+    { "id": ":r1:", "stable": false },
+    { "id": "_x", "stable": false },
+    { "id": "1abc", "stable": false },
+    { "id": "btn1234", "stable": false },
+    { "id": "btn123", "stable": true },
+    { "id": "btn-12-34", "stable": true },
+    { "id": "a1b2c3d4e5", "stable": false },
+    { "id": "deadbeef", "stable": false },
+    { "id": "deadbee", "stable": true },
+    { "id": "DEADBEEF", "stable": true },
+    { "id": "abcdefgh", "stable": true },
+    { "id": "radix-12345", "stable": false },
+    { "id": "ember-9f3a2b1c", "stable": false },
+    { "id": "x٣٤٥٦٧", "stable": true },
+    { "id": "", "stable": false, "domTestable": false },
+    { "id": "   ", "stable": false, "domTestable": false },
+    { "id": "  submit  ", "stable": true, "domTestable": false },
+    { "id": "  :r1:  ", "stable": false, "domTestable": false }
+  ]
+}
