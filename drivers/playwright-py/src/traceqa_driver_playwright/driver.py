@@ -9,20 +9,20 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import struct
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, Frame, Page, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
-from traceqa_protocol import contracts, models, to_wire
+from traceqa_protocol import BaseDriver, models, to_wire
+from traceqa_protocol.driver import check_scroll_target, png_dimensions, scrolled_to_end
 from traceqa_protocol.frames import is_cross_origin
-from traceqa_protocol.rpc import Channel, Handler, RpcError
+from traceqa_protocol.rpc import Channel, RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
+from traceqa_protocol.urls import without_query
 
 NAME = "traceqa-driver-playwright"
 VERSION = "0.1.0"
@@ -363,21 +363,6 @@ def give_state(context: BrowserContext, state: dict[str, Any]) -> None:
         )
 
 
-def without_query(url: str) -> str:
-    """The address as scheme, host and path only: no user name, password, query or fragment."""
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-        if ":" in host:
-            host = f"[{host}]"
-        port = f":{parts.port}" if parts.port else ""
-        if parts.scheme and host:
-            return f"{parts.scheme}://{host}{port}{parts.path}"
-    except ValueError:
-        pass
-    return url.split("?", 1)[0].split("#", 1)[0]
-
-
 # Browsers stop following redirects well before this, so a chain is never cut in practice.
 MAX_REDIRECT_HOPS = 64
 
@@ -436,12 +421,6 @@ def count_closed_shadow_roots(page: Page) -> int | None:
     return closed
 
 
-def png_size(path: Path) -> tuple[int, int]:
-    with path.open("rb") as file:
-        header = file.read(24)
-    return struct.unpack(">II", header[16:24])
-
-
 def settle(page: Page, limit_s: float, *, animations: bool = True) -> None:
     """Wait until the page has stopped growing and, unless told otherwise, its animations have ended."""
     wait_until_settled(
@@ -452,54 +431,19 @@ def settle(page: Page, limit_s: float, *, animations: bool = True) -> None:
     )
 
 
-class PlaywrightDriver:
+class PlaywrightDriver(BaseDriver[Session]):
+    NAME = NAME
+    VERSION = VERSION
+    BROWSERS = (*BROWSERS, CDP)
+
     def __init__(self, channel: Channel) -> None:
-        self._channel = channel
+        super().__init__(channel)
         self._playwright: Playwright | None = None
-        self._sessions: dict[str, Session] = {}
-        self._opened = 0
 
-    def handlers(self) -> dict[str, Handler]:
-        return {
-            "driver.hello": self.hello,
-            "driver.shutdown": self.shutdown,
-            "session.open": self.session_open,
-            "session.close": self.session_close,
-            "session.storage": self.session_storage,
-            "page.goto": self.page_goto,
-            "page.eval": self.page_eval,
-            "page.scroll": self.page_scroll,
-            "page.screenshot": self.page_screenshot,
-        }
-
-    def _session(self, session_id: str) -> Session:
-        try:
-            return self._sessions[session_id]
-        except KeyError:
-            raise RpcError("session_not_found", f"no session {session_id}") from None
-
-    # ---- driver ----------------------------------------------------------
-
-    def hello(self, params: models.DriverHelloParams) -> models.DriverHelloResult:
-        if params.protocol_version != contracts.DRIVER_PROTOCOL_VERSION:
-            raise RpcError(
-                "version_mismatch",
-                f"driver speaks protocol {contracts.DRIVER_PROTOCOL_VERSION}, engine asked for {params.protocol_version}",
-            )
-        return models.DriverHelloResult(
-            driver_name=NAME,
-            driver_version=VERSION,
-            protocol_version=contracts.DRIVER_PROTOCOL_VERSION,
-            browsers=[*BROWSERS, CDP],
-        )
-
-    def shutdown(self, _params: models.Empty) -> models.Empty:
-        for session_id in list(self._sessions):
-            self._close(session_id)
+    def _stop(self) -> None:
         if self._playwright is not None:
             self._playwright.stop()
             self._playwright = None
-        return models.Empty()
 
     # ---- session ---------------------------------------------------------
 
@@ -549,8 +493,7 @@ class PlaywrightDriver:
                     browser.close()
             raise RpcError("internal", f"could not open {target.browser}: {first_line(error.message)}") from error
 
-        self._opened += 1
-        session_id = f"s{self._opened}"
+        session_id = self._new_session_id()
         chromium = target.browser == CDP or BROWSERS.get(target.browser, ("",))[0] == "chromium"
         self._sessions[session_id] = Session(browser, context, page, owns_context, chromium)
         self._channel.log("info", f"opened {target.browser} {browser.version}")
@@ -663,8 +606,7 @@ class PlaywrightDriver:
 
     def page_scroll(self, params: models.PageScrollParams) -> models.PageScrollResult:
         page = self._session(params.session_id).page
-        if (params.to is None) == (params.by_y is None):
-            raise RpcError("invalid_params", "give exactly one of 'to' or 'byY'")
+        check_scroll_target(params)
         if params.to == models.ScrollTo.top:
             page.evaluate("window.scrollTo(0, 0)")
         elif params.to == models.ScrollTo.bottom:
@@ -676,7 +618,7 @@ class PlaywrightDriver:
         return models.PageScrollResult(
             y=state["y"],
             height=state["height"],
-            at_end=state["y"] + state["view"] >= state["height"] - 1,
+            at_end=scrolled_to_end(state["y"], state["view"], state["height"]),
         )
 
     def page_screenshot(self, params: models.PageScreenshotParams) -> models.PageScreenshotResult:
@@ -691,5 +633,5 @@ class PlaywrightDriver:
             page.screenshot(path=str(path), full_page=bool(params.full_page) or clip is not None, clip=clip)
         except PlaywrightError as error:
             raise RpcError("internal", f"screenshot failed: {first_line(error.message)}") from error
-        width, height = png_size(path)
+        width, height = png_dimensions(path.read_bytes()[:24])
         return models.PageScreenshotResult(path=str(path), width=width, height=height)

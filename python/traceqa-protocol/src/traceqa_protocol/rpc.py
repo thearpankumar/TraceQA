@@ -121,3 +121,14 @@ class Channel:
             raise RpcError("invalid_params", str(error), code=INVALID_PARAMS) from error
         result = handler(parsed)
         return to_wire(getattr(models, spec["result"]).model_validate(result))
+
+
+def run_driver(driver_class: Callable[[Channel], Any]) -> None:
+    """The `__main__` of every driver: serve until the engine says shutdown or goes away."""
+    channel = Channel.from_stdio()
+    driver = driver_class(channel)
+    try:
+        channel.serve(driver.handlers())
+    finally:
+        # Also reached when the engine goes away without saying goodbye. Closing twice is harmless.
+        driver.shutdown(models.Empty())

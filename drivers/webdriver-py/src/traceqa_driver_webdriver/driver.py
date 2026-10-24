@@ -14,7 +14,6 @@ from __future__ import annotations
 import base64
 import shutil
 import socket
-import struct
 import subprocess
 import time
 import urllib.error
@@ -22,12 +21,13 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
-from traceqa_protocol import contracts, models
+from traceqa_protocol import BaseDriver, models
+from traceqa_protocol.driver import check_scroll_target, png_dimensions, scrolled_to_end
 from traceqa_protocol.frames import is_cross_origin
-from traceqa_protocol.rpc import Channel, Handler, RpcError
+from traceqa_protocol.rpc import RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
+from traceqa_protocol.urls import without_query
 
 from .wire import WebDriverError, WebDriverSession
 
@@ -70,10 +70,6 @@ class Session:
 
     def frame_id(self, parent_id: str, index: int) -> str:
         return self.frame_ids.setdefault(f"{parent_id}/{index}", f"f{len(self.frame_ids) + 1}")
-
-
-def png_size(data: bytes) -> tuple[int, int]:
-    return struct.unpack(">II", data[16:24])
 
 
 def start_safaridriver() -> tuple[subprocess.Popen[bytes], str]:
@@ -175,52 +171,12 @@ def settle(webdriver: WebDriverSession, limit_s: float, *, animations: bool = Tr
     wait_until_settled(lambda: webdriver.execute(f"return {PAGE_STATE};"), time.sleep, limit_s, animations=animations)
 
 
-class WebDriverDriver:
-    def __init__(self, channel: Channel) -> None:
-        self._channel = channel
-        self._sessions: dict[str, Session] = {}
-        self._opened = 0
-
-    def handlers(self) -> dict[str, Handler]:
-        return {
-            "driver.hello": self.hello,
-            "driver.shutdown": self.shutdown,
-            "session.open": self.session_open,
-            "session.close": self.session_close,
-            "session.storage": self.session_storage,
-            "page.goto": self.page_goto,
-            "page.eval": self.page_eval,
-            "page.scroll": self.page_scroll,
-            "page.screenshot": self.page_screenshot,
-        }
-
-    def _session(self, session_id: str) -> Session:
-        try:
-            return self._sessions[session_id]
-        except KeyError:
-            raise RpcError("session_not_found", f"no session {session_id}") from None
-
-    # ---- driver ----------------------------------------------------------
-
-    def hello(self, params: models.DriverHelloParams) -> models.DriverHelloResult:
-        if params.protocol_version != contracts.DRIVER_PROTOCOL_VERSION:
-            raise RpcError(
-                "version_mismatch",
-                f"driver speaks protocol {contracts.DRIVER_PROTOCOL_VERSION}, engine asked for {params.protocol_version}",
-            )
-        return models.DriverHelloResult(
-            driver_name=NAME,
-            driver_version=VERSION,
-            protocol_version=contracts.DRIVER_PROTOCOL_VERSION,
-            browsers=[SAFARI, REMOTE],
-            # Safari allows one automated session on the whole machine.
-            exclusive_browsers=[SAFARI],
-        )
-
-    def shutdown(self, _params: models.Empty) -> models.Empty:
-        for session_id in list(self._sessions):
-            self._close(session_id)
-        return models.Empty()
+class WebDriverDriver(BaseDriver[Session]):
+    NAME = NAME
+    VERSION = VERSION
+    BROWSERS = (SAFARI, REMOTE)
+    # Safari allows one automated session on the whole machine.
+    EXCLUSIVE = (SAFARI,)
 
     # ---- session ---------------------------------------------------------
 
@@ -244,8 +200,7 @@ class WebDriverDriver:
             stop_server(server)
             raise RpcError("internal", f"could not open {target.browser}: {error.message}") from error
 
-        self._opened += 1
-        session_id = f"s{self._opened}"
+        session_id = self._new_session_id()
         self._sessions[session_id] = Session(webdriver, server)
         try:
             reached = fit_viewport(webdriver, params.viewport.width, params.viewport.height)
@@ -414,8 +369,7 @@ class WebDriverDriver:
 
     def page_scroll(self, params: models.PageScrollParams) -> models.PageScrollResult:
         webdriver = self._session(params.session_id).webdriver
-        if (params.to is None) == (params.by_y is None):
-            raise RpcError("invalid_params", "give exactly one of 'to' or 'byY'")
+        check_scroll_target(params)
         try:
             webdriver.switch_to_frame(None)
             if params.to == models.ScrollTo.top:
@@ -431,7 +385,7 @@ class WebDriverDriver:
         return models.PageScrollResult(
             y=state["y"],
             height=state["height"],
-            at_end=state["y"] + state["view"] >= state["height"] - 1,
+            at_end=scrolled_to_end(state["y"], state["view"], state["height"]),
         )
 
     def page_screenshot(self, params: models.PageScreenshotParams) -> models.PageScreenshotResult:
@@ -445,21 +399,5 @@ class WebDriverDriver:
         path = Path(params.path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        width, height = png_size(data)
+        width, height = png_dimensions(data)
         return models.PageScreenshotResult(path=str(path), width=width, height=height)
-
-
-def without_query(url: str) -> str:
-    """The address as scheme, host and path only: no user name, password, query or fragment.
-    Messages end up in logs and run files, and a query can carry a token."""
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-        if ":" in host:
-            host = f"[{host}]"
-        port = f":{parts.port}" if parts.port else ""
-        if parts.scheme and host:
-            return f"{parts.scheme}://{host}{port}{parts.path}"
-    except ValueError:
-        pass
-    return url.split("?", 1)[0].split("#", 1)[0]
