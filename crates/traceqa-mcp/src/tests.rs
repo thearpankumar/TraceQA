@@ -1,8 +1,10 @@
 // The helpers take `json!` literals by value so that every call site stays short.
 #![allow(clippy::needless_pass_by_value)]
 
-use std::io::{BufRead, BufReader, PipeReader, PipeWriter, Write};
+use std::io::{BufRead, BufReader, PipeWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::time::Duration;
 use std::{fs, process};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -19,7 +21,10 @@ const PICTURE: &[u8] = b"\x89PNG not really";
 /// A host talking to a server over real pipes, as Claude Code would.
 struct Host {
     input: Option<PipeWriter>,
-    output: BufReader<PipeReader>,
+    /// Lines the server wrote, fed by a reader thread so that a wait can have a deadline.
+    output: Receiver<String>,
+    /// How long to wait for the server to write before the test fails instead of hanging.
+    deadline: Duration,
     server: Option<JoinHandle<()>>,
     next_id: u64,
     /// Notifications seen while waiting for answers.
@@ -51,9 +56,21 @@ impl Host {
         let server = thread::spawn(move || {
             serve(BufReader::new(server_input), Box::new(server_output), config).unwrap();
         });
+        let (lines, received) = mpsc::channel();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(output);
+            loop {
+                let mut line = String::new();
+                // End of stream or a closed channel ends the reader; the host sees a closed channel.
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || lines.send(line).is_err() {
+                    break;
+                }
+            }
+        });
         Self {
             input: Some(input),
-            output: BufReader::new(output),
+            output: received,
+            deadline: Duration::from_secs(120),
             server: Some(server),
             next_id: 0,
             notes: Vec::new(),
@@ -69,9 +86,7 @@ impl Host {
         let id = self.next_id;
         self.write(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
         loop {
-            let mut line = String::new();
-            assert!(self.output.read_line(&mut line).unwrap() > 0, "the server stopped");
-            let message: Value = serde_json::from_str(&line).unwrap();
+            let message = self.next_message();
             if message["id"] == id {
                 return message;
             }
@@ -89,8 +104,13 @@ impl Host {
 
     /// The next message from the server, whatever it is.
     fn next_message(&mut self) -> Value {
-        let mut line = String::new();
-        assert!(self.output.read_line(&mut line).unwrap() > 0, "the server stopped");
+        let line = match self.output.recv_timeout(self.deadline) {
+            Ok(line) => line,
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("the server did not answer within {:?}", self.deadline)
+            }
+            Err(RecvTimeoutError::Disconnected) => panic!("the server stopped"),
+        };
         serde_json::from_str(&line).unwrap()
     }
 
@@ -1185,6 +1205,8 @@ fn a_panicking_tool_returns_an_error_result_and_the_server_keeps_answering() {
     let dir = std::env::temp_dir().join(format!("traceqa-mcp-panic-{}", process::id()));
     fs::create_dir_all(&dir).unwrap();
     let mut host = Host::start(dir.clone());
+    // A server that never answers (the panic took a worker slot with it) must fail the test fast.
+    host.deadline = Duration::from_secs(10);
     let result = host.call("panic_for_test", json!({}));
     assert_eq!(result["isError"], true, "{result}");
     let text = result["content"][0]["text"].as_str().unwrap();
