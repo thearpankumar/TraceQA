@@ -271,3 +271,35 @@ def test_every_crate_inherits_rust_version() -> None:
         assert not re.search(r"^rust-version\s*=", text, re.MULTILINE), path.parent.name
     members = re.search(r"^members\s*=\s*\[(.*?)\]", (ROOT / "Cargo.toml").read_text(encoding="utf-8"), re.MULTILINE)
     assert members and '"crates/*"' in members.group(1)
+
+
+def test_clippy_runs_on_every_os() -> None:
+    # Code behind #[cfg(windows)] or #[cfg(target_os = "macos")] is only linted on its own system.
+    job = load("ci.yml")["jobs"]["test"]
+    assert {"ubuntu-latest", "windows-latest", "macos-latest"} <= set(job["strategy"]["matrix"]["os"])
+    clippy = [s for s in job["steps"] if "cargo clippy" in s.get("run", "")]
+    assert clippy, "the Test job has no clippy step"
+    assert all("-D warnings" in s["run"] and "--all-targets" in s["run"] for s in clippy)
+    toolchain = [s for s in job["steps"] if s.get("uses", "").startswith("dtolnay/rust-toolchain")]
+    assert "clippy" in toolchain[0]["with"]["components"]
+
+
+def test_gitattributes_pins_lf_and_marks_binaries() -> None:
+    import subprocess
+
+    lines = [ln.split("#")[0].split() for ln in (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()]
+    rules = {ln[0]: ln[1:] for ln in lines if ln}
+    assert rules["*"][:2] == ["text=auto", "eol=lf"]
+    binary_globs = [g for g, attrs in rules.items() if "binary" in attrs]
+    listing = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True)
+    uncovered = []
+    for name in filter(None, listing.stdout.decode().split("\0")):
+        path = ROOT / name
+        if not path.is_file():
+            continue
+        try:
+            path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            if not any(Path(name).match(g) for g in binary_globs):
+                uncovered.append(name)
+    assert not uncovered, f"binary files without a binary rule in .gitattributes: {uncovered}"
