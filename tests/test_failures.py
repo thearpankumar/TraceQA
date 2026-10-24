@@ -7,9 +7,9 @@ that the run folder is still valid.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import signal
 import socket
 import subprocess
 import sys
@@ -22,7 +22,20 @@ ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
 )
-CRASHING_DRIVER = ROOT / "tests" / "support" / "crashing_driver.py"
+SUPPORT = ROOT / "tests" / "support"
+CRASHING_DRIVER = SUPPORT / "crashing_driver.py"
+STUCK_DRIVER = SUPPORT / "stuck_driver.py"
+
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, SUPPORT / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # a dataclass in the module looks itself up here
+    spec.loader.exec_module(module)
+    return module
+
+
+interrupt = _load("interrupt")
 
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
 
@@ -175,28 +188,70 @@ def test_a_driver_that_crashes_fails_its_target_and_says_why(trouble: str, extra
     assert result.target.error
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows has no process groups to send Ctrl-C to from a test")
-def test_ctrl_c_cancels_the_run_and_leaves_nothing_running(trouble: str, tmp_path: Path, run_folder_checker) -> None:
-    out = tmp_path / "runs"
-    command = [str(BINARY), "extract", trouble + "ok", "--browser", "chromium,firefox"]
-    command += ["--viewport", "1280x800,390x844", "--parallel", "1", "--out", str(out)]
-    # A terminal sends Ctrl-C to every process of the command, drivers and browsers included.
-    process = subprocess.Popen(
-        command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, start_new_session=True
+def _interrupted_extract(trouble: str, out: Path, *, signals: int, extra: list[str], url: str = "ok", **options):
+    command = [str(BINARY), "extract", trouble + url, "--out", str(out), *extra]
+    result = interrupt.run_interrupted(
+        command, ready={"stderr": options.pop("marker", "Opened")}, signals=signals, **options
     )
-    for line in process.stderr:
-        if "Opened" in line:
-            os.killpg(process.pid, signal.SIGINT)
-            break
-    process.stderr.read()
-    assert process.wait(timeout=60) == 130
+    assert result.ready, f"the run was not ready to be interrupted:\n{result.stderr}"
+    assert result.returncode != "still running", f"the run did not end:\n{result.stderr}"
+    return result
+
+
+@pytest.mark.parametrize("signals", [1, 2], ids=["single", "double"])
+def test_ctrl_c_cancels_the_run_and_leaves_nothing_running(
+    trouble: str, tmp_path: Path, run_folder_checker, signals: int
+) -> None:
+    out = tmp_path / "runs"
+    extra = ["--browser", "chromium,firefox", "--viewport", "1280x800,390x844", "--parallel", "1"]
+    # A terminal sends Ctrl-C to every process of the command, drivers and browsers included.
+    result = _interrupted_extract(trouble, out, signals=signals, extra=extra)
+    assert result.returncode == 130, result.stderr
 
     (folder,) = out.iterdir()
     manifest = run_folder_checker(folder)
     assert manifest.status.value == "cancelled"
-    # A target that had already finished stays completed. None may fail: the drivers ignore
-    # Ctrl-C and are closed by the engine, so no browser dies under a target.
+    # A target that had already finished stays completed. None may fail: the drivers are closed by
+    # the engine, or die with the console, and either way the target was cancelled, not broken.
     statuses = [target.status.value for target in manifest.targets]
     assert "cancelled" in statuses and set(statuses) <= {"completed", "cancelled"}, statuses
-    left = subprocess.run(["pgrep", "-g", str(process.pid)], check=False, capture_output=True, text=True).stdout.split()
-    assert left == [], "Ctrl-C left processes running"
+    last = json.loads((folder / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.finished" and last["data"]["status"] == "cancelled"
+    assert result.left == [], f"Ctrl-C left processes running: {result.left}"
+
+
+def test_in_flight_targets_are_cancelled_not_failed(trouble: str, tmp_path: Path, run_folder_checker) -> None:
+    # Four browsers at once: when the signal arrives several are in the middle of a page.
+    out = tmp_path / "runs"
+    extra = ["--browser", "chromium,firefox", "--viewport", "1280x800,390x844", "--parallel", "4"]
+    result = _interrupted_extract(trouble, out, signals=1, extra=extra, url="endless", delay=0.3)
+    assert result.returncode == 130, result.stderr
+    (folder,) = out.iterdir()
+    manifest = run_folder_checker(folder)
+    statuses = [target.status.value for target in manifest.targets]
+    assert manifest.status.value == "cancelled", statuses
+    assert "failed" not in statuses, f"{statuses}\n{result.stderr}"
+    for target in manifest.targets:
+        if target.status.value == "cancelled":
+            assert not target.error, "a cancelled target needs no error text"
+
+
+def test_second_ctrl_c_quits_at_once_with_a_valid_folder(trouble: str, tmp_path: Path, run_folder_checker) -> None:
+    # The driver goes silent after the page opened, and closing its session would wait 30 s: only
+    # the second Ctrl-C can end this run, and it must still leave a folder that tells what happened.
+    out = tmp_path / "runs"
+    driver = f'"{sys.executable}" "{STUCK_DRIVER}"'
+    result = _interrupted_extract(
+        trouble, out, signals=2, extra=["--driver", driver, "--settle-ms", "60000"], delay=0.5, gap=0.5, exit_timeout=20
+    )
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 10, f"quit after {result.seconds} s"
+    (folder,) = out.iterdir()
+    manifest = run_folder_checker(folder)
+    assert manifest.status.value == "cancelled"
+    assert manifest.finished_at is not None
+    assert [target.status.value for target in manifest.targets] == ["cancelled"]
+    last = json.loads((folder / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.finished"
+    assert not [p.name for p in folder.iterdir() if p.name.endswith(".tmp")]
+    assert result.left == [], f"left processes running: {result.left}"
