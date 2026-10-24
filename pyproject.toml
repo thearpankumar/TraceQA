@@ -73,8 +73,3 @@ exclude = [
 ]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"
-# The generated pydantic models declare camelCase aliases and set populate_by_name, so the code
-# builds them with snake_case names. Pyright reads only the alias as the constructor parameter
-# and reports every such call. This hides real arity errors too; remove it once the generator
-# emits models whose synthesized __init__ takes the field names (alias_generator).
-reportCallIssue = "none"

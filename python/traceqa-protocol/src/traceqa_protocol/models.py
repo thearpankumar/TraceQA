@@ -11,17 +11,17 @@ class EngineHelloParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    protocol_version: int = Field(..., alias="protocolVersion", ge=0)
-    client_name: str | None = Field(None, alias="clientName")
-    client_version: str | None = Field(None, alias="clientVersion")
+    protocol_version: int = Field(..., validation_alias="protocolVersion", serialization_alias="protocolVersion", ge=0)
+    client_name: str | None = Field(default=None, validation_alias="clientName", serialization_alias="clientName")
+    client_version: str | None = Field(default=None, validation_alias="clientVersion", serialization_alias="clientVersion")
 
 
 class EngineHelloResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    engine_version: str = Field(..., alias="engineVersion")
-    protocol_version: int = Field(..., alias="protocolVersion", ge=0)
+    engine_version: str = Field(..., validation_alias="engineVersion", serialization_alias="engineVersion")
+    protocol_version: int = Field(..., validation_alias="protocolVersion", serialization_alias="protocolVersion", ge=0)
     features: list[str] = Field(
         ..., description="Features this engine can run. Known values: extract."
     )
@@ -32,27 +32,27 @@ class ExtractOptions(BaseModel):
         populate_by_name=True,
     )
     max_scroll_steps: int | None = Field(
-        None,
-        alias="maxScrollSteps",
+        default=None,
+        validation_alias="maxScrollSteps", serialization_alias="maxScrollSteps",
         description="How many screens to scroll through before giving up on a very long page. 0 reads the page without scrolling.",
         ge=0,
     )
     timeout_ms: int | None = Field(
-        None, alias="timeoutMs", description="Per page.", ge=0
+        default=None, validation_alias="timeoutMs", serialization_alias="timeoutMs", description="Per page.", ge=0
     )
     settle_ms: int | None = Field(
-        None,
-        alias="settleMs",
+        default=None,
+        validation_alias="settleMs", serialization_alias="settleMs",
         description="Extra time to wait after the page has loaded, before reading it. For pages that show a timed intro or splash screen. Default 0.",
         ge=0,
     )
     crops: bool | None = Field(
-        None,
+        default=None,
         description="Also save pictures: a screenshot of the page and one crop per component. Slower, because the page is then read and photographed one screen at a time. Default false.",
     )
     include_hidden: bool | None = Field(
-        None,
-        alias="includeHidden",
+        default=None,
+        validation_alias="includeHidden", serialization_alias="includeHidden",
         description="List hidden elements too. Default true.",
     )
 
@@ -65,15 +65,15 @@ class RunStartResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    run_id: str = Field(..., alias="runId")
-    run_folder: str = Field(..., alias="runFolder", description="Absolute path.")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    run_folder: str = Field(..., validation_alias="runFolder", serialization_alias="runFolder", description="Absolute path.")
 
 
 class RunCancelParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    run_id: str = Field(..., alias="runId")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
 
 
 class ScrollInfo(BaseModel):
@@ -82,7 +82,7 @@ class ScrollInfo(BaseModel):
     )
     y: float
     height: float = Field(..., description="Full scrollable height of the document.")
-    viewport_height: float = Field(..., alias="viewportHeight")
+    viewport_height: float = Field(..., validation_alias="viewportHeight", serialization_alias="viewportHeight")
 
 
 class PathStep(BaseModel):
@@ -91,18 +91,18 @@ class PathStep(BaseModel):
     )
     role: str
     name: str | None = Field(
-        None, description="Accessible name of the ancestor, when it has one."
+        default=None, description="Accessible name of the ancestor, when it has one."
     )
     tag: str
     repeat_index: int | None = Field(
-        None,
-        alias="repeatIndex",
+        default=None,
+        validation_alias="repeatIndex", serialization_alias="repeatIndex",
         description="Zero-based position among siblings with the same tag and role. Present only when repeatCount is 2 or more.",
         ge=0,
     )
     repeat_count: int | None = Field(
-        None,
-        alias="repeatCount",
+        default=None,
+        validation_alias="repeatCount", serialization_alias="repeatCount",
         description="How many siblings share this tag and role.",
         ge=0,
     )
@@ -157,18 +157,18 @@ class BrowserTarget(BaseModel):
         description="Browser name. Known values: chromium, chrome, msedge, firefox, webkit, safari, cdp, webdriver.",
     )
     cdp_endpoint: str | None = Field(
-        None,
-        alias="cdpEndpoint",
+        default=None,
+        validation_alias="cdpEndpoint", serialization_alias="cdpEndpoint",
         description="WebSocket or HTTP endpoint of an already running browser. Used with browser = cdp.",
     )
     webdriver_url: str | None = Field(
-        None,
-        alias="webdriverUrl",
+        default=None,
+        validation_alias="webdriverUrl", serialization_alias="webdriverUrl",
         description="URL of a W3C WebDriver server, local or a cloud grid. Used with browser = webdriver.",
     )
     webdriver_capabilities: dict[str, Any] | None = Field(
-        None,
-        alias="webdriverCapabilities",
+        default=None,
+        validation_alias="webdriverCapabilities", serialization_alias="webdriverCapabilities",
         description='Capabilities to ask the WebDriver server for, for example { "browserName": "safari" }.',
     )
     headless: bool | None = None
@@ -204,12 +204,12 @@ class StorageCookie(BaseModel):
     )
     path: str
     expires: float | None = Field(
-        None,
+        default=None,
         description="Unix time in seconds. -1 or absent for a cookie that lasts until the browser closes.",
     )
-    http_only: bool | None = Field(None, alias="httpOnly")
+    http_only: bool | None = Field(default=None, validation_alias="httpOnly", serialization_alias="httpOnly")
     secure: bool | None = None
-    same_site: SameSite | None = Field(None, alias="sameSite")
+    same_site: SameSite | None = Field(default=None, validation_alias="sameSite", serialization_alias="sameSite")
 
 
 class StorageItem(BaseModel):
@@ -248,7 +248,7 @@ class ElementState(BaseModel):
         description="False when the element is hidden by CSS (display, visibility, opacity, content-visibility), has no size, is clipped to one pixel or less, or is inside a hidden ancestor.",
     )
     enabled: bool
-    in_viewport: bool = Field(..., alias="inViewport")
+    in_viewport: bool = Field(..., validation_alias="inViewport", serialization_alias="inViewport")
     checked: bool | None = None
     expanded: bool | None = None
     selected: bool | None = None
@@ -256,12 +256,12 @@ class ElementState(BaseModel):
     readonly: bool | None = None
     required: bool | None = None
     covered: bool | None = Field(
-        None,
+        default=None,
         description="True when another element lies on top of this one at every point tested, so a click would not reach it, as under a cookie banner or a modal's backdrop. Only tested for visible elements in the viewport; absent means it was not tested.",
     )
     covered_by: str | None = Field(
-        None,
-        alias="coveredBy",
+        default=None,
+        validation_alias="coveredBy", serialization_alias="coveredBy",
         description="A selector for the element on top, when covered is true.",
     )
 
@@ -286,26 +286,26 @@ class DriverHelloParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    protocol_version: int = Field(..., alias="protocolVersion", ge=0)
-    engine_version: str = Field(..., alias="engineVersion")
+    protocol_version: int = Field(..., validation_alias="protocolVersion", serialization_alias="protocolVersion", ge=0)
+    engine_version: str = Field(..., validation_alias="engineVersion", serialization_alias="engineVersion")
 
 
 class DriverHelloResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    driver_name: str = Field(..., alias="driverName")
-    driver_version: str = Field(..., alias="driverVersion")
+    driver_name: str = Field(..., validation_alias="driverName", serialization_alias="driverName")
+    driver_version: str = Field(..., validation_alias="driverVersion", serialization_alias="driverVersion")
     protocol_version: int = Field(
         ...,
-        alias="protocolVersion",
+        validation_alias="protocolVersion", serialization_alias="protocolVersion",
         description="The version the driver speaks. The engine refuses to continue when it differs from its own.",
         ge=0,
     )
     browsers: list[str] = Field(..., description="Browser names this driver can open.")
     exclusive_browsers: list[str] | None = Field(
-        None,
-        alias="exclusiveBrowsers",
+        default=None,
+        validation_alias="exclusiveBrowsers", serialization_alias="exclusiveBrowsers",
         description="Browsers of which only one session can exist on the machine at a time, whichever process opens it. The engine never runs two of these at once.",
     )
 
@@ -320,37 +320,37 @@ class Capabilities(BaseModel):
     )
     clip_screenshot: bool = Field(
         ...,
-        alias="clipScreenshot",
+        validation_alias="clipScreenshot", serialization_alias="clipScreenshot",
         description="Can screenshot one rectangle of the page.",
     )
     full_page_screenshot: bool = Field(
         ...,
-        alias="fullPageScreenshot",
+        validation_alias="fullPageScreenshot", serialization_alias="fullPageScreenshot",
         description="Can screenshot the whole scrollable page.",
     )
     eval_all_frames: bool = Field(
         ...,
-        alias="evalAllFrames",
+        validation_alias="evalAllFrames", serialization_alias="evalAllFrames",
         description="Can run a script in every frame, not only the top one.",
     )
     cross_origin_frames: bool = Field(
         ...,
-        alias="crossOriginFrames",
+        validation_alias="crossOriginFrames", serialization_alias="crossOriginFrames",
         description="Can run a script inside frames from another origin.",
     )
     parallel_sessions: bool = Field(
         ...,
-        alias="parallelSessions",
+        validation_alias="parallelSessions", serialization_alias="parallelSessions",
         description="Can hold more than one session at a time.",
     )
     set_viewport: bool = Field(
-        ..., alias="setViewport", description="Can set an exact viewport size."
+        ..., validation_alias="setViewport", serialization_alias="setViewport", description="Can set an exact viewport size."
     )
-    console_events: bool = Field(..., alias="consoleEvents")
-    network_events: bool = Field(..., alias="networkEvents")
+    console_events: bool = Field(..., validation_alias="consoleEvents", serialization_alias="consoleEvents")
+    network_events: bool = Field(..., validation_alias="networkEvents", serialization_alias="networkEvents")
     failed_requests: bool | None = Field(
-        None,
-        alias="failedRequests",
+        default=None,
+        validation_alias="failedRequests", serialization_alias="failedRequests",
         description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
     )
 
@@ -363,18 +363,18 @@ class SessionStorageParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
 
 
 class SessionOpenResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
     browser: BrowserInfo
     capabilities: Capabilities
     viewport: Viewport | None = Field(
-        None,
+        default=None,
         description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
     )
 
@@ -383,7 +383,7 @@ class SessionCloseParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
 
 
 class WaitUntil(str, Enum):
@@ -399,10 +399,10 @@ class PageGotoParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
     url: str
-    wait_until: WaitUntil | None = Field(None, alias="waitUntil")
-    timeout_ms: int | None = Field(None, alias="timeoutMs", ge=0)
+    wait_until: WaitUntil | None = Field(default=None, validation_alias="waitUntil", serialization_alias="waitUntil")
+    timeout_ms: int | None = Field(default=None, validation_alias="timeoutMs", serialization_alias="timeoutMs", ge=0)
 
 
 class RedirectHop(BaseModel):
@@ -411,8 +411,8 @@ class RedirectHop(BaseModel):
     )
     url: str
     remote_address: str | None = Field(
-        None,
-        alias="remoteAddress",
+        default=None,
+        validation_alias="remoteAddress", serialization_alias="remoteAddress",
         description="The IP address the browser connected to for this request, when the browser reports it. Absent when unknown.",
     )
 
@@ -421,18 +421,20 @@ class PageEvalParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
     script: str = Field(
         ...,
         description="A JavaScript expression that evaluates to a function. The driver calls it with arg and returns its JSON-serialisable result.",
     )
-    arg: Any | None = Field(None, description="Any JSON value, passed to the function.")
+    arg: Any | None = Field(
+        default=None, description="Any JSON value, passed to the function."
+    )
     all_frames: bool | None = Field(
-        None,
-        alias="allFrames",
+        default=None,
+        validation_alias="allFrames", serialization_alias="allFrames",
         description="Run in every frame the driver can reach. Default false.",
     )
-    timeout_ms: int | None = Field(None, alias="timeoutMs", ge=0)
+    timeout_ms: int | None = Field(default=None, validation_alias="timeoutMs", serialization_alias="timeoutMs", ge=0)
 
 
 class FrameInfo(BaseModel):
@@ -447,12 +449,12 @@ class FrameInfo(BaseModel):
         ...,
         description="'main' for the top frame. Otherwise unique within the session.",
     )
-    parent_id: str | None = Field(None, alias="parentId")
+    parent_id: str | None = Field(default=None, validation_alias="parentId", serialization_alias="parentId")
     url: str
     name: str | None = None
     cross_origin: bool = Field(
         ...,
-        alias="crossOrigin",
+        validation_alias="crossOrigin", serialization_alias="crossOrigin",
         description="True when the frame's origin differs from the top page's.",
     )
     box: Rect | None = None
@@ -467,9 +469,9 @@ class FrameEvalResult(BaseModel):
         populate_by_name=True,
     )
     frame: FrameInfo
-    value: Any | None = Field(None, description="What the function returned.")
+    value: Any | None = Field(default=None, description="What the function returned.")
     error: str | None = Field(
-        None, description="Why the script could not run in this frame."
+        default=None, description="Why the script could not run in this frame."
     )
 
 
@@ -511,12 +513,14 @@ class PageScrollParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
     to: ScrollTo | None = None
     by_y: float | None = Field(
-        None, alias="byY", description="Pixels to scroll down. Negative scrolls up."
+        default=None,
+        validation_alias="byY", serialization_alias="byY",
+        description="Pixels to scroll down. Negative scrolls up.",
     )
-    wait_for: ScrollWait | None = Field(None, alias="waitFor")
+    wait_for: ScrollWait | None = Field(default=None, validation_alias="waitFor", serialization_alias="waitFor")
 
 
 class PageScrollResult(BaseModel):
@@ -525,7 +529,7 @@ class PageScrollResult(BaseModel):
     )
     y: float
     height: float = Field(..., description="Full scrollable height after the scroll.")
-    at_end: bool = Field(..., alias="atEnd")
+    at_end: bool = Field(..., validation_alias="atEnd", serialization_alias="atEnd")
 
 
 class PageScreenshotParams(BaseModel):
@@ -536,12 +540,14 @@ class PageScreenshotParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
     path: str = Field(
         ..., description="Absolute path of the PNG file the driver must write."
     )
     full_page: bool | None = Field(
-        None, alias="fullPage", description="Default false: only the current viewport."
+        default=None,
+        validation_alias="fullPage", serialization_alias="fullPage",
+        description="Default false: only the current viewport.",
     )
     clip: Rect | None = None
 
@@ -568,7 +574,9 @@ class ElementTarget(BaseModel):
         populate_by_name=True,
     )
     selector: str
-    frame_id: str | None = Field(None, alias="frameId", description="Default 'main'.")
+    frame_id: str | None = Field(
+        default=None, validation_alias="frameId", serialization_alias="frameId", description="Default 'main'."
+    )
 
 
 class PageActParams(BaseModel):
@@ -579,11 +587,11 @@ class PageActParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
     action: ActionKind
     target: ElementTarget
     value: str | None = Field(
-        None, description="Text to type, option to select, or key to press."
+        default=None, description="Text to type, option to select, or key to press."
     )
 
 
@@ -634,39 +642,39 @@ class Timings(BaseModel):
     )
     open_ms: int = Field(
         ...,
-        alias="openMs",
+        validation_alias="openMs", serialization_alias="openMs",
         description="Starting the driver if needed, and opening the browser.",
         ge=0,
     )
     load_ms: int = Field(
         ...,
-        alias="loadMs",
+        validation_alias="loadMs", serialization_alias="loadMs",
         description="Loading the page and waiting for it to settle, including any settle time asked for.",
         ge=0,
     )
     read_ms: int = Field(
         ...,
-        alias="readMs",
+        validation_alias="readMs", serialization_alias="readMs",
         description="Running the collector, over all the times it ran.",
         ge=0,
     )
     scroll_ms: int = Field(
         ...,
-        alias="scrollMs",
+        validation_alias="scrollMs", serialization_alias="scrollMs",
         description="Scrolling and waiting for the page to settle after each scroll.",
         ge=0,
     )
     screenshot_ms: int = Field(
-        ..., alias="screenshotMs", description="Taking screenshots.", ge=0
+        ..., validation_alias="screenshotMs", serialization_alias="screenshotMs", description="Taking screenshots.", ge=0
     )
     crop_ms: int = Field(
         ...,
-        alias="cropMs",
+        validation_alias="cropMs", serialization_alias="cropMs",
         description="Cutting the crops out of the screenshots.",
         ge=0,
     )
     screens: int | None = Field(
-        None, description="How many screens the page was read in.", ge=0
+        default=None, description="How many screens the page was read in.", ge=0
     )
 
 
@@ -682,18 +690,18 @@ class Event(BaseModel):
         ..., description="Starts at 0 and increases by 1 within a run.", ge=0
     )
     ts: str = Field(..., description="RFC 3339 timestamp in UTC.")
-    run_id: str = Field(..., alias="runId")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     type: str = Field(
         ...,
         description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error.",
     )
     target: str | None = Field(
-        None,
+        default=None,
         description="The target folder name this event belongs to, when it belongs to one.",
     )
     message: str = Field(..., description="One human-readable sentence.")
     data: dict[str, Any] | None = Field(
-        None, description="Extra fields that depend on the event type."
+        default=None, description="Extra fields that depend on the event type."
     )
 
 
@@ -715,15 +723,15 @@ class Instance(BaseModel):
     selectors: list[str]
     box: Rect
     state: ElementState
-    frame_id: str = Field(..., alias="frameId")
-    in_shadow_dom: bool = Field(..., alias="inShadowDom")
+    frame_id: str = Field(..., validation_alias="frameId", serialization_alias="frameId")
+    in_shadow_dom: bool = Field(..., validation_alias="inShadowDom", serialization_alias="inShadowDom")
 
 
 class RunEventParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    run_id: str = Field(..., alias="runId")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     event: Event
 
 
@@ -749,32 +757,32 @@ class StorageOrigin(BaseModel):
     origin: str = Field(
         ..., description="Scheme, host and port, for example https://app.example.com."
     )
-    local_storage: list[StorageItem] = Field(..., alias="localStorage")
+    local_storage: list[StorageItem] = Field(..., validation_alias="localStorage", serialization_alias="localStorage")
 
 
 class PageGotoResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
+    final_url: str = Field(..., validation_alias="finalUrl", serialization_alias="finalUrl", description="URL after redirects.")
     status: int | None = Field(
-        None, description="HTTP status of the main document, when known.", ge=0
+        default=None, description="HTTP status of the main document, when known.", ge=0
     )
     title: str
     load_complete: bool | None = Field(
-        None,
-        alias="loadComplete",
+        default=None,
+        validation_alias="loadComplete", serialization_alias="loadComplete",
         description="False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.",
     )
     closed_shadow_roots: int | None = Field(
-        None,
-        alias="closedShadowRoots",
+        default=None,
+        validation_alias="closedShadowRoots", serialization_alias="closedShadowRoots",
         description="How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
         ge=0,
     )
     redirect_chain: list[RedirectHop] | None = Field(
-        None,
-        alias="redirectChain",
+        default=None,
+        validation_alias="redirectChain", serialization_alias="redirectChain",
         description="Every address the main document was requested from on the way to finalUrl, first request first, finalUrl last. Browsers stop following redirects at about 20, so the list is short. Lets the engine check each hop against an operator's address rules. Absent when the driver cannot see the hops (classic WebDriver shows only the final address).",
     )
 
@@ -786,7 +794,7 @@ class PageEvalResult(BaseModel):
     results: list[FrameEvalResult] = Field(
         ..., description="One entry per frame, main frame first."
     )
-    requests_failed: RequestsFailed | None = Field(None, alias="requestsFailed")
+    requests_failed: RequestsFailed | None = Field(default=None, validation_alias="requestsFailed", serialization_alias="requestsFailed")
 
 
 class TargetSummary(BaseModel):
@@ -805,12 +813,14 @@ class TargetSummary(BaseModel):
     viewport: Viewport
     browser: BrowserInfo | None = None
     status: RunStatus
-    component_count: int = Field(..., alias="componentCount", ge=0)
-    instance_count: int = Field(..., alias="instanceCount", ge=0)
-    warning_count: int = Field(..., alias="warningCount", ge=0)
-    duration_ms: int = Field(..., alias="durationMs", ge=0)
+    component_count: int = Field(..., validation_alias="componentCount", serialization_alias="componentCount", ge=0)
+    instance_count: int = Field(..., validation_alias="instanceCount", serialization_alias="instanceCount", ge=0)
+    warning_count: int = Field(..., validation_alias="warningCount", serialization_alias="warningCount", ge=0)
+    duration_ms: int = Field(..., validation_alias="durationMs", serialization_alias="durationMs", ge=0)
     timings: Timings | None = None
-    error: str | None = Field(None, description="Why this target failed, when it did.")
+    error: str | None = Field(
+        default=None, description="Why this target failed, when it did."
+    )
 
 
 class Component(BaseModel):
@@ -830,10 +840,10 @@ class Component(BaseModel):
         ...,
         description="Accessible name. When nameIsTemplate is true the instances have different names and this is '*'.",
     )
-    name_is_template: bool = Field(..., alias="nameIsTemplate")
+    name_is_template: bool = Field(..., validation_alias="nameIsTemplate", serialization_alias="nameIsTemplate")
     name_changes: bool | None = Field(
-        None,
-        alias="nameChanges",
+        default=None,
+        validation_alias="nameChanges", serialization_alias="nameChanges",
         description="True when the name was seen to change while the page was read, as a countdown's or a cart total's does. The id then leaves the name out, so it stays the same from run to run. The name is the one read last.",
     )
     confidence: Confidence
@@ -843,7 +853,7 @@ class Component(BaseModel):
         description="Readable structural path, for example 'list \"products\" > listitem'.",
     )
     crop: str | None = Field(
-        None,
+        default=None,
         description="Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.",
     )
     instances: list[Instance]
@@ -865,8 +875,8 @@ class RawElement(BaseModel):
         ..., description="Accessible name. Empty string when the element has none."
     )
     name_source: str | None = Field(
-        None,
-        alias="nameSource",
+        default=None,
+        validation_alias="nameSource", serialization_alias="nameSource",
         description="Where the name came from. Known values: aria-label, aria-labelledby, label, content, alt, title, placeholder, value.",
     )
     tag: str = Field(..., description="Lower-case tag name.")
@@ -875,7 +885,7 @@ class RawElement(BaseModel):
         description="A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder.",
     )
     text: str | None = Field(
-        None, description="Visible text, trimmed and capped at 200 characters."
+        default=None, description="Visible text, trimmed and capped at 200 characters."
     )
     selectors: list[str] = Field(
         ...,
@@ -883,7 +893,7 @@ class RawElement(BaseModel):
     )
     box: Rect
     state: ElementState
-    in_shadow_dom: bool = Field(..., alias="inShadowDom")
+    in_shadow_dom: bool = Field(..., validation_alias="inShadowDom", serialization_alias="inShadowDom")
     path: list[PathStep] = Field(
         ...,
         description="Meaningful ancestors from the document root down to the parent. Only ancestors that have a non-generic role or that repeat among their siblings are listed.",
@@ -912,11 +922,11 @@ class SessionOpenParams(BaseModel):
     target: BrowserTarget
     viewport: Viewport
     locale: str | None = Field(
-        None, description="BCP 47 language tag, for example en-US."
+        default=None, description="BCP 47 language tag, for example en-US."
     )
     storage_state: StorageState | None = Field(
-        None,
-        alias="storageState",
+        default=None,
+        validation_alias="storageState", serialization_alias="storageState",
         description="Cookies and stored values to put in place before the first page is loaded.",
     )
 
@@ -929,16 +939,16 @@ class RunManifest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    format_version: int = Field(..., alias="formatVersion", ge=0)
-    run_id: str = Field(..., alias="runId")
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     feature: str = Field(..., description="Known values: extract.")
     url: str
     status: RunStatus
     started_at: str = Field(
-        ..., alias="startedAt", description="RFC 3339 timestamp in UTC."
+        ..., validation_alias="startedAt", serialization_alias="startedAt", description="RFC 3339 timestamp in UTC."
     )
-    finished_at: str | None = Field(None, alias="finishedAt")
-    engine_version: str = Field(..., alias="engineVersion")
+    finished_at: str | None = Field(default=None, validation_alias="finishedAt", serialization_alias="finishedAt")
+    engine_version: str = Field(..., validation_alias="engineVersion", serialization_alias="engineVersion")
     targets: list[TargetSummary]
 
 
@@ -950,16 +960,16 @@ class ComponentsFile(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    format_version: int = Field(..., alias="formatVersion", ge=0)
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
     fingerprint_version: int = Field(
         ...,
-        alias="fingerprintVersion",
+        validation_alias="fingerprintVersion", serialization_alias="fingerprintVersion",
         description="Version of the recipe that produced the component ids. Ids from different versions must not be compared.",
         ge=0,
     )
-    run_id: str = Field(..., alias="runId")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     url: str = Field(..., description="URL that was asked for.")
-    final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
+    final_url: str = Field(..., validation_alias="finalUrl", serialization_alias="finalUrl", description="URL after redirects.")
     title: str
     browser: BrowserInfo
     viewport: Viewport = Field(
@@ -967,7 +977,7 @@ class ComponentsFile(BaseModel):
         description="The viewport the page was read at. It differs from the target's when the browser could not give the one asked for, and a viewport_not_reached warning says so.",
     )
     captured_at: str = Field(
-        ..., alias="capturedAt", description="RFC 3339 timestamp in UTC."
+        ..., validation_alias="capturedAt", serialization_alias="capturedAt", description="RFC 3339 timestamp in UTC."
     )
     components: list[Component]
     warnings: list[Warning]
@@ -986,19 +996,19 @@ class RunStartParams(BaseModel):
     targets: list[BrowserTarget]
     viewports: list[Viewport]
     out_dir: str | None = Field(
-        None,
-        alias="outDir",
+        default=None,
+        validation_alias="outDir", serialization_alias="outDir",
         description="Where to create the run folder. Default ./runs.",
     )
     parallel: int | None = Field(
-        None,
+        default=None,
         description="How many browsers to run at the same time. 1 runs them one after another. 0 or absent lets the engine choose from the machine's cores.",
         ge=0,
     )
     options: ExtractOptions | None = None
     storage_state: StorageState | None = Field(
-        None,
-        alias="storageState",
+        default=None,
+        validation_alias="storageState", serialization_alias="storageState",
         description="Start every browser with these cookies and stored values, for pages behind a sign-in or a first screen. Never written to the run folder.",
     )
 
@@ -1011,7 +1021,7 @@ class RunDoneParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    run_id: str = Field(..., alias="runId")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     status: RunStatus
     manifest: RunManifest
 
@@ -1020,7 +1030,7 @@ class CollectorResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    collector_version: int = Field(..., alias="collectorVersion", ge=0)
+    collector_version: int = Field(..., validation_alias="collectorVersion", serialization_alias="collectorVersion", ge=0)
     url: str
     title: str
     scroll: ScrollInfo
