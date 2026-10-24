@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import threading
 import time
 import urllib.request
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -202,3 +205,73 @@ def test_the_pristine_table_cannot_be_replaced_or_deleted_by_the_page(
     hits = driver.call("page.eval", {"sessionId": session_id, "script": "() => window.__hits", "arg": {}})
     assert hits["results"][0]["value"]["trim"] == 0
     driver.call("session.close", {"sessionId": session_id})
+
+
+class Redirects(BaseHTTPRequestHandler):
+    """/start goes to /middle goes to /end, which answers. /hang never answers."""
+
+    def do_GET(self) -> None:
+        path = self.path.split("?")[0]
+        if path in ("/start", "/middle"):
+            self.send_response(302)
+            self.send_header("Location", "/middle" if path == "/start" else "/end?step=3")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path == "/hang":
+            time.sleep(8)
+        else:
+            body = b"<!doctype html><title>End</title><p>done</p>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def redirecting() -> Iterator[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Redirects)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.mark.parametrize("browser", ["chromium", "firefox", "webkit"])
+def test_goto_reports_the_redirect_chain_with_server_addresses(
+    driver: DriverClient, redirecting: str, browser: str
+) -> None:
+    driver.call("driver.hello", HELLO)
+    session = driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
+    page = driver.call("page.goto", {"sessionId": session["sessionId"], "url": f"{redirecting}/start"})
+    chain = models.PageGotoResult.model_validate(page).redirect_chain
+    assert chain is not None
+    assert [hop.url for hop in chain] == [f"{redirecting}/start", f"{redirecting}/middle", f"{redirecting}/end?step=3"]
+    assert page["finalUrl"] == chain[-1].url
+    if browser == "webkit":
+        # WebKit gives no address for the hops that redirected. The engine resolves their names instead.
+        assert all(hop.remote_address in (None, "127.0.0.1") for hop in chain)
+    else:
+        assert [hop.remote_address for hop in chain] == ["127.0.0.1"] * 3
+    driver.call("session.close", {"sessionId": session["sessionId"]})
+
+
+def test_a_timeout_message_does_not_carry_the_query(driver: DriverClient, redirecting: str) -> None:
+    driver.call("driver.hello", HELLO)
+    session = driver.call("session.open", {"target": {"browser": "chromium"}, "viewport": VIEWPORT})
+    with pytest.raises(RpcFailure) as failure:
+        driver.call(
+            "page.goto",
+            {
+                "sessionId": session["sessionId"],
+                "url": f"{redirecting}/hang?token=SEKRET#access_token=SEKRET",
+                "timeoutMs": 1500,
+            },
+        )
+    assert failure.value.kind == "timeout"
+    assert "SEKRET" not in str(failure.value)
+    assert f"{redirecting}/hang did not load" in str(failure.value)

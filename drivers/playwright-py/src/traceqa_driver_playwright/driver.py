@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, Frame, Page, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
@@ -362,6 +363,49 @@ def give_state(context: BrowserContext, state: dict[str, Any]) -> None:
         )
 
 
+def without_query(url: str) -> str:
+    """The address as scheme, host and path only: no user name, password, query or fragment."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        port = f":{parts.port}" if parts.port else ""
+        if parts.scheme and host:
+            return f"{parts.scheme}://{host}{port}{parts.path}"
+    except ValueError:
+        pass
+    return url.split("?", 1)[0].split("#", 1)[0]
+
+
+# Browsers stop following redirects well before this, so a chain is never cut in practice.
+MAX_REDIRECT_HOPS = 64
+
+
+def redirect_chain(response: Any) -> list[models.RedirectHop] | None:
+    """Every request that led to `response`, oldest first, each with the IP address the browser
+    connected to when the browser says it. Lets the engine check every hop against the operator's
+    address rules. None when there is no response (for example a page that did not navigate)."""
+    if response is None:
+        return None
+    requests = []
+    request = response.request
+    while request is not None and len(requests) < MAX_REDIRECT_HOPS:
+        requests.append(request)
+        request = request.redirected_from
+    hops = []
+    for request in reversed(requests):
+        remote = None
+        try:
+            answer = response if request is response.request else request.response()
+            address = answer.server_addr() if answer is not None else None
+            remote = address["ipAddress"] if address else None
+        except PlaywrightError:
+            remote = None
+        hops.append(models.RedirectHop(url=request.url, remote_address=remote))
+    return hops
+
+
 def first_line(message: str) -> str:
     """Playwright appends a multi-line call log to its errors. People only need the first line."""
     return message.strip().splitlines()[0] if message.strip() else message
@@ -551,7 +595,10 @@ class PlaywrightDriver:
             # The content first. Without it there is nothing to read, so this is the one that can fail.
             response = page.goto(params.url, wait_until="domcontentloaded", timeout=timeout)
         except PlaywrightTimeout as error:
-            raise RpcError("timeout", f"{params.url} did not load in {timeout} ms", retryable=True) from error
+            # Without the query or fragment: they can carry a token, and logs and run files keep this text.
+            raise RpcError(
+                "timeout", f"{without_query(params.url)} did not load in {timeout} ms", retryable=True
+            ) from error
         except PlaywrightError as error:
             raise RpcError("navigation_failed", first_line(error.message), retryable=True) from error
 
@@ -579,6 +626,7 @@ class PlaywrightDriver:
             title=title,
             load_complete=None if load_complete else False,
             closed_shadow_roots=count_closed_shadow_roots(page) if session.chromium else None,
+            redirect_chain=redirect_chain(response),
         )
 
     def page_eval(self, params: models.PageEvalParams) -> models.PageEvalResult:

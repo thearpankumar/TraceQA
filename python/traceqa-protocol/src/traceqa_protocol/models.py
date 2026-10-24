@@ -404,25 +404,15 @@ class PageGotoParams(BaseModel):
     timeout_ms: int | None = Field(None, alias="timeoutMs", ge=0)
 
 
-class PageGotoResult(BaseModel):
+class RedirectHop(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
-    status: int | None = Field(
-        None, description="HTTP status of the main document, when known.", ge=0
-    )
-    title: str
-    load_complete: bool | None = Field(
+    url: str
+    remote_address: str | None = Field(
         None,
-        alias="loadComplete",
-        description="False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.",
-    )
-    closed_shadow_roots: int | None = Field(
-        None,
-        alias="closedShadowRoots",
-        description="How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
-        ge=0,
+        alias="remoteAddress",
+        description="The IP address the browser connected to for this request, when the browser reports it. Absent when unknown.",
     )
 
 
@@ -621,7 +611,7 @@ class RpcErrorData(BaseModel):
     )
     kind: str = Field(
         ...,
-        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, internal.",
+        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, internal.",
     )
     retryable: bool
 
@@ -752,6 +742,33 @@ class StorageOrigin(BaseModel):
         ..., description="Scheme, host and port, for example https://app.example.com."
     )
     local_storage: list[StorageItem] = Field(..., alias="localStorage")
+
+
+class PageGotoResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    final_url: str = Field(..., alias="finalUrl", description="URL after redirects.")
+    status: int | None = Field(
+        None, description="HTTP status of the main document, when known.", ge=0
+    )
+    title: str
+    load_complete: bool | None = Field(
+        None,
+        alias="loadComplete",
+        description="False when the page's content arrived but its load event did not fire in time, for example because one image never arrived. The page is then read as it stands. Absent means true.",
+    )
+    closed_shadow_roots: int | None = Field(
+        None,
+        alias="closedShadowRoots",
+        description="How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
+        ge=0,
+    )
+    redirect_chain: list[RedirectHop] | None = Field(
+        None,
+        alias="redirectChain",
+        description="Every address the main document was requested from on the way to finalUrl, first request first, finalUrl last. Browsers stop following redirects at about 20, so the list is short. Lets the engine check each hop against an operator's address rules. Absent when the driver cannot see the hops (classic WebDriver shows only the final address).",
+    )
 
 
 class TargetSummary(BaseModel):

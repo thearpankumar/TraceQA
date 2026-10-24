@@ -14,6 +14,7 @@ use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
 
 use crate::driver::{DriverCommand, DriverError, Drivers};
 use crate::extract::{extract_target, Job, Progress, Sink};
+use crate::url_policy::UrlPolicy;
 use crate::url_safety::{check_navigable, redact};
 
 pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_protocol::contracts::run_folder::VERSION;
@@ -201,6 +202,7 @@ impl Run {
             progress,
             exclusive: &exclusive,
             cancel: execution.cancel,
+            policy: execution.policy,
         };
         let next = AtomicUsize::new(0);
         let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
@@ -280,6 +282,9 @@ pub struct Execution<'a> {
     /// Set this to stop the run. Targets that have not started are skipped, and the ones
     /// that are running stop at their next step.
     pub cancel: &'a AtomicBool,
+    /// Where browsers may go, when the operator set rules (the MCP server does). A page that
+    /// ends up somewhere the rules refuse fails its target and nothing from it is written.
+    pub policy: Option<&'a UrlPolicy>,
 }
 
 /// One browser at one viewport, and the folder its results go to.
@@ -296,6 +301,7 @@ struct Shared<'a, 'b> {
     progress: Progress<'a, 'b>,
     exclusive: &'a Exclusive,
     cancel: &'a AtomicBool,
+    policy: Option<&'a UrlPolicy>,
 }
 
 /// How many browsers to run at once when the request does not say. Each one is a browser
@@ -366,6 +372,7 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
                 dir: &dir,
                 exclusive: shared.exclusive,
                 cancel: shared.cancel,
+                policy: shared.policy,
                 storage_state: shared.params.storage_state.as_ref(),
             };
             let (file, browser, timings) = extract_target(drivers, &extraction, progress)?;

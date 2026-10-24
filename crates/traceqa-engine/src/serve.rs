@@ -200,6 +200,7 @@ fn start_run(
             let execution = Execution {
                 drivers: &|| Drivers::new(commands.clone()),
                 cancel: &cancel,
+                policy: None,
             };
             let manifest = run.execute(&execution, &mut on_event);
             let done = RunDoneParams {

@@ -57,6 +57,19 @@ struct McpArgs {
     /// a file in this folder as `storage_state`; without it, the AI cannot use sign-ins at all.
     #[arg(long, value_name = "DIR")]
     state_dir: Option<PathBuf>,
+    /// Let the AI attach to a running browser (cdp=ENDPOINT) or a WebDriver server
+    /// (webdriver=URL). Off by default: those name a machine for this server to connect to.
+    #[arg(long)]
+    allow_remote_browsers: bool,
+    /// Refuse pages on loopback, private (RFC 1918), shared (100.64/10), unique-local and
+    /// multicast addresses, also when a redirect leads there. Cloud metadata and link-local
+    /// addresses are always refused, with or without this flag.
+    #[arg(long)]
+    block_private: bool,
+    /// With --block-private, still allow this host (a name or an address). Repeat for several.
+    /// Never lifts the ban on metadata and link-local addresses.
+    #[arg(long = "allow-host", value_name = "HOST")]
+    allow_hosts: Vec<String>,
     #[command(flatten)]
     drivers: DriverArgs,
 }
@@ -170,6 +183,8 @@ fn mcp(args: McpArgs) -> ExitCode {
         runs_dir,
         drivers: driver_commands(&args.drivers.drivers),
         state_dir,
+        allow_remote_browsers: args.allow_remote_browsers,
+        policy: traceqa_mcp::UrlPolicy::new(args.block_private, &args.allow_hosts),
     };
     // Stdout belongs to the protocol. Everything for people goes to stderr, which hosts log.
     match traceqa_mcp::serve(BufReader::new(io::stdin()), Box::new(io::stdout()), config) {
@@ -223,6 +238,7 @@ fn extract(args: ExtractArgs) -> ExitCode {
     let execution = Execution {
         drivers: &|| Drivers::new(commands.clone()),
         cancel: &CANCEL,
+        policy: None,
     };
     // Browsers run side by side, so each line says which one it is about.
     let mut show_progress = |event: &Event| match &event.target {
