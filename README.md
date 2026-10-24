@@ -60,7 +60,7 @@ finds into bug reports and deterministic tests.
 | Consistent results | One in-page collector runs in every browser, so results are measured the same way everywhere. |
 | AI agent ready | A built-in MCP server lets AI tools such as Claude Code and Cursor run TraceQA and inspect its results. |
 | Any language | A documented protocol, with Python and TypeScript SDKs and a guide for others. |
-| Non-invasive | Extraction reads the page as it is. It does not click, type or navigate. |
+| Non-invasive | It navigates to the URL and scrolls to load lazy content. With `--storage-state` it first sets cookies and local storage. It never clicks, types or submits anything. |
 
 ## Supported platforms and browsers
 
