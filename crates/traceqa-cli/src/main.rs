@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use traceqa_engine::driver::Drivers;
-use traceqa_engine::{driver_commands, serve, Abort, Execution, Run};
+use traceqa_engine::{driver_commands, serve, Abort, EngineError, Execution, Run};
 use traceqa_protocol::types::{
     BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState, Viewport,
 };
@@ -245,6 +245,7 @@ fn extract(args: ExtractArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     }
+    let out_dir = args.out.clone();
     let request = RunStartParams {
         feature: "extract".to_string(),
         url: args.url,
@@ -263,6 +264,11 @@ fn extract(args: ExtractArgs) -> ExitCode {
     };
     let run = match Run::prepare(request) {
         Ok(run) => run,
+        Err(EngineError::Io(error)) => {
+            // The operating system's text alone ("Access is denied") names neither flag nor path.
+            eprintln!("traceqa: --out {out_dir}: {error}");
+            return ExitCode::from(2);
+        }
         Err(error) => {
             eprintln!("traceqa: {error}");
             return ExitCode::from(2);

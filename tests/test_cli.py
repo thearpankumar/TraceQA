@@ -260,3 +260,20 @@ def test_extract_with_a_missing_browser_fails_the_target_with_the_install_comman
     error = json.loads(result.stdout)["targets"][0]["error"]
     assert "chromium is not installed. Run: traceqa install chromium" in error
     assert "Executable doesn't exist" not in error
+
+
+def test_out_that_cannot_be_created_names_the_flag_and_the_path(tmp_path: Path) -> None:
+    blocker = tmp_path / "a-file"
+    blocker.write_text("x", encoding="utf-8")
+    target = blocker / "runs"  # its parent is a file, so no operating system lets it be made
+    result = traceqa("extract", "https://example.com", "--out", str(target))
+    assert result.returncode == 2
+    assert f"--out {target}" in result.stderr
+
+
+def test_out_that_is_a_file_names_the_flag_and_the_path(tmp_path: Path) -> None:
+    target = tmp_path / "a-file"
+    target.write_text("x", encoding="utf-8")
+    result = traceqa("extract", "https://example.com", "--out", str(target))
+    assert result.returncode == 2
+    assert f"--out {target}" in result.stderr
