@@ -91,7 +91,11 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
+      # The installer pins the commit this binary was built from. Name it here, so it never
+      # depends on the state of the checkout (build.rs falls back to git only without it).
       - name: Build the release binary
+        env:
+          TRACEQA_RELEASE_COMMIT: ${{ github.sha }}
         run: cargo build --release --locked --bin traceqa
 
       - name: The binary starts and reports this version
