@@ -18,6 +18,9 @@
 | /members   | Shows a members-only page when both are present, and sends the browser to /signin otherwise. |
 | /virtual   | A list of 300 rows that keeps only the rows near the screen, as long tables and feeds do. |
 | /text      | Plain text, not HTML. |
+| /flaky/TOKEN | A page with a button and a script, /flaky/TOKEN/app.js, which answers 503 the first time it is asked for and 200 after that. Each TOKEN has its own count, so a test makes up a token of its own. |
+| /gone-script | A page with a button and a script that is always 404. |
+| /bad-picture | A page with a button and a picture that is 404. Pictures do not change the list, so it raises no warning. |
 """
 
 from __future__ import annotations
@@ -139,6 +142,18 @@ MEMBERS = b"""<!doctype html><title>Members</title>
 </script>
 <main><h1>Members area</h1><button>Members only</button></main>"""
 
+LOADED_BUTTON = b'document.body.append(Object.assign(document.createElement("button"), { textContent: "Loaded" }));'
+
+# How many times each /flaky/TOKEN/app.js has been asked for. One server serves many tests, so the count is
+# kept per token, and guarded because every request runs on its own thread.
+FLAKY_ASKED: dict[str, int] = {}
+FLAKY_LOCK = threading.Lock()
+
+
+def flaky_page(token: str) -> bytes:
+    return f'<!doctype html><title>Flaky</title><main><button>Static</button></main><script src="/flaky/{token}/app.js"></script>'.encode()
+
+
 # Requests to /never are held until the server stops, so a page that needs one never finishes loading.
 STOPPING = threading.Event()
 
@@ -150,6 +165,8 @@ class Handler(BaseHTTPRequestHandler):
     def send(self, status: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        # Nothing here may be reused by a second browser of the same run.
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -187,8 +204,33 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, LATE)
         elif path == "/endless":
             self.send(200, ENDLESS)
+        elif path.startswith("/flaky/"):
+            self.flaky(path)
+        elif path == "/gone-script":
+            self.send(
+                200,
+                b'<!doctype html><title>Gone</title><main><button>Static</button></main><script src="/gone.js"></script>',
+            )
+        elif path == "/bad-picture":
+            self.send(
+                200,
+                b'<!doctype html><title>Picture</title><main><button>Static</button><img src="/nothing.png" alt=""></main>',
+            )
         elif path == "/text":
             self.send(200, b"Just some text, no HTML here.", "text/plain; charset=utf-8")
+        else:
+            self.send(404, MISSING)
+
+    def flaky(self, path: str) -> None:
+        parts = path.split("/")  # "", "flaky", TOKEN, optionally "app.js"
+        if len(parts) == 3 and parts[2]:
+            self.send(200, flaky_page(parts[2]))
+        elif len(parts) == 4 and parts[2] and parts[3] == "app.js":
+            with FLAKY_LOCK:
+                asked = FLAKY_ASKED[parts[2]] = FLAKY_ASKED.get(parts[2], 0) + 1
+            self.send(
+                503 if asked == 1 else 200, b"unavailable" if asked == 1 else LOADED_BUTTON, "application/javascript"
+            )
         else:
             self.send(404, MISSING)
 
