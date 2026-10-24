@@ -387,19 +387,33 @@ uv run playwright install chromium firefox webkit
 Run the test suites:
 
 ```sh
-cargo test                                          # Rust crates
-uv run pytest                                       # collector cases, drivers, SDKs, MCP server, installer
-(cd sdks/typescript && npm ci && uv run npm test)   # TypeScript SDK
-uv run bench/run.py                                 # end to end on the demo site
+cargo test
+uv run pytest
+npm ci --prefix sdks/typescript
+uv run --directory sdks/typescript node --run test
+uv run bench/run.py
 ```
+
+These are the Rust crates, then the collector cases, drivers, SDKs, MCP server and
+installer, then the TypeScript SDK (it needs Node 22 or later), then the end-to-end bench
+on the demo site. Every command runs unchanged from the repository root in Bash,
+PowerShell and cmd on Windows, and in a POSIX shell on macOS and Linux.
 
 Run the linters:
 
 ```sh
-uv run ruff check . && uv run ruff format --check .   # Python style
-uv run pyright                                        # Python types
-(cd sdks/typescript && npm run lint && npm run lint:collector)   # TypeScript SDK, and the ES5 collector
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+npm run lint --prefix sdks/typescript
+npm run lint:collector --prefix sdks/typescript
 ```
+
+By default a Python test that needs the built binary, `uv`, or `chromedriver` is skipped
+when it is missing. CI sets `TRACEQA_REQUIRE_BINARY=1` to turn those skips into failures
+(and `TRACEQA_REQUIRE_CHROMEDRIVER=1` for chromedriver), and `TRACEQA_NO_UNEXPECTED_SKIPS=1`
+to fail the run on any skip whose reason is not listed in `tests/support/ci_guards.py`. Set
+them locally to check that nothing was silently skipped.
 
 Every part of the repository has tests, from unit tests of each crate to
 end-to-end runs in real browsers. The collector is checked case by case in
@@ -420,12 +434,13 @@ Continuous integration runs on every pull request, on pushes to `master`, on dem
 Pushing a version tag runs the release workflow, which builds and publishes the
 binaries. See [docs/releasing.md](docs/releasing.md).
 
-After changing a schema in `spec/`, regenerate the types:
+After changing a schema in `spec/`, regenerate the Python and TypeScript types, and
+after a client protocol change record the transcripts again:
 
 ```sh
-uv run scripts/gen_python_protocol.py      # Python
-(cd sdks/typescript && npm run gen)        # TypeScript
-uv run scripts/record_transcripts.py       # after a client protocol change
+uv run scripts/gen_python_protocol.py
+npm run gen --prefix sdks/typescript
+uv run scripts/record_transcripts.py
 ```
 
 The Rust types regenerate on build.
