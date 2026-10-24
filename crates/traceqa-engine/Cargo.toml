@@ -12,7 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.11.1"
 traceqa-protocol.workspace = true
-traceqa-recorder = { version = "0.1.0", path = "../traceqa-recorder" }
+traceqa-recorder.workspace = true
 unicode-normalization = "0.1.25"
 url = "2"
 

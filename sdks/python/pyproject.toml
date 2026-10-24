@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Python client for TraceQA. It starts the traceqa engine and talks to it; all logic lives in the engine."
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["traceqa-protocol"]
+dependencies = ["traceqa-protocol==0.1.0"]
 
 [build-system]
 requires = ["hatchling"]
