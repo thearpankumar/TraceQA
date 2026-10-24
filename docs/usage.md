@@ -603,7 +603,7 @@ live to an SDK's `on_event` callback.
 | `nameIsTemplate` | True when the instances have different names, as with product titles in a grid. |
 | `confidence` | `high` for native controls and explicit interactive roles. `low` for elements that only look interactive. |
 | `signals` | Why the element is considered interactive: `native`, `role`, `contenteditable`, `tabindex`, `onclick-attr`, `cursor-pointer`. |
-| `path` | The structural path to the component, for example `main > list "Products" > listitem`. |
+| `path` | The structural path to the component, for example `main > list "products" > listitem`. |
 | `crop` | Path of a crop of the component, relative to `components.json`. Absent without `--crops`, and when the component never appeared on screen. |
 | `instances` | Every element that belongs to the component. |
 
