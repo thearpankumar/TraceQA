@@ -20,6 +20,7 @@
   // code. Either way the result carries a collector_tampered warning.
   // This is best effort: Function.prototype.toString can be faked too, and what a page does to
   // properties that are not captured (such as the checked state of an input) is not defended.
+  // The block below is GENERATED from collector/pristine.js by scripts/sync_pristine.py. Never edit it here.
   // BEGIN pristine.js
   var capture = (function traceqaPristine() {
   "use strict";
@@ -28,9 +29,12 @@
   // of "uncurried" functions: table.getAttribute(element, "id") calls the original
   // Element.prototype.getAttribute without looking it up on the page-modifiable prototype.
   //
-  // This text exists in three places that a test keeps identical: this file, the capture
-  // block inside collector.js (used when the page already ran its scripts), and the
-  // Playwright driver (which runs it before the page's scripts, as an init script).
+  // This text exists in three places: this file, the capture block inside collector.js (used
+  // when the page already ran its scripts), and the Playwright driver (which runs it before the
+  // page's scripts, as an init script). THIS FILE IS THE ONLY ONE TO EDIT. Afterwards run
+  // `python3 scripts/sync_pristine.py` to rewrite the other two; CI and a test run it with
+  // --check. Do not use a triple double quote or a backslash in this file: the driver holds the
+  // text in a raw Python string.
   //
   // Best effort: a page that ran before this did can have replaced anything, and
   // Function.prototype.toString, which tells native code from page code, can be faked too.
