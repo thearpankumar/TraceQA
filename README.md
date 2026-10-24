@@ -440,6 +440,7 @@ The Rust types regenerate on build.
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
 | [docs/releasing.md](docs/releasing.md) | Version numbers and how to publish a release. |
+| [SECURITY.md](SECURITY.md) | How to report a vulnerability privately. |
 | [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
 | [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
 | [docs/PLAN.md](docs/PLAN.md) | Project plan, decisions and current status. |

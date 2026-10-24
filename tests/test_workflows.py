@@ -156,6 +156,61 @@ def test_release_attests_every_asset_in_the_publish_job_only() -> None:
     assert "--verify-tag" in publish[-1]["run"]
 
 
+def test_audit_workflow_never_uses_the_self_hosted_pool_and_has_read_only_permissions() -> None:
+    audit = load("audit.yml")
+    assert audit["permissions"] == {"contents": "read"}
+    assert "RUNNER_LABELS" not in (WORKFLOWS / "audit.yml").read_text(encoding="utf-8")
+    for name, job in audit["jobs"].items():
+        assert job["runs-on"] == "ubuntu-latest", name
+        assert "permissions" not in job and job["timeout-minutes"], name
+    triggers = triggers_of(audit)
+    assert {"schedule", "workflow_dispatch", "push", "pull_request"} <= set(triggers)
+    for event in ("push", "pull_request"):
+        assert "Cargo.lock" in triggers[event]["paths"] and "uv.lock" in triggers[event]["paths"]
+    text = (WORKFLOWS / "audit.yml").read_text(encoding="utf-8")
+    for command in ("cargo audit", "cargo deny", "npm audit", "pip-audit=="):
+        assert command in text, command
+
+
+def test_dependabot_covers_every_ecosystem_in_the_repo() -> None:
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    assert config["version"] == 2
+    ecosystems = {u["package-ecosystem"] for u in config["updates"]}
+    assert {"cargo", "npm", "github-actions"} <= ecosystems
+    assert ecosystems & {"uv", "pip"}
+    for update in config["updates"]:
+        assert (ROOT / update["directory"].lstrip("/")).is_dir(), update
+        assert update["schedule"]["interval"] == "weekly"
+        assert update["commit-message"]["prefix"] == "chore(deps)"
+    # Each ecosystem's manifest or lock file really is where Dependabot is pointed.
+    assert (ROOT / "Cargo.lock").is_file() and (ROOT / "uv.lock").is_file()
+    assert (ROOT / "sdks" / "typescript" / "package-lock.json").is_file()
+
+
+def test_codeowners_gates_the_github_directory() -> None:
+    lines = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8").splitlines()
+    rules = dict(line.split(None, 1) for line in lines if line.strip() and not line.startswith("#"))
+    assert rules["*"].startswith("@")
+    for path in ("/.github/", "/SECURITY.md", "/deny.toml", "/scripts/", "/Cargo.lock", "/crates/traceqa-mcp/"):
+        assert path in rules, path
+
+
+def test_the_security_policy_names_the_private_reporting_channel() -> None:
+    text = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert "https://github.com/thearpankumar/TraceQA/security/advisories/new" in text
+    assert "SECURITY.md" in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_deny_policy_denies_unknown_sources_and_lists_its_licences() -> None:
+    import tomllib
+
+    policy = tomllib.loads((ROOT / "deny.toml").read_text(encoding="utf-8"))
+    assert policy["sources"]["unknown-registry"] == "deny"
+    assert policy["sources"]["unknown-git"] == "deny"
+    assert policy["advisories"]["ignore"] == []
+    assert set(policy["licenses"]["allow"]) == {"Apache-2.0", "MIT", "Unicode-3.0"}
+
+
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
 
 
