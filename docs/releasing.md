@@ -103,6 +103,25 @@ Merging a pull request puts code on `master` and publishes nothing. A release
 happens only when a tag is pushed, so several pull requests can be merged and
 then released together under one version.
 
+## Pinned actions
+
+Every action in the workflows is pinned to a full 40-character commit SHA, with
+the release it belongs to in a trailing comment (`# v4.4.0`). A tag can be moved
+to different code; a commit cannot. `dtolnay/rust-toolchain` has no release
+tags, so its pin is a commit of `master` (comment `# master`) and each use names
+its toolchain with `with: toolchain:`. Dependabot proposes new SHAs in pull
+requests, each one a reviewable diff.
+
+To check a SHA by hand, resolve the tag in the action's own repository and compare:
+
+```sh
+gh api repos/actions/checkout/commits/v4.4.0 --jq .sha
+```
+
+`commits/<tag>` works for annotated and lightweight tags. Do not take a SHA
+from a fork. `zizmor` with a GitHub token (`GH_TOKEN`) runs the online
+`impostor-commit` check that catches this.
+
 ## Self-hosted runner checklist
 
 CI can run on a self-hosted machine, named by the repository variable
