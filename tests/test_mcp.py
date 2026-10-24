@@ -216,3 +216,30 @@ def test_a_redirect_to_a_blocked_host_is_refused_after_navigation(redirector: in
         path for path in (tmp_path / "runs").iterdir() if not (path / "chromium-1280x800" / "components.json").exists()
     )
     assert not list(folder.rglob("components.json"))
+
+
+def test_raw_lines_that_are_not_requests_get_the_right_json_rpc_error(tmp_path: Path) -> None:
+    """-32700 is only for text that is not JSON. JSON that is not a request is -32600, with the id echoed."""
+    lines = [
+        '{"id":5,"method":"ping"}',  # no jsonrpc, id 5
+        "[]",
+        "42",
+        '{"jsonrpc":"2.0","id":"a","method":7}',
+        "this is not json",
+        '{"jsonrpc":"2.0","id":9,"method":"ping"}',  # the server is still alive
+    ]
+    result = subprocess.run(
+        [str(BINARY), "mcp", "--out", str(tmp_path / "runs")],
+        input="\n".join(lines) + "\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+        env=dict(os.environ),
+    )
+    assert result.returncode == 0, result.stderr
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    codes = [(reply["id"], reply["error"]["code"]) for reply in replies if "error" in reply]
+    assert codes == [(5, -32600), (None, -32600), (None, -32600), ("a", -32600), (None, -32700)]
+    assert any(reply.get("id") == 9 and "result" in reply for reply in replies)

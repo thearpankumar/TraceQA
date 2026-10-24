@@ -57,9 +57,10 @@ pub enum Message {
 pub enum DecodeError {
     #[error("not valid JSON: {0}")]
     Json(serde_json::Error),
-    /// Valid JSON that is not a JSON-RPC 2.0 message.
-    #[error("not a JSON-RPC 2.0 message: {0}")]
-    Invalid(&'static str),
+    /// Valid JSON that is not a JSON-RPC 2.0 message. `id` is the request's own id when it
+    /// had one that can be read, so the error can be addressed to it; otherwise `Id::Null`.
+    #[error("not a JSON-RPC 2.0 message: {reason}")]
+    Invalid { id: Id, reason: &'static str },
 }
 
 /// A message as it is read from a line.
@@ -127,10 +128,50 @@ pub fn encode(message: &Message) -> String {
 }
 
 /// Decodes one line.
+///
+/// Text that is not JSON is [`DecodeError::Json`] (JSON-RPC's parse error). JSON that is not a
+/// message is [`DecodeError::Invalid`] (an invalid request), with the request's id when it has
+/// one. Batches (arrays) are not supported and are invalid requests too.
 pub fn decode(line: &str) -> Result<Message, DecodeError> {
-    let wire: Incoming = serde_json::from_str(line).map_err(DecodeError::Json)?;
+    match serde_json::from_str::<Incoming>(line) {
+        Ok(wire) => decode_wire(wire),
+        Err(error) => Err(classify(line, error)),
+    }
+}
+
+/// Why a line that is not an [`Incoming`] message is not one. Only runs on the error path.
+fn classify(line: &str, error: serde_json::Error) -> DecodeError {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return DecodeError::Json(error);
+    };
+    let Some(object) = value.as_object() else {
+        return DecodeError::Invalid {
+            id: Id::Null,
+            reason: "a request is a JSON object (batches are not supported)",
+        };
+    };
+    // Only an id of a kind we can send back is echoed: a number we can hold, or a string.
+    let id = match object.get("id") {
+        Some(Value::Number(number)) => number.as_u64().map_or(Id::Null, Id::Number),
+        Some(Value::String(text)) => Id::String(text.clone()),
+        _ => Id::Null,
+    };
+    let reason = match object.get("jsonrpc") {
+        Some(Value::String(version)) if version == VERSION => match object.get("method") {
+            Some(method) if !method.is_string() => "method must be a string",
+            _ => "not a valid request, response or notification",
+        },
+        _ => "jsonrpc must be \"2.0\"",
+    };
+    DecodeError::Invalid { id, reason }
+}
+
+fn decode_wire(wire: Incoming) -> Result<Message, DecodeError> {
     if wire.jsonrpc != VERSION {
-        return Err(DecodeError::Invalid("jsonrpc must be \"2.0\""));
+        return Err(DecodeError::Invalid {
+            id: wire.id.unwrap_or(Id::Null),
+            reason: "jsonrpc must be \"2.0\"",
+        });
     }
     let params = wire.params.unwrap_or(Value::Null);
     match (wire.method, wire.id) {
@@ -145,7 +186,10 @@ pub fn decode(line: &str) -> Result<Message, DecodeError> {
             };
             Ok(Message::Response { id, result })
         }
-        (None, None) => Err(DecodeError::Invalid("needs a method or an id")),
+        (None, None) => Err(DecodeError::Invalid {
+            id: Id::Null,
+            reason: "needs a method or an id",
+        }),
     }
 }
 
@@ -255,7 +299,8 @@ impl Output {
 }
 
 /// Reads the messages a peer sends, one per line, and hands each to `dispatch`. What cannot be
-/// handed on is answered here with an error and an id of `null`, and reading goes on: a line
+/// handed on is answered here with an error and an id of `null` (the request's own id, for JSON
+/// that is not a valid request: -32600), and reading goes on: a line
 /// longer than [`MAX_REQUEST_LINE`] (skipped, so one huge line costs no memory), a line that is
 /// not UTF-8, and a line that is not a JSON-RPC message. Blank lines are skipped. `refuse`
 /// builds the error for a code and a message.
@@ -268,12 +313,13 @@ pub fn serve_lines<R: BufRead>(
     refuse: impl Fn(i64, String) -> RpcError,
     mut dispatch: impl FnMut(Message),
 ) -> io::Result<()> {
-    let refuse_line = |rpc_code: i64, message: String| {
+    let refuse_to = |id: Id, rpc_code: i64, message: String| {
         output.send(&Message::Response {
-            id: Id::Null,
+            id,
             result: Err(refuse(rpc_code, message)),
         });
     };
+    let refuse_line = |rpc_code: i64, message: String| refuse_to(Id::Null, rpc_code, message);
     let mut buf = Vec::new();
     loop {
         // Lines are read with a limit: a peer that never sends a newline cannot use all the memory.
@@ -302,6 +348,13 @@ pub fn serve_lines<R: BufRead>(
         }
         match decode(line) {
             Ok(message) => dispatch(message),
+            Err(DecodeError::Invalid { id, reason }) => {
+                refuse_to(
+                    id,
+                    code::INVALID_REQUEST,
+                    format!("not a JSON-RPC 2.0 message: {reason}"),
+                );
+            }
             Err(e) => refuse_line(code::PARSE_ERROR, e.to_string()),
         }
     }
@@ -577,8 +630,59 @@ mod tests {
         assert!(matches!(decode("not json"), Err(DecodeError::Json(_))));
         assert!(matches!(
             decode(r#"{"jsonrpc":"1.0","id":1,"method":"x"}"#),
-            Err(DecodeError::Invalid(_))
+            Err(DecodeError::Invalid { .. })
         ));
-        assert!(matches!(decode(r#"{"jsonrpc":"2.0"}"#), Err(DecodeError::Invalid(_))));
+        assert!(matches!(
+            decode(r#"{"jsonrpc":"2.0"}"#),
+            Err(DecodeError::Invalid { .. })
+        ));
+    }
+
+    fn invalid_id(line: &str) -> Id {
+        match decode(line) {
+            Err(DecodeError::Invalid { id, .. }) => id,
+            other => panic!("{line}: expected an invalid request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_distinguishes_parse_error_from_invalid_request() {
+        assert!(matches!(decode("not json"), Err(DecodeError::Json(_))));
+        assert!(matches!(decode(r#"{"jsonrpc":"2.0","#), Err(DecodeError::Json(_))));
+        for not_an_object in ["[]", "[1]", "42", r#""x""#, "null", "true"] {
+            assert_eq!(invalid_id(not_an_object), Id::Null, "{not_an_object}");
+        }
+        assert_eq!(invalid_id(r#"{"id":5,"method":"x"}"#), Id::Number(5));
+        assert_eq!(
+            invalid_id(r#"{"jsonrpc":"1.0","id":"a","method":"x"}"#),
+            Id::String("a".into())
+        );
+        assert_eq!(invalid_id(r#"{"jsonrpc":"2.0","id":1,"method":7}"#), Id::Number(1));
+        // An id of a kind that cannot be sent back is answered with null.
+        assert_eq!(invalid_id(r#"{"id":1.5,"method":"x"}"#), Id::Null);
+        assert_eq!(invalid_id(r#"{"id":-1,"method":"x"}"#), Id::Null);
+        assert_eq!(invalid_id(r#"{"id":{"a":1}}"#), Id::Null);
+    }
+
+    #[test]
+    fn invalid_requests_get_32600_with_the_id_and_serving_goes_on() {
+        let input = concat!(
+            "{\"id\":5,\"method\":\"x\"}\n",
+            "[]\n",
+            "not json\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n"
+        );
+        let captured = Captured::default();
+        let output = Output::new(Box::new(captured.clone()));
+        let mut dispatched = Vec::new();
+        serve_lines(input.as_bytes(), &output, plain, |message| dispatched.push(message)).unwrap();
+        let replies = written(&captured);
+        assert_eq!(replies.len(), 3);
+        assert_eq!(replies[0]["error"]["code"], code::INVALID_REQUEST);
+        assert_eq!(replies[0]["id"], 5);
+        assert_eq!(replies[1]["error"]["code"], code::INVALID_REQUEST);
+        assert!(replies[1]["id"].is_null());
+        assert_eq!(replies[2]["error"]["code"], code::PARSE_ERROR);
+        assert!(matches!(&dispatched[..], [Message::Request { id: Id::Number(7), .. }]));
     }
 }
