@@ -408,11 +408,11 @@ run folder a test produces is checked against the JSON Schemas in `spec/`. The M
 MCP client library, and both SDKs replay the same recorded conversations so
 they are proven to send identical messages.
 
-Continuous integration runs on every pull request:
+Continuous integration runs on every pull request, on pushes to `master`, on demand and weekly:
 
 | Job | Platforms | Checks |
 |---|---|---|
-| Changes | Linux | Decides whether the change touches code. A change to documentation only skips Lint and Test. |
+| Changes | Linux | Decides whether the change touches code. Only `README.md`, `LICENSE` and Markdown files under `docs/` count as documentation; a change made of those alone skips Lint and Test. Manual and weekly scheduled runs test everything. |
 | Lint | Linux | Formatting and lint for Rust, Python and TypeScript, Python and TypeScript type checks, the collector's ES5 profile, that every `$ref` in `spec/` resolves, that generated types match `spec/`, and that every package has the same version. |
 | Test | Linux, macOS, Windows | All Rust, Python and TypeScript tests against the built binary and real browsers, and the bench. |
 | CI | Linux | One result for the whole run: passes when every job passed or was skipped for a documentation change. |
