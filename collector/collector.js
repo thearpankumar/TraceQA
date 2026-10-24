@@ -433,6 +433,29 @@
     return out;
   }
 
+  // The text of a node is read once. Many controls can point at one heading, and a listed
+  // element needs its text for both its name and its `text`.
+  var rawTextCache = N.newWeakMap();
+  var squashedTextCache = N.newWeakMap();
+
+  function rawText(node) {
+    var text = N.weakMapGet(rawTextCache, node);
+    if (text === undefined) {
+      text = contentText(node);
+      N.weakMapSet(rawTextCache, node, text);
+    }
+    return text;
+  }
+
+  function squashedText(node) {
+    var text = N.weakMapGet(squashedTextCache, node);
+    if (text === undefined) {
+      text = squash(rawText(node));
+      N.weakMapSet(squashedTextCache, node, text);
+    }
+    return text;
+  }
+
   function labelledByText(el) {
     var ids = attr(el, "aria-labelledby");
     if (!ids) return "";
@@ -441,9 +464,47 @@
     var list = words(ids);
     for (var i = 0; i < list.length; i++) {
       var target = N.getElementById(root, list[i]);
-      N.push(parts, target ? contentText(target) : "");
+      N.push(parts, target ? rawText(target) : "");
     }
     return squash(N.join(parts, " "));
+  }
+
+  // ---- labels --------------------------------------------------------------
+  // `labels` on a control costs a walk of the tree in some browsers, so it is not asked for
+  // each control. One pass over the labels of a tree (the document or one shadow root)
+  // finds the control of each, by the rules of label.control: `for` names the control, and
+  // only the first element with that id counts; without `for` it is the first labelable
+  // descendant. The kinds are the ones the table can read `labels` of.
+  var LABELABLE = "button, input:not([type=hidden]), meter, output, progress, select, textarea";
+  var NO_LABELS = [];
+  var labelsByRoot = N.newWeakMap();
+
+  function labelsOf(el) {
+    var root = N.getRootNode(el);
+    var byControl = N.weakMapGet(labelsByRoot, root);
+    if (!byControl) {
+      byControl = N.newWeakMap();
+      var labels = N.querySelectorAll(root, "label");
+      for (var i = 0, n = N.listLength(labels); i < n; i++) {
+        var label = labels[i];
+        var control;
+        if (N.hasAttribute(label, "for")) {
+          control = N.getElementById(root, N.getAttribute(label, "for"));
+          if (control && !N.matches(control, LABELABLE)) control = null;
+        } else {
+          control = N.elementQuerySelector(label, LABELABLE);
+        }
+        if (!control) continue;
+        var list = N.weakMapGet(byControl, control);
+        if (!list) {
+          list = [];
+          N.weakMapSet(byControl, control, list);
+        }
+        N.push(list, label);
+      }
+      N.weakMapSet(labelsByRoot, root, byControl);
+    }
+    return N.weakMapGet(byControl, el) || NO_LABELS;
   }
 
   // Returns [name, source]. A simplified version of the accessible-name algorithm.
@@ -453,10 +514,10 @@
     if (name) return [name, "aria-labelledby"];
     name = squash(attr(el, "aria-label"));
     if (name) return [name, "aria-label"];
-    var labels = N.labels(el);
-    if (labels && N.listLength(labels)) {
+    var labels = labelsOf(el);
+    if (labels.length) {
       var texts = [];
-      for (var i = 0; i < N.listLength(labels); i++) N.push(texts, contentText(labels[i]));
+      for (var i = 0; i < labels.length; i++) N.push(texts, rawText(labels[i]));
       name = squash(N.join(texts, " "));
       if (name) return [name, "label"];
     }
@@ -466,7 +527,7 @@
       if (name) return [name, isImage ? "alt" : "value"];
     }
     if (fromContent) {
-      name = squash(contentText(el));
+      name = squashedText(el);
       if (name) return [name, "content"];
     }
     name = squash(attr(el, "title"));
@@ -525,19 +586,81 @@
     return true;
   }
 
-  function matchesOnce(root, selector) {
-    try {
-      return N.listLength(N.querySelectorAll(root, selector)) === 1;
-    } catch (e) {
-      return false;
+  // How often each data-testid and id occurs in a tree (the document or one shadow root),
+  // counted in one pass. Asking the browser per element would walk the tree each time.
+  // `#id` ignores case in quirks mode, so ids are counted by their lower-case form there.
+  var quirks = document.compatMode === "BackCompat";
+  var countsByRoot = N.newWeakMap();
+
+  function idKey(id) {
+    return quirks ? N.toLowerCase(id) : id;
+  }
+
+  function countsOf(root) {
+    var counts = N.weakMapGet(countsByRoot, root);
+    if (counts) return counts;
+    counts = { testids: { __proto__: null }, ids: { __proto__: null } };
+    var found = N.querySelectorAll(root, "[data-testid],[id]");
+    for (var i = 0, n = N.listLength(found); i < n; i++) {
+      var testId = N.getAttribute(found[i], "data-testid");
+      if (testId !== null) counts.testids[testId] = (counts.testids[testId] || 0) + 1;
+      var id = N.getAttribute(found[i], "id");
+      if (id !== null) {
+        id = idKey(id);
+        counts.ids[id] = (counts.ids[id] || 0) + 1;
+      }
     }
+    N.weakMapSet(countsByRoot, root, counts);
+    return counts;
+  }
+
+  function idOnce(root, id) {
+    return countsOf(root).ids[idKey(id)] === 1;
+  }
+
+  // A newline, form feed, carriage return or NUL cannot be written in a CSS string: the
+  // selector for such a value is invalid, so it is never offered.
+  function fitsInCssString(value) {
+    for (var i = 0; i < value.length; i++) {
+      var code = N.charCodeAt(value, i);
+      if (code === 0 || code === 10 || code === 12 || code === 13) return false;
+    }
+    return true;
+  }
+
+  function testIdOnce(root, testId) {
+    return fitsInCssString(testId) && countsOf(root).testids[testId] === 1;
+  }
+
+  // The position of an element among the children of its parent with the same tag, worked
+  // out once for all of them. Scanning the siblings for each element is quadratic in a list.
+  var siblingsOf = N.newWeakMap();
+
+  function sameTagPosition(node) {
+    var known = N.weakMapGet(siblingsOf, node);
+    if (known) return known;
+    var parent = N.parentNode(node);
+    if (!parent) return { position: 1, twins: 0 };
+    var children = N.childElements(parent);
+    var totals = { __proto__: null };
+    for (var i = 0; i < children.length; i++) {
+      var name = N.localName(children[i]);
+      totals[name] = (totals[name] || 0) + 1;
+    }
+    var seen = { __proto__: null };
+    for (var j = 0; j < children.length; j++) {
+      var tag = N.localName(children[j]);
+      seen[tag] = (seen[tag] || 0) + 1;
+      N.weakMapSet(siblingsOf, children[j], { position: seen[tag], twins: totals[tag] });
+    }
+    return N.weakMapGet(siblingsOf, node) || { position: 1, twins: 0 };
   }
 
   function structuralSelector(el, root) {
     var parts = [];
     for (var node = el; node && N.nodeType(node) === 1; node = N.parentElement(node)) {
       var id = attr(node, "id");
-      if (node !== el && stableId(id) && matchesOnce(root, "#" + N.cssEscape(id))) {
+      if (node !== el && stableId(id) && idOnce(root, id)) {
         N.unshift(parts, "#" + N.cssEscape(id));
         break;
       }
@@ -547,16 +670,8 @@
         N.unshift(parts, tag);
         break;
       }
-      var position = 1;
-      var twins = 0;
-      var parent = N.parentNode(node);
-      var siblings = parent ? N.childElements(parent) : [];
-      for (var i = 0; i < siblings.length; i++) {
-        if (N.localName(siblings[i]) !== name) continue;
-        twins++;
-        if (siblings[i] === node) position = twins;
-      }
-      N.unshift(parts, twins > 1 ? tag + ":nth-of-type(" + position + ")" : tag);
+      var place = sameTagPosition(node);
+      N.unshift(parts, place.twins > 1 ? tag + ":nth-of-type(" + place.position + ")" : tag);
     }
     // A path that ran up to a shadow root has nothing to hold on to, so "div > button" would
     // also match deeper in the tree. ":host >" pins it to the top of the shadow root.
@@ -569,9 +684,9 @@
     var root = N.getRootNode(el);
     var found = [];
     var testId = attr(el, "data-testid");
-    if (testId && matchesOnce(root, "[data-testid=" + quote(testId) + "]")) N.push(found, "[data-testid=" + quote(testId) + "]");
+    if (testId && testIdOnce(root, testId)) N.push(found, "[data-testid=" + quote(testId) + "]");
     var id = attr(el, "id");
-    if (stableId(id) && matchesOnce(root, "#" + N.cssEscape(id))) N.push(found, "#" + N.cssEscape(id));
+    if (stableId(id) && idOnce(root, id)) N.push(found, "#" + N.cssEscape(id));
     N.push(found, structuralSelector(el, root));
     return found;
   }
@@ -655,9 +770,8 @@
   // it, one of its labels, or an ancestor (the element itself lets clicks through to it).
   function reaches(el, hit) {
     if (hit === el || N.contains(el, hit) || N.contains(hit, el)) return true;
-    var labels = N.labels(el);
-    var count = labels ? N.listLength(labels) : 0;
-    for (var i = 0; i < count; i++) {
+    var labels = labelsOf(el);
+    for (var i = 0; i < labels.length; i++) {
       if (labels[i] === hit || N.contains(labels[i], hit)) return true;
     }
     return false;
@@ -757,7 +871,7 @@
       interactive: evidence,
     };
     if (named[1]) item.nameSource = named[1];
-    var text = OPAQUE_TAGS[tag] === true || tag === "input" ? "" : squash(contentText(el));
+    var text = OPAQUE_TAGS[tag] === true || tag === "input" ? "" : squashedText(el);
     if (text) item.text = text;
     N.push(elements, item);
 
@@ -791,11 +905,14 @@
       if (SKIPPED_TAGS[tag] === true) continue;
 
       var role = roleOf(el);
-      var style = N.getComputedStyle(el);
-      var pointer = N.getPropertyValue(style, "cursor") === "pointer";
+      // Inside a listed element a pointer cursor is no evidence (it only counts for a
+      // low-confidence element that nothing interactive contains), so the style is read
+      // only for the elements that end up listed.
+      var style = insideInteractive ? null : N.getComputedStyle(el);
+      var pointer = !insideInteractive && N.getPropertyValue(style, "cursor") === "pointer";
       var evidence = evidenceOf(el, pointer && !parentPointer);
       var listed = evidence && !(evidence.confidence === "low" && insideInteractive);
-      if (listed) record(el, role, style, evidence, path, inShadowDom);
+      if (listed) record(el, role, style || N.getComputedStyle(el), evidence, path, inShadowDom);
 
       if (OPAQUE_TAGS[tag] === true) continue;
       var repeatCount = counts[keys[j]];
