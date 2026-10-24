@@ -4,7 +4,26 @@ version = "0.1.0"
 description = "TraceQA message and file types, generated from spec/."
 requires-python = ">=3.10"
 license = "Apache-2.0"
+readme = "README.md"
+keywords = ["traceqa", "protocol", "pydantic", "json-schema"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = ["pydantic>=2.7"]
+
+[project.urls]
+Homepage = "https://github.com/thearpankumar/TraceQA/tree/master/python/traceqa-protocol#readme"
+Repository = "https://github.com/thearpankumar/TraceQA"
+Issues = "https://github.com/thearpankumar/TraceQA/issues"
+Documentation = "https://github.com/thearpankumar/TraceQA/blob/master/docs/usage.md"
 
 [build-system]
 requires = ["hatchling"]
