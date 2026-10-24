@@ -5,6 +5,9 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+# The oldest compiler that builds the workspace with its locked dependencies (sha2 0.11, image and the
+# icu crates need 1.88). CI builds with exactly this version. Raise it deliberately: docs/releasing.md.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/thearpankumar/TraceQA"
 

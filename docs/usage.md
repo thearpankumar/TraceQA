@@ -42,6 +42,44 @@ Inside the repository, `uv run` puts both drivers on `PATH`:
 uv run cargo run -- extract https://example.com
 ```
 
+### Which programs TraceQA runs
+
+TraceQA starts programs on your machine: the drivers, and, for `traceqa
+install`, `uv`. Which program it starts is decided by the list above and by
+these inputs, all of which belong to whoever starts the process:
+
+| Input | What it decides |
+|---|---|
+| `--driver COMMAND` | The driver command line, used as given. Highest priority. |
+| `TRACEQA_DRIVERS` | Driver command lines separated by `;`, used when no `--driver` is given. |
+| `PATH` | Where `traceqa-driver-playwright`, `traceqa-driver-webdriver` and `uv` are looked for. |
+| `TRACEQA_HOME` | Moves `~/.traceqa`, where the installed drivers are looked for last. |
+| `TRACEQA_UV` | The `uv` that `traceqa install` runs, instead of the one on `PATH`. |
+
+Treat each of them as an input that can run code: whoever can set one in the
+environment of the `traceqa` process, or put a program earlier on `PATH`, picks
+the program that runs. TraceQA does not guard against that, because the process
+runs with the rights of the person who started it and could not tell a wanted
+change from an unwanted one. It follows that:
+
+- With `traceqa mcp`, these belong in the operator's server entry (the `env`
+  block or the command line in the AI tool's settings). The AI cannot set any of
+  them: no tool argument reaches the environment, a driver command or a path.
+- To pin the drivers, give absolute paths: `--driver /opt/traceqa/env/bin/traceqa-driver-playwright`
+  (or the same in `TRACEQA_DRIVERS`). A bare name is searched on `PATH`.
+- `traceqa install` puts the drivers in `~/.traceqa/env` and installs only what
+  the binary's own release pins (see below).
+
+The order is not changed to prefer `~/.traceqa/env` over `PATH`. Someone who
+develops TraceQA keeps a checkout's drivers on `PATH` (with `uv run`); an
+installed copy that came first would silently replace the code being worked on.
+
+Arguments are fixed by TraceQA and never taken from a page or from the AI. On
+Windows, starting a batch file (`.cmd`, `.bat`) with arguments was unsafe in Rust
+before 1.77.2 (CVE-2024-24576, "BatBadBut"), so Rust 1.77.2 or newer is required
+there. The oldest version this project declares (`rust-version`, 1.88) is newer,
+so a binary built from this source is not affected.
+
 ## `traceqa extract`
 
 ```

@@ -3,6 +3,7 @@ name = "traceqa-mcp"
 description = "The TraceQA MCP server: lets AI tools run the engine and read its results."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

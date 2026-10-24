@@ -108,6 +108,12 @@ all three archives and fix the workflow before the next release if anything fail
 - Raise `RUST_TOOLCHAIN` (top of `release.yml`) in a pull request when a new
   stable compiler is wanted. Run `rustc --version` locally with that version,
   and `cargo test --locked`, first.
+- `rust-version` in the root `Cargo.toml` is the oldest compiler the project builds
+  with, and the `msrv` job in `ci.yml` builds with exactly that version. Raise it
+  deliberately, in its own pull request, when a dependency or the code needs a
+  newer compiler, and never lower it without building with the lower version first
+  (`cargo +<version> check --workspace --locked`). The `msrv` job fails on its own
+  when something starts needing a newer one.
 - Tags must be on `master`. A tag on any other commit fails the first job.
 
 ## Code signing and drivers

@@ -3,6 +3,7 @@ name = "traceqa-recorder"
 description = "Writes the run folder and the live event stream."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
