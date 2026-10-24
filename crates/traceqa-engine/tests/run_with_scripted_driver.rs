@@ -1,6 +1,9 @@
 //! Runs the engine against a scripted driver, so the paths that are hard to
 //! reach with a real browser (failures, missing capabilities, cancelling) are covered.
 
+// Integration tests: a failed unwrap is the failure (clippy.toml covers only #[test] functions and test modules).
+#![allow(clippy::unwrap_used)]
+
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -240,6 +243,8 @@ impl Default for Case {
     }
 }
 
+// Callers build a `Case` with struct-update syntax at each call; by value reads best there.
+#[allow(clippy::needless_pass_by_value)]
 fn run_case(case: Case) -> Outcome {
     let out = std::env::temp_dir().join("traceqa-engine-tests");
     let request = RunStartParams {

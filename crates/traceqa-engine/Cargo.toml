@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 
 [features]
 # Scripted drivers (`Drivers::starting_with`) for tests of this crate and the ones that use it.
@@ -16,13 +17,16 @@ test-support = []
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-sha2 = "0.11.1"
+sha2.workspace = true
 traceqa-protocol.workspace = true
 traceqa-recorder.workspace = true
-unicode-normalization = "0.1.25"
-url = "2"
+unicode-normalization.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 # Itself, with the scripted-driver hooks, so the integration tests can use them.
 traceqa-engine = { workspace = true, features = ["test-support"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image.workspace = true
+
+[lints]
+workspace = true

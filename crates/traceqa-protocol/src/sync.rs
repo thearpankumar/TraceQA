@@ -21,11 +21,11 @@ pub trait LockExt<T> {
 
 impl<T> LockExt<T> for Mutex<T> {
     fn lock_ok(&self) -> MutexGuard<'_, T> {
-        self.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn into_inner_ok(self) -> T {
-        self.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -39,7 +39,7 @@ pub trait CondvarExt {
 impl CondvarExt for Condvar {
     fn wait_timeout_ok<'a, T>(&self, guard: MutexGuard<'a, T>, timeout: Duration) -> MutexGuard<'a, T> {
         self.wait_timeout(guard, timeout)
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .0
     }
 }

@@ -1,0 +1,2 @@
+# Tests may unwrap: a failing unwrap is the failure. Production code uses expect("reason") or handles the error.
+allow-unwrap-in-tests = true

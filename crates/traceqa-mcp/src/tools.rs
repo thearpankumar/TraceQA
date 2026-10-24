@@ -290,9 +290,9 @@ impl Call<'_> {
         let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
         let outcome = match name {
             "extract" => args(arguments).and_then(|a| self.extract(a)),
-            "list_runs" => args(arguments).and_then(|a| self.list_runs(a)),
-            "get_components" => args(arguments).and_then(|a| self.get_components(a)),
-            "get_crop" => args(arguments).and_then(|a| self.get_crop(a)),
+            "list_runs" => args(arguments).and_then(|a| self.list_runs(&a)),
+            "get_components" => args(arguments).and_then(|a| self.get_components(&a)),
+            "get_crop" => args(arguments).and_then(|a| self.get_crop(&a)),
             #[cfg(test)]
             "panic_for_test" => panic!("page text that must not reach the host"),
             other => {
@@ -500,7 +500,7 @@ fn safe_file_in(root: &Path, path: &Path) -> Option<PathBuf> {
 }
 
 impl Call<'_> {
-    fn list_runs(&self, args: ListRunsArgs) -> Result<Content, ToolError> {
+    fn list_runs(&self, args: &ListRunsArgs) -> Result<Content, ToolError> {
         let mut runs: Vec<RunManifest> = match fs::read_dir(&self.config.runs_dir) {
             Ok(entries) => entries
                 .filter_map(|entry| read_json(&entry.ok()?.path().join("run.json")))
@@ -531,7 +531,7 @@ impl Call<'_> {
         Ok(reply(json!({ "limit_applied": limit, "runs": runs }), Some(cut)))
     }
 
-    fn get_components(&self, args: ComponentsArgs) -> Result<Content, ToolError> {
+    fn get_components(&self, args: &ComponentsArgs) -> Result<Content, ToolError> {
         let (dir, file) = self.components_file(&args.run_id, args.target.as_deref())?;
         if let Some(id) = &args.component_id {
             let mut component = serde_json::to_value(find(&file, id)?).expect("plain data always serialises");
@@ -595,7 +595,7 @@ impl Call<'_> {
         ))
     }
 
-    fn get_crop(&self, args: CropArgs) -> Result<Content, ToolError> {
+    fn get_crop(&self, args: &CropArgs) -> Result<Content, ToolError> {
         let (dir, file) = self.components_file(&args.run_id, args.target.as_deref())?;
         let component = find(&file, &args.component_id)?;
         let Some(crop) = &component.crop else {

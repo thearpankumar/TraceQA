@@ -2,6 +2,9 @@
 //! result or error data parse as the types the client protocol names for its method.
 //! The clients replay these conversations, so they have to stay true to the spec.
 
+// Integration tests: a failed unwrap is the failure (clippy.toml covers only #[test] functions and test modules).
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;

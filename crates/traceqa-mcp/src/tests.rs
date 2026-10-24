@@ -1,3 +1,6 @@
+// The helpers take `json!` literals by value so that every call site stays short.
+#![allow(clippy::needless_pass_by_value)]
+
 use std::io::{BufRead, BufReader, PipeReader, PipeWriter, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, process};

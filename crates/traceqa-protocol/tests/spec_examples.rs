@@ -2,6 +2,9 @@
 //! and survive a round trip unchanged. The Python package runs the same check,
 //! so a schema change that the two languages read differently fails here.
 
+// Integration tests: a failed unwrap is the failure (clippy.toml covers only #[test] functions and test modules).
+#![allow(clippy::unwrap_used)]
+
 use std::fs;
 use std::path::Path;
 

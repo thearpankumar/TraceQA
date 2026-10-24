@@ -4,6 +4,10 @@
 //! namespace, so type names must be unique across files. The `x-traceqa`
 //! block of each file supplies the contract version and method names.
 
+// A build script that cannot read or generate its input must stop the build, and a panic is how
+// it does that. Nothing here runs in a shipped program.
+#![allow(clippy::unwrap_used)]
+
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
