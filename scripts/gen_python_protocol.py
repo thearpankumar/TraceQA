@@ -71,6 +71,7 @@ def render_models(definitions: dict) -> str:
                 "--use-union-operator",
                 "--use-schema-description",
                 "--use-subclass-enum",
+                "--skip-root-model",
                 "--field-constraints",
                 "--formatters", "ruff-format",
                 "--disable-timestamp",

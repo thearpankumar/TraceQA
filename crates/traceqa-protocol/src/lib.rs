@@ -7,12 +7,13 @@
 pub mod jsonrpc;
 
 /// Every type defined in `spec/*.schema.json`.
-#[allow(clippy::all)]
+#[allow(clippy::all, clippy::pedantic)]
 pub mod types {
     include!(concat!(env!("OUT_DIR"), "/spec_types.rs"));
 }
 
 /// Contract versions and method names.
+#[allow(clippy::pedantic)]
 pub mod contracts {
     include!(concat!(env!("OUT_DIR"), "/spec_meta.rs"));
 }
