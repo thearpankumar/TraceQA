@@ -4,10 +4,29 @@ version = "0.1.0"
 description = "TraceQA browser driver for real Safari and for any W3C WebDriver server or cloud grid."
 requires-python = ">=3.10"
 license = "Apache-2.0"
+readme = "README.md"
+keywords = ["traceqa", "testing", "webdriver", "safari", "browser", "driver"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = ["traceqa-protocol==0.1.0"]
 
 [project.scripts]
 traceqa-driver-webdriver = "traceqa_driver_webdriver.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/thearpankumar/TraceQA/tree/master/drivers/webdriver-py#readme"
+Repository = "https://github.com/thearpankumar/TraceQA"
+Issues = "https://github.com/thearpankumar/TraceQA/issues"
+Documentation = "https://github.com/thearpankumar/TraceQA/blob/master/docs/usage.md#drivers"
 
 [build-system]
 requires = ["hatchling"]
