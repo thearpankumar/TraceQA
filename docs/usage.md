@@ -514,7 +514,8 @@ Leaving a `with` block calls it.
 
 ## TypeScript SDK
 
-Node 18 or later. The package has no runtime dependencies.
+Node 22 or later. The package is ESM only and has no runtime dependencies. See
+[its README](../sdks/typescript/README.md#esm-only) for loading it from CommonJS.
 
 ```ts
 import { extract } from "traceqa";
