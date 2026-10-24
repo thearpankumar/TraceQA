@@ -63,7 +63,7 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
                     main = Some((collected.title, collected.scroll));
                 }
             }
-            Err(reason) if is_main => return Err(EngineError::new(format!("could not read the page: {reason}"))),
+            Err(reason) if is_main => return Err(EngineError::invalid(format!("could not read the page: {reason}"))),
             Err(reason) => {
                 let code = if frame.cross_origin {
                     "cross_origin_frame_skipped"
@@ -77,7 +77,7 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
             }
         }
     }
-    let (title, scroll) = main.ok_or_else(|| EngineError::new("the driver returned nothing for the main frame"))?;
+    let (title, scroll) = main.ok_or_else(|| EngineError::invalid("the driver returned nothing for the main frame"))?;
     Ok(Reading {
         elements,
         title,

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use traceqa_engine::driver::{Driver, DriverError, Drivers, Transport};
+use traceqa_engine::driver::{Driver, DriverError, Drivers, ErrorKind, Transport};
 use traceqa_engine::{Execution, Run, UrlPolicy};
 use traceqa_protocol::types::{
     BrowserTarget, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState,
@@ -87,16 +87,10 @@ impl Transport for Scripted {
                 .push(params["url"].as_str().unwrap().to_string());
         }
         if method == "page.goto" && take_one(&self.slow_loads) {
-            return Err(DriverError {
-                kind: "timeout".into(),
-                message: "the page did not load in time".into(),
-            });
+            return Err(DriverError::new(ErrorKind::Timeout, "the page did not load in time"));
         }
         if let Some((_, kind)) = self.fail.filter(|(failing, _)| *failing == method) {
-            return Err(DriverError {
-                kind: kind.to_string(),
-                message: self.fail_text.into(),
-            });
+            return Err(DriverError::new(ErrorKind::from(kind), self.fail_text));
         }
         Ok(match method {
             "driver.hello" => json!({
@@ -374,7 +368,7 @@ fn a_failed_page_load_fails_the_target_and_still_closes_the_session() {
 
 #[test]
 fn a_driver_that_stops_answering_is_not_asked_for_anything_more() {
-    let outcome = run(true, Some(("page.goto", "timeout")), false);
+    let outcome = run(true, Some(("page.goto", ErrorKind::Timeout.as_str())), false);
     assert_eq!(outcome.manifest.targets[0].status, RunStatus::Failed);
     // No session.close: the driver's state is unknown, so the engine leaves it and replaces it.
     assert_eq!(outcome.calls, ["driver.hello", "session.open", "page.goto"]);

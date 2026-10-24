@@ -15,6 +15,7 @@ use traceqa_engine::{driver_commands, serve, Execution, Run};
 use traceqa_protocol::types::{
     BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState, Viewport,
 };
+use traceqa_protocol::ParseError;
 
 #[derive(Parser)]
 #[command(
@@ -147,11 +148,11 @@ struct ExtractArgs {
     drivers: DriverArgs,
 }
 
-fn parse_viewport(text: &str) -> Result<Viewport, String> {
+fn parse_viewport(text: &str) -> Result<Viewport, ParseError> {
     Viewport::parse(text)
 }
 
-fn parse_browser(text: &str) -> Result<BrowserTarget, String> {
+fn parse_browser(text: &str) -> Result<BrowserTarget, ParseError> {
     BrowserTarget::parse(text)
 }
 

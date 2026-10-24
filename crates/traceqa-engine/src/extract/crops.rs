@@ -36,7 +36,7 @@ pub(super) fn screenshot(
                     "screenshot_failed",
                     format!(
                         "A screenshot could not be taken, so some crops are missing: {}",
-                        error.message
+                        error.message()
                     ),
                 )
             });

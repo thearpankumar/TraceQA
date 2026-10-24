@@ -594,7 +594,10 @@ fn config_with(state_dir: Option<PathBuf>) -> Config {
 #[test]
 fn storage_state_is_refused_without_a_state_dir() {
     use crate::tools::resolve_state;
-    let why = resolve_state(&config_with(None), "shop.state.json").err().unwrap();
+    let why = resolve_state(&config_with(None), "shop.state.json")
+        .err()
+        .unwrap()
+        .to_string();
     assert!(why.contains("--state-dir"), "{why}");
     assert!(!why.contains(std::env::temp_dir().to_str().unwrap()), "{why}");
 }
@@ -630,7 +633,8 @@ fn storage_state_rejects_separators_dotdot_absolute_drive_and_stream_names() {
     for name in names {
         let why = resolve_state(&config, name)
             .err()
-            .unwrap_or_else(|| panic!("{name:?} was accepted"));
+            .unwrap_or_else(|| panic!("{name:?} was accepted"))
+            .to_string();
         assert!(why.contains("no state file named"), "{name:?}: {why}");
         assert!(!why.contains(dir.to_str().unwrap()), "{name:?}: {why}");
     }
@@ -660,7 +664,8 @@ fn storage_state_rejects_a_symlink_inside_the_state_dir() {
     }
     let why = resolve_state(&config_with(Some(dir.clone())), "evil.json")
         .err()
-        .unwrap();
+        .unwrap()
+        .to_string();
     assert!(why.contains("no state file named"), "{why}");
     assert!(resolve_state(&config_with(Some(dir.clone())), "shop.state.json").is_ok());
     // Remove the link first, so deleting the folder cannot follow it.
@@ -677,11 +682,11 @@ fn storage_state_reads_a_named_file_and_never_echoes_its_contents_or_os_errors()
     let config = config_with(Some(dir.clone()));
     assert!(resolve_state(&config, "shop.state.json").is_ok());
 
-    let broken = resolve_state(&config, "bad.json").err().unwrap();
+    let broken = resolve_state(&config, "bad.json").err().unwrap().to_string();
     assert!(broken.contains("is not a storage state file"), "{broken}");
     assert!(!broken.contains("secret-token-123"), "{broken}");
 
-    let missing = resolve_state(&config, "nope.json").err().unwrap();
+    let missing = resolve_state(&config, "nope.json").err().unwrap().to_string();
     assert!(missing.contains("no state file named nope.json"), "{missing}");
     assert!(
         missing.contains("shop.state.json") && missing.contains("bad.json"),
@@ -968,7 +973,10 @@ fn extract_refuses_cdp_and_webdriver_targets_without_the_flag() {
     use crate::tools::extract_request;
     let config = config_with(None);
     for arguments in remote_targets() {
-        let why = extract_request(&config, arguments.clone()).err().unwrap_or_default();
+        let why = extract_request(&config, arguments.clone())
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
         assert!(why.contains("--allow-remote-browsers"), "{arguments}: {why}");
     }
     // Plain names are fine.
@@ -1067,7 +1075,7 @@ fn an_over_long_line_gets_an_error_and_the_server_keeps_serving() {
 /// A driver start that waits until `release` is dropped, then fails. While it waits, the
 /// extraction that asked for it is running.
 fn blocked_until_dropped() -> (std::sync::mpsc::Sender<()>, Arc<dyn Fn() -> Drivers + Send + Sync>) {
-    use traceqa_engine::driver::{DriverError, Starter};
+    use traceqa_engine::driver::{DriverError, ErrorKind, Starter};
     let (release, wait) = std::sync::mpsc::channel::<()>();
     let wait = Arc::new(Mutex::new(wait));
     let make: Arc<dyn Fn() -> Drivers + Send + Sync> = Arc::new(move || {
@@ -1075,10 +1083,7 @@ fn blocked_until_dropped() -> (std::sync::mpsc::Sender<()>, Arc<dyn Fn() -> Driv
         let start: Starter = Box::new(move || {
             // Returns an error once the sender is gone.
             let _ = wait.lock().unwrap().recv();
-            Err(DriverError {
-                kind: "unsupported".into(),
-                message: "scripted: no browser".into(),
-            })
+            Err(DriverError::new(ErrorKind::Unsupported, "scripted: no browser"))
         });
         Drivers::starting_with(vec![start])
     });
@@ -1142,4 +1147,32 @@ fn a_panicking_call_frees_its_slot() {
     }));
     assert!(outcome.is_err());
     assert!(slots.take(true, 1, &running, &Id::Number(4)).is_ok());
+}
+
+#[test]
+fn tool_errors_read_as_the_strings_they_replaced() {
+    use crate::tools::ToolError;
+    use traceqa_protocol::types::Viewport;
+    assert_eq!(
+        ToolError::NoRun("r_1".into()).to_string(),
+        "no run r_1. list_runs shows the runs."
+    );
+    assert_eq!(
+        ToolError::NoComponent("c_9".into()).to_string(),
+        "no component c_9 here. get_components lists them."
+    );
+    assert_eq!(
+        ToolError::NotPlainName {
+            what: "run_id".into(),
+            name: "../x".into()
+        }
+        .to_string(),
+        "run_id must be a plain name, got \"../x\""
+    );
+    let bad: ToolError = Viewport::parse("big").unwrap_err().into();
+    assert_eq!(bad.to_string(), "expected WIDTHxHEIGHT such as 1280x800, got \"big\"");
+    let arguments = serde_json::from_str::<serde_json::Value>("[").unwrap_err();
+    assert!(ToolError::Arguments(arguments)
+        .to_string()
+        .starts_with("invalid arguments: "));
 }

@@ -802,6 +802,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror",
  "traceqa-protocol",
  "traceqa-recorder",
  "unicode-normalization",
@@ -814,6 +815,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror",
  "traceqa-engine",
  "traceqa-protocol",
 ]
@@ -827,6 +829,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 3.0.9",
+ "thiserror",
  "typify",
 ]
 
