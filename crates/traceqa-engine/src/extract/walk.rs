@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
 
@@ -58,9 +59,14 @@ const LIST_CONTROLS: &str = "(function () {
   return keys;
 })";
 
-fn list_controls(driver: &mut Driver, session: &SessionOpenResult, clock: &mut Clock) -> Option<Vec<String>> {
+fn list_controls(
+    driver: &mut Driver,
+    session: &SessionOpenResult,
+    cancel: &AtomicBool,
+    clock: &mut Clock,
+) -> Option<Vec<String>> {
     let evaluated = timed(&mut clock.read, || {
-        driver.eval(&PageEvalParams {
+        driver.until(cancel).eval(&PageEvalParams {
             session_id: session.session_id.clone(),
             script: LIST_CONTROLS.to_string(),
             arg: None,
@@ -99,7 +105,7 @@ fn more_at_end(
     check_cancelled(job)?;
     let scrolled = timed(&mut clock.scroll, || {
         thread::sleep(PATIENCE_AT_END);
-        driver.scroll(&PageScrollParams {
+        driver.until(job.cancel).scroll(&PageScrollParams {
             session_id: session.session_id.clone(),
             to: Some(ScrollTo::Bottom),
             by_y: None,
@@ -144,7 +150,14 @@ pub(super) fn walk_with_pictures(
         let scroll = &reading.scroll;
         let image = screens_dir.join(format!("{steps}.png"));
         let captured = timed(&mut clock.screenshot, || {
-            screenshot(driver, &session.session_id, &image, false, screenshot_warning)
+            screenshot(
+                driver,
+                job.cancel,
+                &session.session_id,
+                &image,
+                false,
+                screenshot_warning,
+            )
         })?;
         if captured {
             let shown = reading
@@ -186,7 +199,7 @@ pub(super) fn walk_with_pictures(
         // A little less than a full screen, so nothing falls into the gap between two screens.
         let before = scroll.y;
         let scrolled = timed(&mut clock.scroll, || {
-            driver.scroll(&PageScrollParams {
+            driver.until(job.cancel).scroll(&PageScrollParams {
                 session_id: session.session_id.clone(),
                 to: None,
                 by_y: Some(scroll.viewport_height * 0.9),
@@ -224,14 +237,14 @@ pub(super) fn walk_quickly(
         reached_end: None,
         removals: Removals::default(),
     };
-    if let Some(keys) = list_controls(driver, session, clock) {
+    if let Some(keys) = list_controls(driver, session, job.cancel, clock) {
         walk.removals.saw(keys);
     }
     let mut y = 0.0;
     while walk.steps < max_steps {
         check_cancelled(job)?;
         let scrolled = timed(&mut clock.scroll, || {
-            driver.scroll(&PageScrollParams {
+            driver.until(job.cancel).scroll(&PageScrollParams {
                 session_id: session.session_id.clone(),
                 to: None,
                 by_y: Some(job.viewport.height as f64),
@@ -239,7 +252,7 @@ pub(super) fn walk_quickly(
             })
         })?;
         walk.steps += 1;
-        if let Some(keys) = list_controls(driver, session, clock) {
+        if let Some(keys) = list_controls(driver, session, job.cancel, clock) {
             walk.removals.saw(keys);
         }
         if scrolled.at_end || scrolled.y <= y {

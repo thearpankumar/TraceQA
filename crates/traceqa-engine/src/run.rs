@@ -40,13 +40,24 @@ pub enum EngineError {
     /// A driver failed, or could not be reached. A `timeout` kind means the browser or its
     /// driver did not answer in time.
     #[error(transparent)]
-    Driver(#[from] DriverError),
+    Driver(DriverError),
     /// A file or folder of the run could not be read or written.
     #[error(transparent)]
     Io(#[from] std::io::Error),
     /// The request or the page was not acceptable; the text says why.
     #[error("{0}")]
     Invalid(String),
+}
+
+impl From<DriverError> for EngineError {
+    /// A driver call that was given up on because of a cancel is a cancelled run, not a failure.
+    fn from(error: DriverError) -> Self {
+        if error.is_cancelled() {
+            Self::Cancelled
+        } else {
+            Self::Driver(error)
+        }
+    }
 }
 
 impl EngineError {
@@ -559,6 +570,9 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
     }
 }
 
+/// How often a target that waits for a browser looks at the cancel flag.
+const CANCEL_SLICE: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// Browsers of which only one session may exist on the machine. A target that needs one
 /// waits here until the target that has it is done.
 #[derive(Default)]
@@ -568,17 +582,26 @@ pub(crate) struct Exclusive {
 }
 
 impl Exclusive {
-    /// Waits until `browser` is free and takes it until the returned value is dropped.
-    pub(crate) fn hold<'a>(&'a self, browser: &str) -> Held<'a> {
+    /// Waits until `browser` is free and takes it until the returned value is dropped. Looks at
+    /// `cancel` every [`CANCEL_SLICE`] while it waits and gives up with `None` once it is set.
+    pub(crate) fn hold<'a>(&'a self, browser: &str, cancel: &AtomicBool) -> Option<Held<'a>> {
         let mut busy = self.busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         while busy.contains(browser) {
-            busy = self.freed.wait(busy).unwrap_or_else(|poisoned| poisoned.into_inner());
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            // Woken early by a release, or after a slice; either way the predicate is checked again.
+            busy = self
+                .freed
+                .wait_timeout(busy, CANCEL_SLICE)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
         }
         busy.insert(browser.to_string());
-        Held {
+        Some(Held {
             owner: self,
             browser: browser.to_string(),
-        }
+        })
     }
 }
 
@@ -726,12 +749,13 @@ mod tests {
     #[test]
     fn an_exclusive_browser_is_held_by_one_target_at_a_time() {
         let exclusive = Exclusive::default();
+        let never = AtomicBool::new(false);
         let inside = AtomicUsize::new(0);
         let most_at_once = AtomicUsize::new(0);
         thread::scope(|scope| {
             for _ in 0..6 {
                 scope.spawn(|| {
-                    let _held = exclusive.hold("safari");
+                    let _held = exclusive.hold("safari", &never).unwrap();
                     most_at_once.fetch_max(inside.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
                     thread::sleep(std::time::Duration::from_millis(5));
                     inside.fetch_sub(1, Ordering::SeqCst);
@@ -740,8 +764,29 @@ mod tests {
         });
         assert_eq!(most_at_once.load(Ordering::SeqCst), 1);
         // A different browser is not held up by it.
-        let _safari = exclusive.hold("safari");
-        let _other = exclusive.hold("another");
+        let _safari = exclusive.hold("safari", &never).unwrap();
+        let _other = exclusive.hold("another", &never).unwrap();
+    }
+
+    #[test]
+    fn a_waiter_for_an_exclusive_browser_notices_cancel_within_a_slice() {
+        let exclusive = Exclusive::default();
+        let never = AtomicBool::new(false);
+        let cancel = AtomicBool::new(false);
+        let _held = exclusive.hold("safari", &never).unwrap();
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(std::time::Duration::from_millis(100));
+                cancel.store(true, Ordering::SeqCst);
+            });
+            let started = Instant::now();
+            assert!(exclusive.hold("safari", &cancel).is_none());
+            let waited = started.elapsed();
+            assert!(waited < std::time::Duration::from_millis(900), "waited {waited:?}");
+        });
+        // A cancelled waiter took nothing: once the holder is done the browser is free again.
+        drop(_held);
+        assert!(exclusive.hold("safari", &never).is_some());
     }
 
     #[test]

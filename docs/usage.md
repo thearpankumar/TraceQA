@@ -125,7 +125,9 @@ result to standard output.
 | `2` | The request was invalid, for example a malformed URL or viewport. Nothing was run. |
 | `130` | The run was stopped with Ctrl-C. |
 
-Ctrl-C stops the run at its next step, closes the browsers and writes a run
+Ctrl-C stops the run within about a second, even while a page is loading or a
+target waits for a browser that only one target may use at a time. It closes the
+browsers and writes a run
 folder that says `cancelled`. Targets that had already finished keep their
 results. A second Ctrl-C quits at once.
 

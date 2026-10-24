@@ -86,10 +86,16 @@ pub(crate) fn extract_target(
     let opening = Instant::now();
     let driver = drivers.for_browser(&job.target.browser)?;
     // Held until this function returns, so no other target opens the same browser meanwhile.
-    let _only_session = driver
-        .is_exclusive(&job.target.browser)
-        .then(|| job.exclusive.hold(&job.target.browser));
-    let session = driver.open_session(&SessionOpenParams {
+    let _only_session = if driver.is_exclusive(&job.target.browser) {
+        Some(
+            job.exclusive
+                .hold(&job.target.browser, job.cancel)
+                .ok_or(EngineError::Cancelled)?,
+        )
+    } else {
+        None
+    };
+    let session = driver.until(job.cancel).open_session(&SessionOpenParams {
         target: job.target.clone(),
         viewport: job.viewport.clone(),
         locale: None,
@@ -276,7 +282,7 @@ fn open_address(
     job: &Job,
     progress: Progress,
 ) -> Result<Landed, EngineError> {
-    let page = driver.goto(&PageGotoParams {
+    let page = driver.until(job.cancel).goto(&PageGotoParams {
         session_id: session.session_id.clone(),
         url: job.url.to_string(),
         wait_until: Some(WaitUntil::Settled),
@@ -388,7 +394,7 @@ fn return_to_top(
         ScrollWait::Height
     };
     timed(&mut clock.scroll, || {
-        driver.scroll(&PageScrollParams {
+        driver.until(job.cancel).scroll(&PageScrollParams {
             session_id: session.session_id.clone(),
             to: Some(ScrollTo::Top),
             by_y: None,
@@ -425,7 +431,14 @@ fn save_pictures(
     let page_png = job.dir.join("page.png");
     let whole_page = session.capabilities.full_page_screenshot
         && timed(&mut clock.screenshot, || {
-            screenshot(driver, &session.session_id, &page_png, true, screenshot_warning)
+            screenshot(
+                driver,
+                job.cancel,
+                &session.session_id,
+                &page_png,
+                true,
+                screenshot_warning,
+            )
         })?;
     if !whole_page {
         if let Some(first) = screens.first() {

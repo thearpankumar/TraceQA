@@ -22,7 +22,7 @@ pub(super) struct Reading {
 
 /// Runs the collector in the main page and every frame the driver can reach.
 pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job: &Job) -> Result<Reading, EngineError> {
-    let evaluated = driver.eval(&PageEvalParams {
+    let evaluated = driver.until(job.cancel).eval(&PageEvalParams {
         session_id: session.session_id.clone(),
         script: COLLECTOR.to_string(),
         arg: Some(json!({ "includeHidden": job.include_hidden })),
