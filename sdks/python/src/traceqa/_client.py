@@ -16,6 +16,7 @@ from traceqa_protocol import contracts, models, to_wire
 
 Browser = str | models.BrowserTarget
 EventHandler = Callable[[models.Event], None]
+LogHandler = Callable[[str], None]
 
 BINARY_ENV = "TRACEQA_BIN"
 EXCERPT_CHARS = 80
@@ -129,21 +130,47 @@ def _find_binary(binary: str | os.PathLike[str] | None) -> str:
     return str(candidate)
 
 
+def _pump_log(stream: IO[str], on_log: LogHandler | None) -> None:
+    """Read the engine's stderr to its end, calling `on_log` for each line when there is one."""
+    with contextlib.suppress(OSError, ValueError):
+        for line in stream:
+            if on_log is None:
+                continue
+            try:
+                on_log(line.rstrip("\r\n"))
+            except Exception:  # a broken handler must not stop the reading: the pipe has to be drained
+                on_log = None
+
+
 class Engine:
     """A running engine process. Use it as a context manager to make several calls on one process.
+
+    Nothing is printed to the caller's standard error. Pass `on_log` to receive, line by line,
+    what the engine and its drivers log (for example `[driver info] opened chromium 128.0`).
 
     One Engine runs one extraction at a time, on purpose: a second `extract` while another is
     active raises `TraceQAError`. Use one Engine per concurrent run. `cancel()` may be called
     from any thread.
     """
 
-    def __init__(self, binary: str | os.PathLike[str] | None = None, drivers: Sequence[str] = ()) -> None:
+    def __init__(
+        self,
+        binary: str | os.PathLike[str] | None = None,
+        drivers: Sequence[str] = (),
+        on_log: LogHandler | None = None,
+    ) -> None:
         command = [_find_binary(binary), "serve"]
         for driver in drivers:
             command += ["--driver", driver]
         try:
             self._process = subprocess.Popen(
-                command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8"
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except OSError as error:
             raise EngineStartError(f"could not start {command[0]}: {error}") from error
@@ -153,6 +180,16 @@ class Engine:
             raise EngineStartError(f"could not open the pipes of {command[0]}")
         self._stdin: IO[str] = self._process.stdin
         self._stdout: IO[str] = self._process.stdout
+        # A library prints nothing by default. The engine's stderr (its own notes and the drivers'
+        # logs, already redacted by the engine) is read here so the pipe never fills, and goes to
+        # the caller only when it asked for it with on_log.
+        self._log_thread: threading.Thread | None = None
+        stderr: IO[str] | None = getattr(self._process, "stderr", None)
+        if stderr is not None:
+            self._log_thread = threading.Thread(
+                target=_pump_log, args=(stderr, on_log), name="traceqa-log", daemon=True
+            )
+            self._log_thread.start()
         self._next_id = 0
         self._lock = threading.Lock()  # guards _next_id, the writes to stdin and the run state below
         self._extracting = False
@@ -223,6 +260,8 @@ class Engine:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        if self._log_thread is not None:
+            self._log_thread.join(5)
         if drain is not None:
             drain.join(5)
             if not drain.is_alive():
@@ -388,8 +427,17 @@ class Engine:
 
 
 def extract(
-    url: str, *, binary: str | os.PathLike[str] | None = None, drivers: Sequence[str] = (), **options: Any
+    url: str,
+    *,
+    binary: str | os.PathLike[str] | None = None,
+    drivers: Sequence[str] = (),
+    on_log: LogHandler | None = None,
+    **options: Any,
 ) -> ExtractResult:
-    """Start an engine, run one extraction and stop the engine. See `Engine.extract` for the options."""
-    with Engine(binary=binary, drivers=drivers) as engine:
+    """Start an engine, run one extraction and stop the engine. See `Engine.extract` for the options.
+
+    Nothing is printed. `on_log` is called with each line the engine writes to its standard error,
+    such as `[driver info] opened chromium 128.0`.
+    """
+    with Engine(binary=binary, drivers=drivers, on_log=on_log) as engine:
         return engine.extract(url, **options)

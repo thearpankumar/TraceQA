@@ -113,6 +113,9 @@ default drivers do not open (see below) exits with code 2 and leaves no run
 folder. When you configure your own driver (`--driver` or `TRACEQA_DRIVERS`),
 browser names are not checked up front, because that driver may open others..
 
+If the run folder cannot be created, the message starts `--out PATH:` and the
+exit code is 2.
+
 Naming a browser twice (`--browser chromium,chromium`) runs it twice. The
 second target's folder ends in `-2` (`chromium-1280x800-2`).
 
@@ -510,6 +513,11 @@ with traceqa.Engine() as engine:
 `traceqa.extract` and `traceqa.Engine` also accept `binary`, the path of the
 engine, and `drivers`, a list of driver commands. Without `binary`, the SDK uses
 the `TRACEQA_BIN` environment variable and then `traceqa` on `PATH`.
+
+The SDK prints nothing by default, as a library should. The engine and its drivers
+log to standard error (for example `[driver info] opened chromium 128.0`); the SDK
+reads that and drops it. Pass `on_log=` (to `traceqa.extract` or `traceqa.Engine`)
+to receive each line as a string, already redacted by the engine.
 
 ### Result
 
