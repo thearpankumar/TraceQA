@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use traceqa_protocol::sync::LockExt;
 use traceqa_protocol::types::{Event, Timings};
 use traceqa_recorder::RunWriter;
 
@@ -23,7 +24,7 @@ pub(crate) struct Progress<'a, 'b> {
 
 impl Progress<'_, '_> {
     pub fn emit(&self, kind: &str, target: Option<&str>, message: String, data: Value) {
-        let mut guard = self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = self.sink.lock_ok();
         let sink = &mut *guard;
         match sink.writer.event(kind, target, message, data) {
             Ok(event) => (sink.listener)(&event),
@@ -33,7 +34,7 @@ impl Progress<'_, '_> {
 
     /// Uses the run folder's writer for something other than an event.
     pub fn with_writer<T>(&self, work: impl FnOnce(&RunWriter) -> T) -> T {
-        work(&self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).writer)
+        work(&self.sink.lock_ok().writer)
     }
 }
 

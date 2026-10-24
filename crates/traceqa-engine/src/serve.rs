@@ -8,13 +8,13 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use serde::Serialize;
 use serde_json::Value;
 use traceqa_protocol::contracts::client_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
-use traceqa_protocol::jsonrpc::{self, code, Id, Line, Message, RpcError, MAX_REQUEST_LINE};
+use traceqa_protocol::jsonrpc::{code, serve_lines, Message, Output, RpcError};
 use traceqa_protocol::supervise::guard;
 use traceqa_protocol::types::{
     EngineHelloParams, EngineHelloResult, Event, RpcErrorData, RunCancelParams, RunDoneParams, RunEventParams,
@@ -23,25 +23,6 @@ use traceqa_protocol::types::{
 
 use crate::driver::{DriverCommand, Drivers, ErrorKind};
 use crate::run::{failed_after_panic, Execution, Run, FEATURES};
-
-type Output = Arc<Mutex<Box<dyn Write + Send>>>;
-
-fn send(output: &Output, message: &Message) {
-    let mut output = output.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    // A client that has gone away cannot be told anything, so a failed write is dropped.
-    let _ = writeln!(output, "{}", jsonrpc::encode(message)).and_then(|()| output.flush());
-}
-
-fn notify(output: &Output, method: &str, params: &impl Serialize) {
-    let params = serde_json::to_value(params).expect("spec types always serialise");
-    send(
-        output,
-        &Message::Notification {
-            method: method.to_string(),
-            params,
-        },
-    );
-}
 
 fn failure(rpc_code: i64, kind: ErrorKind, message: impl Into<String>) -> RpcError {
     failure_with(rpc_code, kind, false, message)
@@ -125,99 +106,64 @@ pub fn serve_with(
 }
 
 fn serve_inner(
-    mut input: impl BufRead,
+    input: impl BufRead,
     output: Box<dyn Write + Send>,
     make_drivers: &MakeDrivers,
     options: &ServeOptions,
 ) -> io::Result<()> {
-    let output: Output = Arc::new(Mutex::new(output));
+    let output = Output::new(output);
     let mut runs: HashMap<String, ActiveRun> = HashMap::new();
     let active = Arc::new(AtomicUsize::new(0));
     let max_runs = options.max_runs.max(1);
 
-    let mut failure_reading = None;
-    let mut buf = Vec::new();
-    loop {
-        // Lines are read with a limit: a client that never sends a newline cannot use all the memory.
-        match jsonrpc::read_line_bounded(&mut input, MAX_REQUEST_LINE, &mut buf) {
-            Ok(Line::Eof) => break,
-            Ok(Line::Complete) => {}
-            Ok(Line::TooLong) => {
-                let message = format!(
-                    "request larger than {} MiB was skipped",
-                    MAX_REQUEST_LINE / (1024 * 1024)
-                );
-                let result = Err(failure(code::INVALID_REQUEST, ErrorKind::InvalidRequest, message));
-                send(&output, &Message::Response { id: Id::Null, result });
-                continue;
-            }
-            Err(error) => {
-                failure_reading = Some(error);
-                break;
-            }
-        }
-        // A line that is not UTF-8 is a bad request, not a reason to stop serving.
-        let line = match std::str::from_utf8(&buf) {
-            Ok(line) => line,
-            Err(error) => {
-                refuse_unreadable(&output, format!("the request is not valid UTF-8: {error}"));
-                continue;
-            }
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let (id, method, params) = match jsonrpc::decode(line) {
-            Ok(Message::Request { id, method, params }) => (id, method, params),
-            Ok(_) => continue,
-            Err(error) => {
-                refuse_unreadable(&output, error.to_string());
-                continue;
-            }
-        };
+    let reading = serve_lines(
+        input,
+        &output,
+        |rpc_code, message| failure(rpc_code, ErrorKind::InvalidRequest, message),
+        |message| {
+            // We never receive anything but requests that need an answer.
+            let Message::Request { id, method, params } = message else {
+                return;
+            };
+            // Forget runs that have finished, so an engine that serves for a long time does not grow.
+            runs.retain(|_, run| !run.thread.is_finished());
 
-        // Forget runs that have finished, so an engine that serves for a long time does not grow.
-        runs.retain(|_, run| !run.thread.is_finished());
-
-        let result = match method.as_str() {
-            method::ENGINE_HELLO => parse(params).and_then(hello),
-            method::RUN_START => parse(params)
-                .and_then(|request| start_run(request, make_drivers, &output, &mut runs, &active, max_runs)),
-            method::RUN_CANCEL => parse(params).and_then(|request: RunCancelParams| match runs.get(&request.run_id) {
-                Some(run) => {
-                    run.cancel.store(true, Ordering::Relaxed);
-                    answer(serde_json::json!({}))
+            let result = match method.as_str() {
+                method::ENGINE_HELLO => parse(params).and_then(hello),
+                method::RUN_START => parse(params)
+                    .and_then(|request| start_run(request, make_drivers, &output, &mut runs, &active, max_runs)),
+                method::RUN_CANCEL => {
+                    parse(params).and_then(|request: RunCancelParams| match runs.get(&request.run_id) {
+                        Some(run) => {
+                            run.cancel.store(true, Ordering::Relaxed);
+                            answer(serde_json::json!({}))
+                        }
+                        None => Err(failure(
+                            code::INVALID_PARAMS,
+                            ErrorKind::InvalidParams,
+                            format!("no running run {}", request.run_id),
+                        )),
+                    })
                 }
-                None => Err(failure(
-                    code::INVALID_PARAMS,
-                    ErrorKind::InvalidParams,
-                    format!("no running run {}", request.run_id),
+                other => Err(failure(
+                    code::METHOD_NOT_FOUND,
+                    ErrorKind::Unsupported,
+                    format!("unknown method {other}"),
                 )),
-            }),
-            other => Err(failure(
-                code::METHOD_NOT_FOUND,
-                ErrorKind::Unsupported,
-                format!("unknown method {other}"),
-            )),
-        };
-        send(&output, &Message::Response { id, result });
-        for run in runs.values_mut() {
-            run.go.take();
-        }
-    }
+            };
+            output.send(&Message::Response { id, result });
+            for run in runs.values_mut() {
+                run.go.take();
+            }
+        },
+    );
 
     // Runs are always allowed to finish, so no run folder is left half written.
     for run in runs.into_values() {
         drop(run.go);
         let _ = run.thread.join();
     }
-    failure_reading.map_or(Ok(()), Err)
-}
-
-/// Answers a line that could not be understood. Its id is unknown, so the reply carries none.
-fn refuse_unreadable(output: &Output, reason: String) {
-    let result = Err(failure(code::PARSE_ERROR, ErrorKind::InvalidRequest, reason));
-    send(output, &Message::Response { id: Id::Null, result });
+    reading
 }
 
 fn hello(hello: EngineHelloParams) -> Result<Value, RpcError> {
@@ -274,7 +220,7 @@ fn start_run(
         let (run_id, cancel, output, make_drivers) = (
             run_id.clone(),
             Arc::clone(&cancel),
-            Arc::clone(output),
+            output.clone(),
             Arc::clone(make_drivers),
         );
         move || {
@@ -285,7 +231,7 @@ fn start_run(
                     run_id: run_id.clone(),
                     event: event.clone(),
                 };
-                notify(&output, notification::RUN_EVENT, &params);
+                output.notify(notification::RUN_EVENT, &params);
             };
             let execution = Execution {
                 drivers: &|| make_drivers(),
@@ -303,7 +249,7 @@ fn start_run(
                 status: manifest.status,
                 manifest,
             };
-            notify(&output, notification::RUN_DONE, &done);
+            output.notify(notification::RUN_DONE, &done);
         }
     });
     runs.insert(
@@ -320,6 +266,7 @@ fn start_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     /// Collects what the engine writes, so a test can read it after `serve` returns.
     #[derive(Clone, Default)]
