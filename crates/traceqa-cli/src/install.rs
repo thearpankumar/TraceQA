@@ -5,6 +5,7 @@
 //! TraceQA's own, under `~/.traceqa` (see `traceqa_engine::home`), so they never touch the
 //! user's other Python projects. The engine finds them there by itself.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -36,21 +37,64 @@ pub struct InstallArgs {
     #[arg(long, value_name = "FOLDER")]
     from: Option<PathBuf>,
     /// Branch, tag or commit to install the drivers from, when installing from GitHub. The
-    /// default is this binary's own release, so the binary and its drivers always match.
-    #[arg(long = "ref", value_name = "REF", default_value = RELEASE_TAG)]
-    git_ref: String,
+    /// default is the commit this binary was released from, so the binary and its drivers
+    /// match. Only a full commit SHA is pinned: a branch or tag can move.
+    #[arg(long = "ref", value_name = "REF")]
+    git_ref: Option<String>,
     /// Also install the system libraries the browsers need. Linux only; may ask for sudo.
     #[arg(long)]
     with_deps: bool,
+    /// Print what would be run and exit. Nothing is installed or written.
+    #[arg(long)]
+    dry_run: bool,
 }
 
-/// How to get uv, the one thing `install` cannot do without.
-fn uv_instructions() -> &'static str {
+/// The commit this binary was built from, 40 hex digits, or empty when it was not built from a
+/// release commit (see build.rs). A tag can be moved; a commit cannot.
+const COMMIT: &str = env!("TRACEQA_COMMIT");
+
+/// The third-party packages the drivers need, pinned with hashes from uv.lock. Made by
+/// scripts/gen_driver_requirements.py.
+const DRIVER_REQUIREMENTS: &str = include_str!("../driver-requirements.txt");
+
+const UV_DOCS: &str = "https://docs.astral.sh/uv/getting-started/installation/";
+
+/// How to get uv, the one thing `install` cannot do without: a package manager, never a
+/// script piped into a shell.
+fn uv_install_command() -> &'static str {
     if cfg!(windows) {
-        "powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\""
+        "winget install --id=astral-sh.uv -e"
     } else {
-        "curl -LsSf https://astral.sh/uv/install.sh | sh"
+        "brew install uv    (or: pipx install uv)"
     }
+}
+
+fn uv_instructions() -> String {
+    format!(
+        "{}\n\n    Other ways, and a versioned installer with its published checksum: {UV_DOCS}",
+        uv_install_command()
+    )
+}
+
+fn is_full_commit(text: &str) -> bool {
+    text.len() == 40 && text.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The git ref to install the drivers from, and a message to show about it. What the person
+/// asked for wins; otherwise the commit this binary was built from; otherwise its release tag.
+fn resolve_ref(commit: &str, tag: &str, requested: Option<&str>) -> (String, Option<String>) {
+    if let Some(requested) = requested {
+        let note = (!is_full_commit(requested)).then(|| {
+            format!("Installing from {requested}, which is not pinned to a commit. Use a full commit SHA to pin.")
+        });
+        return (requested.to_string(), note);
+    }
+    if is_full_commit(commit) {
+        let note = format!("Installing the drivers from this binary's release commit {commit}, so they are pinned.");
+        return (commit.to_string(), Some(note));
+    }
+    let note = format!("This binary was not built from a release commit; using tag {tag}, and tags can be moved.");
+    (tag.to_string(), Some(note))
 }
 
 fn find_uv() -> Option<PathBuf> {
@@ -71,12 +115,51 @@ fn package_specs(from: Option<&Path>, git_ref: &str) -> Vec<String> {
         .collect()
 }
 
+/// The two `uv` steps that install the drivers from GitHub, as (what, arguments).
+///
+/// First every third-party package, from the hashed requirements and nothing else. Then
+/// TraceQA's own three packages from the release ref, without dependencies. They are two steps
+/// because uv does not accept a git URL in hash-checking mode (it has no hash to check).
+fn release_steps(python: &Path, requirements: &Path, git_ref: &str) -> Vec<(&'static str, Vec<String>)> {
+    let python = python.display().to_string();
+    let mut dependencies = words(&[
+        "pip",
+        "install",
+        "--python",
+        &python,
+        "--require-hashes",
+        "--no-deps",
+        "-r",
+    ]);
+    dependencies.push(requirements.display().to_string());
+
+    let mut drivers = words(&["pip", "install", "--python", &python, "--no-deps"]);
+    // Installing again brings the drivers up to date, even when their version has not changed.
+    for (name, _) in PACKAGES {
+        drivers.extend(words(&["--reinstall-package", name]));
+    }
+    drivers.extend(package_specs(None, git_ref));
+    vec![
+        (
+            "Installing the drivers' dependencies, checked against hashes",
+            dependencies,
+        ),
+        ("Installing the drivers", drivers),
+    ]
+}
+
 fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| (*word).to_string()).collect()
 }
 
-/// Runs one step, showing it first. Its output goes straight to the user.
-fn step(what: &str, program: &Path, args: &[String]) -> Result<(), String> {
+/// Runs one step, showing it first. Its output goes straight to the user. In a dry run it is
+/// only shown, on standard output.
+fn step(dry_run: bool, what: &str, program: &Path, args: &[String]) -> Result<(), String> {
+    if dry_run {
+        println!("\n{what}");
+        println!("  > {} {}", program.display(), args.join(" "));
+        return Ok(());
+    }
     eprintln!("\n{what}");
     eprintln!("  > {} {}", program.display(), args.join(" "));
     let status = Command::new(program)
@@ -120,20 +203,37 @@ fn try_install(args: InstallArgs) -> Result<(), String> {
             return Err(format!("{} is not a TraceQA checkout", from.display()));
         }
     }
+    let dry_run = args.dry_run;
     let home = home::dir().ok_or_else(|| format!("no home folder found. Set {}.", home::HOME_ENV))?;
-    let uv = find_uv().ok_or_else(|| {
-        format!(
-            "uv was not found. It installs the drivers. Install it with:\n\n    {}\n\nthen run traceqa install again.",
-            uv_instructions()
-        )
-    })?;
+    // A dry run only prints, so it does not need uv to be there.
+    let uv = match find_uv() {
+        Some(uv) => uv,
+        None if dry_run => PathBuf::from("uv"),
+        None => {
+            return Err(format!(
+                "uv was not found. It installs the drivers. Install it with:\n\n    {}\n\nthen run traceqa install again.",
+                uv_instructions()
+            ));
+        }
+    };
     let env = home::env_dir(&home);
     let python = home::bin_dir(&env).join(home::program("python"));
+    let (git_ref, note) = resolve_ref(COMMIT, RELEASE_TAG, args.git_ref.as_deref());
+    if dry_run {
+        println!("Dry run: nothing is installed or written.");
+    }
     eprintln!("Installing TraceQA's drivers into {}", env.display());
+    if args.from.is_none() {
+        if let Some(note) = note {
+            eprintln!("{note}");
+        }
+    } else if args.git_ref.is_some() {
+        eprintln!("--ref is ignored when installing from a checkout with --from.");
+    }
 
     if !python.is_file() {
         let venv = words(&["venv", &env.display().to_string(), "--python", PYTHON]);
-        step("Creating a Python environment", &uv, &venv)?;
+        step(dry_run, "Creating a Python environment", &uv, &venv)?;
     }
 
     let mut pip = words(&["pip", "install", "--python", &python.display().to_string()]);
@@ -153,15 +253,32 @@ fn try_install(args: InstallArgs) -> Result<(), String> {
             export.extend(words(&["--package", name]));
         }
         export.extend(words(&["--output-file", &pins]));
-        step("Reading the tested versions from the checkout's uv.lock", &uv, &export)?;
+        step(
+            dry_run,
+            "Reading the tested versions from the checkout's uv.lock",
+            &uv,
+            &export,
+        )?;
         pip.extend(words(&["--constraint", &pins]));
+        // Installing again brings the drivers up to date, even when their version has not changed.
+        for (name, _) in PACKAGES {
+            pip.extend(words(&["--reinstall-package", name]));
+        }
+        pip.extend(package_specs(args.from.as_deref(), &git_ref));
+        step(dry_run, "Installing the drivers", &uv, &pip)?;
+    } else {
+        let requirements = home.join("driver-requirements.txt");
+        if dry_run {
+            println!("\nWriting the pinned dependencies to {}", requirements.display());
+        } else {
+            fs::create_dir_all(&home).map_err(|e| format!("could not create {}: {e}", home.display()))?;
+            fs::write(&requirements, DRIVER_REQUIREMENTS)
+                .map_err(|e| format!("could not write {}: {e}", requirements.display()))?;
+        }
+        for (what, args) in release_steps(&python, &requirements, &git_ref) {
+            step(dry_run, what, &uv, &args)?;
+        }
     }
-    // Installing again brings the drivers up to date, even when their version has not changed.
-    for (name, _) in PACKAGES {
-        pip.extend(words(&["--reinstall-package", name]));
-    }
-    pip.extend(package_specs(args.from.as_deref(), &args.git_ref));
-    step("Installing the drivers", &uv, &pip)?;
 
     let downloads: Vec<String> = args.browsers.iter().filter(|b| *b != "safari").cloned().collect();
     if !downloads.is_empty() {
@@ -170,13 +287,26 @@ fn try_install(args: InstallArgs) -> Result<(), String> {
             playwright.push("--with-deps".into());
         }
         playwright.extend(downloads);
-        step("Downloading browsers", &python, &playwright)?;
+        step(dry_run, "Downloading browsers", &python, &playwright)?;
     }
     if args.browsers.iter().any(|b| b == "safari") {
         eprintln!("\nSafari needs no download. Switch on \"Allow remote automation\" in Safari's Developer settings.");
     }
-    eprintln!("\nDone. Check the setup with: traceqa doctor");
+    if dry_run {
+        println!("\nDry run finished: nothing was installed.");
+    } else {
+        eprintln!("\nDone. Check the setup with: traceqa doctor");
+    }
     Ok(())
+}
+
+/// What `doctor` says about the commit this binary was built from.
+fn commit_text(commit: &str) -> &str {
+    if is_full_commit(commit) {
+        commit
+    } else {
+        "not a release build"
+    }
 }
 
 /// Where a driver command came from, for people reading `doctor`.
@@ -196,6 +326,7 @@ fn origin(command: &DriverCommand) -> String {
 
 pub fn doctor(explicit: &[String]) -> ExitCode {
     println!("TraceQA {}", traceqa_engine::VERSION);
+    println!("Commit:  {}", commit_text(COMMIT));
     match home::dir() {
         Some(dir) => {
             let installed = home::bin_dir(&home::env_dir(&dir)).is_dir();
@@ -210,7 +341,10 @@ pub fn doctor(explicit: &[String]) -> ExitCode {
     }
     match find_uv() {
         Some(uv) => println!("uv:      {}", uv.display()),
-        None => println!("uv:      not found; traceqa install needs it ({})", uv_instructions()),
+        None => println!(
+            "uv:      not found; traceqa install needs it (install it with: {}; see {UV_DOCS})",
+            uv_install_command()
+        ),
     }
 
     println!("\nDrivers:");
@@ -269,13 +403,117 @@ mod tests {
         assert_eq!(RELEASE_TAG, format!("v{}", env!("CARGO_PKG_VERSION")));
     }
 
+    const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn package_specs_use_the_resolved_ref() {
+        let (git_ref, _) = resolve_ref(SHA, "v0.1.0", None);
+        for spec in package_specs(None, &git_ref) {
+            assert!(spec.contains(&format!("@{SHA}#subdirectory=")), "{spec}");
+        }
+    }
+
+    #[test]
+    fn resolve_ref_prefers_the_embedded_commit() {
+        let (git_ref, note) = resolve_ref(SHA, "v0.1.0", None);
+        assert_eq!(git_ref, SHA);
+        assert!(note.unwrap().contains("pinned"));
+    }
+
+    #[test]
+    fn resolve_ref_uses_the_tag_with_a_warning_without_one() {
+        let (git_ref, note) = resolve_ref("", "v0.1.0", None);
+        assert_eq!(git_ref, "v0.1.0");
+        let note = note.unwrap();
+        assert!(note.contains("not built from a release commit") && note.contains("tags can be moved"));
+        // Anything that is not a full commit id is no commit.
+        assert_eq!(resolve_ref("abc123", "v0.1.0", None).0, "v0.1.0");
+    }
+
+    #[test]
+    fn resolve_ref_warns_for_a_user_ref_that_is_not_a_sha() {
+        for requested in ["master", "v0.2.0", "abc1234", &SHA[..39]] {
+            let (git_ref, note) = resolve_ref(SHA, "v0.1.0", Some(requested));
+            assert_eq!(
+                git_ref, requested,
+                "what the person asked for wins over the embedded commit"
+            );
+            let note = note.unwrap();
+            assert!(note.contains("not pinned to a commit") && note.contains("Use a full commit SHA"));
+        }
+    }
+
+    #[test]
+    fn resolve_ref_accepts_a_40_hex_ref_silently() {
+        let other = "ABCDEFabcdef0123456789abcdef0123456789ab";
+        assert_eq!(resolve_ref("", "v0.1.0", Some(other)), (other.to_string(), None));
+    }
+
+    #[test]
+    fn the_install_plan_installs_hashed_dependencies_before_the_drivers() {
+        let steps = release_steps(
+            Path::new("/h/env/bin/python"),
+            Path::new("/h/driver-requirements.txt"),
+            SHA,
+        );
+        assert_eq!(steps.len(), 2);
+        let (_, dependencies) = &steps[0];
+        assert!(dependencies.contains(&"--require-hashes".to_string()));
+        assert!(dependencies.contains(&"--no-deps".to_string()));
+        assert!(dependencies
+            .windows(2)
+            .any(|pair| pair[0] == "-r" && pair[1].ends_with("driver-requirements.txt")));
+        assert!(
+            !dependencies.iter().any(|arg| arg.contains("git+")),
+            "git URLs cannot carry hashes"
+        );
+
+        let (_, drivers) = &steps[1];
+        assert!(drivers.contains(&"--no-deps".to_string()));
+        assert!(!drivers.contains(&"--require-hashes".to_string()));
+        let specs: Vec<&String> = drivers.iter().filter(|arg| arg.contains("git+")).collect();
+        assert_eq!(specs.len(), 3);
+        assert!(specs.iter().all(|spec| spec.contains(&format!("@{SHA}#"))));
+    }
+
+    #[test]
+    fn the_pinned_requirements_are_hashed_and_leave_out_our_own_packages() {
+        assert!(DRIVER_REQUIREMENTS.contains("--hash=sha256:"));
+        assert!(DRIVER_REQUIREMENTS.lines().any(|line| line.starts_with("playwright==")));
+        assert!(!DRIVER_REQUIREMENTS.lines().any(|line| line.starts_with("traceqa")));
+        // Every pinned package carries a hash, as --require-hashes demands.
+        let pins = DRIVER_REQUIREMENTS.lines().filter(|line| line.contains("==")).count();
+        let hashed = DRIVER_REQUIREMENTS
+            .lines()
+            .filter(|line| line.contains("--hash=sha256:"))
+            .count();
+        assert!(pins > 0 && hashed >= pins);
+    }
+
+    #[test]
+    fn uv_is_never_installed_by_piping_a_download_into_a_shell() {
+        let text = uv_instructions();
+        assert!(
+            !text.contains("curl") && !text.contains("| sh") && !text.contains("iex"),
+            "{text}"
+        );
+        assert!(text.contains(UV_DOCS));
+    }
+
+    #[test]
+    fn doctor_says_when_the_binary_is_not_a_release_build() {
+        assert_eq!(commit_text(""), "not a release build");
+        assert_eq!(commit_text(SHA), SHA);
+    }
+
     #[test]
     fn an_unknown_browser_is_refused_before_anything_is_installed() {
         let args = InstallArgs {
             browsers: vec!["netscape".into()],
             from: None,
-            git_ref: RELEASE_TAG.into(),
+            git_ref: None,
             with_deps: false,
+            dry_run: false,
         };
         assert!(try_install(args).unwrap_err().contains("unknown browser"));
     }

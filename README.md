@@ -91,11 +91,14 @@ Install uv if it is not already present:
 
 ```sh
 # macOS and Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
+brew install uv        # or: pipx install uv
 
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Windows
+winget install --id=astral-sh.uv -e
 ```
+
+Other ways, including a versioned installer with its published checksum, are on
+[uv's installation page](https://docs.astral.sh/uv/getting-started/installation/).
 
 ### Step 1: Install the traceqa binary
 
