@@ -7,10 +7,16 @@
       "path": "main",
       "instances": 1
     },
-    "c_0716b2b61540": {
-      "role": "checkbox",
-      "name": "In stock only",
-      "path": "main > group \"filters\" > div",
+    "c_044f5febdd6e": {
+      "role": "button",
+      "name": "Decrease quantity",
+      "path": "region \"cart preview\"",
+      "instances": 1
+    },
+    "c_06e7f1592e0c": {
+      "role": "spinbutton",
+      "name": "Quantity",
+      "path": "region \"cart preview\"",
       "instances": 1
     },
     "c_0f4b2a722613": {
@@ -19,10 +25,22 @@
       "path": "banner",
       "instances": 1
     },
-    "c_1ef2bbf51c36": {
+    "c_1c6379b0c92c": {
+      "role": "link",
+      "name": "*",
+      "path": "list \"products\" > listitem",
+      "instances": 12
+    },
+    "c_1d02b9badd7f": {
+      "role": "checkbox",
+      "name": "In stock only",
+      "path": "group \"filters\" > div",
+      "instances": 1
+    },
+    "c_1d776447f7e3": {
       "role": "button",
-      "name": "Decrease quantity",
-      "path": "main > region \"cart preview\"",
+      "name": "कार्ट देखें",
+      "path": "region \"languages\"",
       "instances": 1
     },
     "c_22db864e0a14": {
@@ -31,52 +49,28 @@
       "path": "banner",
       "instances": 1
     },
+    "c_26503b4e0472": {
+      "role": "button",
+      "name": "Helpful",
+      "path": "list \"reviews\" > listitem",
+      "instances": 9
+    },
     "c_2c123b89375c": {
       "role": "generic",
       "name": "Gift cards",
       "path": "main",
       "instances": 1
     },
-    "c_358f3538e8af": {
-      "role": "radio",
-      "name": "Any",
-      "path": "main > group \"filters\" > group \"price\" > label",
-      "instances": 1
-    },
-    "c_38b289facc89": {
+    "c_30d47485819f": {
       "role": "button",
       "name": "Increase quantity",
-      "path": "main > region \"cart preview\"",
+      "path": "region \"cart preview\"",
       "instances": 1
     },
-    "c_417197bbe710": {
-      "role": "link",
-      "name": "Home",
-      "path": "banner > navigation \"main\" > list > listitem",
-      "instances": 1
-    },
-    "c_4544b53db589": {
-      "role": "button",
-      "name": "Add to cart",
-      "path": "main > list \"products\" > listitem",
-      "instances": 12
-    },
-    "c_52ffc6b6302b": {
-      "role": "button",
-      "name": "Helpful",
-      "path": "main > list \"reviews\" > listitem",
-      "instances": 9
-    },
-    "c_541d080be2b4": {
+    "c_38a4abbc53b5": {
       "role": "link",
       "name": "تواصل معنا",
-      "path": "main > region \"languages\"",
-      "instances": 1
-    },
-    "c_5aff09a93c14": {
-      "role": "spinbutton",
-      "name": "Quantity",
-      "path": "main > region \"cart preview\"",
+      "path": "region \"languages\"",
       "instances": 1
     },
     "c_5c4f0ff66a79": {
@@ -85,28 +79,22 @@
       "path": "banner",
       "instances": 1
     },
-    "c_5d49b4e2b8ce": {
+    "c_5e19c7835bfe": {
       "role": "button",
-      "name": "कार्ट देखें",
-      "path": "main > region \"languages\"",
-      "instances": 1
+      "name": "Add to cart",
+      "path": "list \"products\" > listitem",
+      "instances": 12
     },
-    "c_627254726974": {
+    "c_60a1fb5f8a59": {
       "role": "radio",
-      "name": "Over $25",
-      "path": "main > group \"filters\" > group \"price\" > label",
+      "name": "Any",
+      "path": "group \"price\" > label",
       "instances": 1
     },
-    "c_6e2187e0c58f": {
+    "c_663c9dccbb31": {
       "role": "button",
-      "name": "Apply filters",
-      "path": "main > group \"filters\"",
-      "instances": 1
-    },
-    "c_709dcaa11728": {
-      "role": "checkbox",
-      "name": "On sale",
-      "path": "main > group \"filters\" > div",
+      "name": "Search",
+      "path": "search \"site search\"",
       "instances": 1
     },
     "c_74ffbbcb593a": {
@@ -115,10 +103,10 @@
       "path": "contentinfo",
       "instances": 1
     },
-    "c_761124584135": {
-      "role": "searchbox",
-      "name": "Search products",
-      "path": "banner > search \"site search\"",
+    "c_7a1136e6d1f7": {
+      "role": "link",
+      "name": "Home",
+      "path": "navigation \"main\" > list > listitem",
       "instances": 1
     },
     "c_7e3842decc6b": {
@@ -127,10 +115,40 @@
       "path": "frame \"newsletter\"",
       "instances": 1
     },
-    "c_9839e326b951": {
+    "c_89a9dfe5727b": {
+      "role": "textbox",
+      "name": "Order notes",
+      "path": "region \"cart preview\"",
+      "instances": 1
+    },
+    "c_948ccf95e547": {
+      "role": "radio",
+      "name": "Over $25",
+      "path": "group \"price\" > label",
+      "instances": 1
+    },
+    "c_97a7e9e06ef5": {
       "role": "button",
-      "name": "Clear cart",
-      "path": "main > region \"cart preview\"",
+      "name": "Apply filters",
+      "path": "group \"filters\"",
+      "instances": 1
+    },
+    "c_9d67ff4c4556": {
+      "role": "radio",
+      "name": "Under $25",
+      "path": "group \"price\" > label",
+      "instances": 1
+    },
+    "c_a5c85999c99e": {
+      "role": "checkbox",
+      "name": "On sale",
+      "path": "group \"filters\" > div",
+      "instances": 1
+    },
+    "c_aa4f4bb1284f": {
+      "role": "link",
+      "name": "Deals",
+      "path": "navigation \"main\" > list > listitem",
       "instances": 1
     },
     "c_b440c13a06a7": {
@@ -139,10 +157,28 @@
       "path": "main > group",
       "instances": 1
     },
-    "c_cd925002c754": {
+    "c_b5129c6a7e99": {
+      "role": "searchbox",
+      "name": "Search products",
+      "path": "search \"site search\"",
+      "instances": 1
+    },
+    "c_b54c3bf7e8ca": {
+      "role": "link",
+      "name": "Contact",
+      "path": "navigation \"main\" > list > listitem",
+      "instances": 1
+    },
+    "c_c37156de2774": {
       "role": "combobox",
       "name": "Sort by",
-      "path": "main > group \"filters\" > div",
+      "path": "group \"filters\" > div",
+      "instances": 1
+    },
+    "c_c6dd003e68d8": {
+      "role": "link",
+      "name": "Products",
+      "path": "navigation \"main\" > list > listitem",
       "instances": 1
     },
     "c_cf32bca1f4ff": {
@@ -151,22 +187,10 @@
       "path": "main",
       "instances": 1
     },
-    "c_d47559db6375": {
-      "role": "link",
-      "name": "Deals",
-      "path": "banner > navigation \"main\" > list > listitem",
-      "instances": 1
-    },
     "c_dac70a8cd81e": {
       "role": "button",
       "name": "Pay now",
       "path": "frame \"pay\"",
-      "instances": 1
-    },
-    "c_db71d55fc9bc": {
-      "role": "link",
-      "name": "Products",
-      "path": "banner > navigation \"main\" > list > listitem",
       "instances": 1
     },
     "c_df985bb1a5b2": {
@@ -175,16 +199,10 @@
       "path": "frame \"pay\"",
       "instances": 1
     },
-    "c_e6addbbe2f8d": {
+    "c_eca8b583b606": {
       "role": "button",
-      "name": "Search",
-      "path": "banner > search \"site search\"",
-      "instances": 1
-    },
-    "c_eaefc6e74727": {
-      "role": "link",
-      "name": "Contact",
-      "path": "banner > navigation \"main\" > list > listitem",
+      "name": "Clear cart",
+      "path": "region \"cart preview\"",
       "instances": 1
     },
     "c_ecf0cab6efc4": {
@@ -192,12 +210,6 @@
       "name": "Terms",
       "path": "contentinfo",
       "instances": 1
-    },
-    "c_fa65862fe076": {
-      "role": "link",
-      "name": "*",
-      "path": "main > list \"products\" > listitem",
-      "instances": 12
     },
     "c_fa675de52c52": {
       "role": "button",
@@ -209,18 +221,6 @@
       "role": "button",
       "name": "Subscribe",
       "path": "frame \"newsletter\"",
-      "instances": 1
-    },
-    "c_fb8b237c657a": {
-      "role": "textbox",
-      "name": "Order notes",
-      "path": "main > region \"cart preview\"",
-      "instances": 1
-    },
-    "c_fcb023d1712c": {
-      "role": "radio",
-      "name": "Under $25",
-      "path": "main > group \"filters\" > group \"price\" > label",
       "instances": 1
     }
   }

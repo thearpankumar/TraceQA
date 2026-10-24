@@ -44,5 +44,37 @@
     { "label": "Pay  Frame", "key": "frame \"pay frame\"" },
     { "label": "x\" > main \"y", "key": "frame \"x\\\" > main \\\"y\"" },
     { "label": "/widget/v2", "key": "frame \"/widget/v2\"" }
+  ],
+  "pathKey": [
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }, { "role": "navigation", "tag": "nav", "name": "Contents" }, { "role": "list", "tag": "ul" }, { "role": "listitem", "tag": "li" }],
+      "key": "navigation \"contents\" > list > listitem"
+    },
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }, { "role": "main", "tag": "main" }, { "role": "navigation", "tag": "nav", "name": "Contents" }, { "role": "list", "tag": "ul" }, { "role": "listitem", "tag": "li" }],
+      "key": "navigation \"contents\" > list > listitem"
+    },
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }],
+      "key": "div > div"
+    },
+    {
+      "frame": "frame \"pay\"",
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "main", "tag": "main", "name": "Checkout" }, { "role": "form", "tag": "form", "name": "Card" }, { "role": "generic", "tag": "div" }],
+      "key": "frame \"pay\" > form \"card\" > div"
+    },
+    {
+      "frame": "frame \"pay\"",
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }],
+      "key": "frame \"pay\" > div > div"
+    },
+    {
+      "steps": [{ "role": "navigation", "tag": "nav", "name": "Primary" }, { "role": "list", "tag": "ul" }, { "role": "article", "tag": "article", "name": "Blue Shirt", "repeatIndex": 4, "repeatCount": 12 }],
+      "key": "navigation \"primary\" > list > article"
+    },
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "article", "tag": "article", "name": "Blue Shirt", "repeatIndex": 4, "repeatCount": 12 }, { "role": "generic", "tag": "div" }],
+      "key": "div > article > div"
+    }
   ]
 }

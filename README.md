@@ -53,7 +53,7 @@ finds into bug reports and deterministic tests.
 |---|---|
 | Complete element discovery | Buttons, links, inputs, selects, editable regions, and elements that only look clickable. |
 | Whole-page coverage | Open shadow DOM, same-origin and cross-origin iframes, and content that loads as the page scrolls. |
-| Stable identifiers | The same component has the same id in every browser, at every screen size, on every run. |
+| Stable identifiers | The same component has the same id in every browser and on every run, and across screen sizes unless the layout moves it under a differently named landmark. |
 | Component grouping | Repeated elements, such as twelve "Add to cart" buttons in a product grid, become one component with twelve instances. |
 | Evidence | Role, accessible name, selectors, position, visibility and state for each element, and an optional cropped screenshot. |
 | Parallel execution | Browsers and screen sizes run side by side, with a time breakdown for each. |

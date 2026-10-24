@@ -808,7 +808,7 @@ nameChanges?: boolean
 confidence: Confidence
 signals: string[]
 /**
- * Readable structural path, for example 'main > list "products" > listitem'.
+ * Readable structural path, for example 'list "products" > listitem'.
  */
 path: string
 /**

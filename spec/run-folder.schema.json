@@ -126,7 +126,7 @@
         "confidence": { "$ref": "common.schema.json#/$defs/Confidence" },
         "signals": { "type": "array", "items": { "type": "string" } },
         "path": {
-          "description": "Readable structural path, for example 'main > list \"products\" > listitem'.",
+          "description": "Readable structural path, for example 'list \"products\" > listitem'.",
           "type": "string"
         },
         "crop": { "description": "Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.", "type": "string" },

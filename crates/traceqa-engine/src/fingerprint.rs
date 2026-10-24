@@ -86,11 +86,31 @@ pub fn frame_step_key(label: &str) -> String {
 /// many is data. Indexes are always left out, so every card in a grid has the same path.
 pub fn step_key(step: &PathStep) -> String {
     let base = if step.role == "generic" { &step.tag } else { &step.role };
-    let is_data = step.repeat_count.unwrap_or(0) >= REPEAT_THRESHOLD && !LANDMARKS.contains(&step.role.as_str());
-    match &step.name {
-        Some(name) if !is_data => format!("{base} \"{}\"", escape_step_name(name)),
-        _ => base.clone(),
+    match step_name(step) {
+        Some(name) => format!("{base} \"{}\"", escape_step_name(name)),
+        None => base.clone(),
     }
+}
+
+/// The name a step contributes to the path key: none when it has no name or the name is data.
+fn step_name(step: &PathStep) -> Option<&str> {
+    let is_data = step.repeat_count.unwrap_or(0) >= REPEAT_THRESHOLD && !LANDMARKS.contains(&step.role.as_str());
+    step.name.as_deref().filter(|_| !is_data)
+}
+
+/// The path key of an element: the frame step (always kept), then the steps from the innermost
+/// one the page gave a name down to the element. What sits above that step is plain wrappers and
+/// unnamed landmarks, which a responsive layout moves around (a contents list that moves from a
+/// sidebar `div` into `<main>` on a phone); the named step is the page's own stable vocabulary.
+/// With no named step, the whole path is kept.
+pub fn path_key(frame_step: Option<&str>, steps: &[PathStep]) -> String {
+    let start = steps.iter().rposition(|step| step_name(step).is_some()).unwrap_or(0);
+    frame_step
+        .map(str::to_string)
+        .into_iter()
+        .chain(steps[start..].iter().map(step_key))
+        .collect::<Vec<_>>()
+        .join(" > ")
 }
 
 #[cfg(test)]
@@ -202,6 +222,77 @@ mod tests {
                 step_key(&step("main", "main", Some("b"), None))
             )
         );
+    }
+
+    #[test]
+    fn path_starts_at_the_innermost_named_step() {
+        let toc = |above: &[PathStep]| {
+            let mut steps = above.to_vec();
+            steps.push(step("navigation", "nav", Some("Contents"), None));
+            steps.push(step("list", "ul", None, None));
+            path_key(None, &steps)
+        };
+        let wide = toc(&[step("generic", "div", None, None), step("generic", "div", None, None)]);
+        let narrow = toc(&[step("generic", "div", None, None), step("main", "main", None, None)]);
+        assert_eq!(wide, "navigation \"contents\" > list");
+        assert_eq!(wide, narrow);
+        // Of two named steps, the inner one wins.
+        let inner = path_key(
+            None,
+            &[
+                step("main", "main", Some("Shop"), None),
+                step("region", "section", Some("Cart"), None),
+                step("generic", "div", None, None),
+            ],
+        );
+        assert_eq!(inner, "region \"cart\" > div");
+    }
+
+    #[test]
+    fn frame_step_is_always_kept() {
+        let frame = frame_step_key("pay");
+        let steps = [
+            step("generic", "div", None, None),
+            step("form", "form", Some("Card"), None),
+        ];
+        assert_eq!(path_key(Some(&frame), &steps), "frame \"pay\" > form \"card\"");
+        assert_eq!(path_key(Some(&frame), &[]), "frame \"pay\"");
+    }
+
+    #[test]
+    fn no_named_step_keeps_the_full_path() {
+        let steps = [step("generic", "div", None, None), step("list", "ul", None, None)];
+        assert_eq!(path_key(None, &steps), "div > list");
+        assert_eq!(path_key(None, &[]), "");
+    }
+
+    #[test]
+    fn repeated_step_names_dropped_by_the_repeat_rule_do_not_count_as_named() {
+        // The article's name is data, so it is not named and the path keeps what is above it.
+        let steps = [
+            step("generic", "div", None, None),
+            step("article", "article", Some("Blue Shirt"), Some((4, 12))),
+        ];
+        assert_eq!(path_key(None, &steps), "div > article");
+        // A landmark keeps its name even when repeated, so it does count.
+        let steps = [
+            step("generic", "div", None, None),
+            step("region", "section", Some("Founders"), Some((2, 5))),
+            step("generic", "div", None, None),
+        ];
+        assert_eq!(path_key(None, &steps), "region \"founders\" > div");
+    }
+
+    #[test]
+    fn pathkey_vectors() {
+        let vectors = vectors();
+        let cases = vectors["pathKey"].as_array().unwrap();
+        assert!(cases.len() >= 6);
+        for case in cases {
+            let steps: Vec<PathStep> = serde_json::from_value(case["steps"].clone()).unwrap();
+            let frame = case["frame"].as_str();
+            assert_eq!(path_key(frame, &steps), case["key"].as_str().unwrap(), "case {case}");
+        }
     }
 
     #[test]
