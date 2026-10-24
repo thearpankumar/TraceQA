@@ -4,6 +4,7 @@
 //! the lines is the caller's job, so it works over any transport.
 
 use std::fmt;
+use std::io::{self, BufRead};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -150,10 +151,183 @@ pub fn decode(line: &str) -> Result<Message, DecodeError> {
     }
 }
 
+/// What [`read_line_bounded`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Line {
+    /// The input ended before any byte of a new line.
+    Eof,
+    /// A whole line is in the buffer, without its line ending.
+    Complete,
+    /// The line was longer than the limit. The buffer is empty. With [`read_line_bounded`] the
+    /// rest of the line was skipped and the next call starts at the next line.
+    TooLong,
+}
+
+/// Reads one line of at most `max` bytes (without its `\n` or `\r\n`) into `buf`, which is
+/// cleared first. Unlike `BufRead::read_line` and `lines()`, a peer that never sends a
+/// newline cannot make this grow memory: past `max` the bytes are read and dropped until
+/// the newline, and [`Line::TooLong`] is returned. A last line without a newline counts as a line.
+pub fn read_line_bounded<R: BufRead>(reader: &mut R, max: usize, buf: &mut Vec<u8>) -> io::Result<Line> {
+    read_line_inner(reader, max, buf, true)
+}
+
+/// As [`read_line_bounded`], but [`Line::TooLong`] is returned as soon as the limit is passed,
+/// with the rest of the line left unread. For a peer that is dropped after such a line, so
+/// that one which never sends a newline is noticed at once and not when it stops.
+pub fn read_line_or_give_up<R: BufRead>(reader: &mut R, max: usize, buf: &mut Vec<u8>) -> io::Result<Line> {
+    read_line_inner(reader, max, buf, false)
+}
+
+fn read_line_inner<R: BufRead>(reader: &mut R, max: usize, buf: &mut Vec<u8>, skip_rest: bool) -> io::Result<Line> {
+    buf.clear();
+    let mut seen_any = false;
+    let mut too_long = false;
+    loop {
+        let chunk = match reader.fill_buf() {
+            Ok(chunk) => chunk,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if chunk.is_empty() {
+            if !seen_any {
+                return Ok(Line::Eof);
+            }
+            break;
+        }
+        seen_any = true;
+        let newline = chunk.iter().position(|&byte| byte == b'\n');
+        let take = newline.unwrap_or(chunk.len());
+        if !too_long {
+            if buf.len() + take > max {
+                if !skip_rest {
+                    *buf = Vec::new();
+                    return Ok(Line::TooLong);
+                }
+                too_long = true;
+                *buf = Vec::new();
+            } else {
+                buf.extend_from_slice(&chunk[..take]);
+            }
+        }
+        reader.consume(take + usize::from(newline.is_some()));
+        if newline.is_some() {
+            break;
+        }
+    }
+    if too_long {
+        return Ok(Line::TooLong);
+    }
+    if buf.last() == Some(&b'\r') {
+        buf.pop();
+    }
+    Ok(Line::Complete)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Cursor;
+
+    fn lines_of(input: &[u8], max: usize) -> Vec<(Line, Vec<u8>)> {
+        let mut reader = Cursor::new(input.to_vec());
+        let mut out = Vec::new();
+        let mut buf = Vec::new();
+        loop {
+            let line = read_line_bounded(&mut reader, max, &mut buf).unwrap();
+            if line == Line::Eof {
+                return out;
+            }
+            out.push((line, buf.clone()));
+        }
+    }
+
+    #[test]
+    fn read_line_bounded_returns_lines_and_eof() {
+        let got = lines_of(b"one\r\ntwo\n\nlast", 100);
+        let text: Vec<(Line, &str)> = got
+            .iter()
+            .map(|(line, bytes)| (*line, std::str::from_utf8(bytes).unwrap()))
+            .collect();
+        assert_eq!(
+            text,
+            [
+                (Line::Complete, "one"),
+                (Line::Complete, "two"),
+                (Line::Complete, ""),
+                (Line::Complete, "last")
+            ]
+        );
+        assert!(lines_of(b"", 10).is_empty());
+    }
+
+    #[test]
+    fn read_line_bounded_reports_too_long_and_resumes_at_the_next_line() {
+        let got = lines_of(b"aaaa\nok\n", 3);
+        assert_eq!(got, [(Line::TooLong, vec![]), (Line::Complete, b"ok".to_vec())]);
+        // Exactly at the limit is fine; a long line at the very end, without newline, is too long.
+        assert_eq!(lines_of(b"abc\n", 3), [(Line::Complete, b"abc".to_vec())]);
+        assert_eq!(lines_of(b"abcd", 3), [(Line::TooLong, vec![])]);
+        // The cut can fall between two reads of a small buffer.
+        let mut reader = std::io::BufReader::with_capacity(2, Cursor::new(b"abcdefgh\nxy\n".to_vec()));
+        let mut buf = Vec::new();
+        assert_eq!(read_line_bounded(&mut reader, 3, &mut buf).unwrap(), Line::TooLong);
+        assert_eq!(read_line_bounded(&mut reader, 3, &mut buf).unwrap(), Line::Complete);
+        assert_eq!(buf, b"xy");
+    }
+
+    /// Yields `'a'` for as long as asked, without a newline, and counts what it gave.
+    struct Endless {
+        given: u64,
+        limit: u64,
+    }
+
+    impl io::Read for Endless {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            let n = out.len().min((self.limit - self.given) as usize);
+            out[..n].fill(b'a');
+            self.given += n as u64;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn read_line_or_give_up_reports_at_once_without_reading_the_rest() {
+        let mut reader = std::io::BufReader::with_capacity(
+            8192,
+            Endless {
+                given: 0,
+                limit: 100_000_000,
+            },
+        );
+        let mut buf = Vec::new();
+        assert_eq!(
+            read_line_or_give_up(&mut reader, 1000, &mut buf).unwrap(),
+            Line::TooLong
+        );
+        assert!(reader.get_ref().given <= 8192, "read {} bytes", reader.get_ref().given);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn read_line_bounded_never_buffers_more_than_max() {
+        let mut reader = std::io::BufReader::with_capacity(
+            8192,
+            Endless {
+                given: 0,
+                limit: 100_000_000,
+            },
+        );
+        let mut buf = Vec::new();
+        assert_eq!(read_line_bounded(&mut reader, 1000, &mut buf).unwrap(), Line::TooLong);
+        assert!(buf.capacity() <= 2048, "capacity grew to {}", buf.capacity());
+        assert!(buf.is_empty());
+        assert_eq!(
+            reader.get_ref().given,
+            100_000_000,
+            "the whole line was read and dropped"
+        );
+    }
 
     fn round_trip(message: Message) {
         let line = encode(&message);

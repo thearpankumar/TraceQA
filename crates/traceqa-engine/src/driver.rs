@@ -6,6 +6,7 @@
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -14,7 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use traceqa_protocol::contracts::driver_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
-use traceqa_protocol::jsonrpc::{self, Id, Message};
+use traceqa_protocol::jsonrpc::{self, Id, Line, Message};
 use traceqa_protocol::types::{
     DriverHelloParams, DriverHelloResult, DriverLogParams, Empty, PageEvalParams, PageEvalResult, PageGotoParams,
     PageGotoResult, PageScreenshotParams, PageScreenshotResult, PageScrollParams, PageScrollResult, RpcErrorData,
@@ -133,10 +134,84 @@ pub struct ProcessTransport {
     unresponsive: bool,
 }
 
+/// The longest line the engine accepts from a driver. A collector result for a very large
+/// page is tens of MiB, so the limit is generous; its job is to stop a driver that never
+/// sends a newline from using all the memory. A longer line makes the driver count as lost.
+pub const MAX_DRIVER_LINE: usize = 64 * 1024 * 1024;
+
+/// How many messages from the driver may wait to be read. When the engine is busy the
+/// reader thread blocks, so the driver's pipe fills and the driver slows down instead of
+/// the queue growing.
+const QUEUE_LIMIT: usize = 64;
+
+/// Longest piece of a driver's output that goes into an error message.
+const EXCERPT_CHARS: usize = 200;
+
+/// At most [`EXCERPT_CHARS`] characters of `bytes`, with control characters shown as escapes,
+/// and the size of the whole when it was cut.
+fn excerpt(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let mut shown = String::new();
+    let mut chars = text.chars();
+    for c in chars.by_ref().take(EXCERPT_CHARS) {
+        if c.is_control() {
+            shown.extend(c.escape_default());
+        } else {
+            shown.push(c);
+        }
+    }
+    if chars.next().is_some() {
+        shown.push_str(&format!("… ({} bytes)", bytes.len()));
+    }
+    shown
+}
+
+/// Reads the driver's lines and queues what they decode to, until the pipe ends, the line
+/// limit is passed or the queue is no longer read. `read` counts lines taken from the pipe.
+fn read_messages<R: BufRead>(
+    mut stdout: R,
+    max_line: usize,
+    sender: &mpsc::SyncSender<Result<Message, String>>,
+    read: &AtomicUsize,
+) {
+    let mut buf = Vec::new();
+    loop {
+        // A line that is not text, or an unreadable pipe, ends the reader: nothing after it can be trusted.
+        let (message, stop) = match jsonrpc::read_line_or_give_up(&mut stdout, max_line, &mut buf) {
+            Ok(Line::Eof) => return,
+            Ok(Line::Complete) => match std::str::from_utf8(&buf) {
+                Ok(line) if line.trim().is_empty() => continue,
+                Ok(line) => (
+                    jsonrpc::decode(line).map_err(|e| format!("{e}: {}", excerpt(line.as_bytes()))),
+                    false,
+                ),
+                Err(_) => (Err(format!("not valid UTF-8: {}", excerpt(&buf))), true),
+            },
+            Ok(Line::TooLong) => (Err(format!("a line longer than {max_line} bytes")), true),
+            Err(e) => (Err(e.to_string()), true),
+        };
+        read.fetch_add(1, Ordering::SeqCst);
+        if sender.send(message).is_err() || stop {
+            return;
+        }
+    }
+}
+
 impl ProcessTransport {
     pub fn spawn(command: &DriverCommand) -> Result<Self, DriverError> {
-        let mut child = Command::new(&command.program)
-            .args(&command.args)
+        Self::spawn_with_limit(command, MAX_DRIVER_LINE)
+    }
+
+    /// As [`spawn`](Self::spawn), with another limit on the length of a line from the driver.
+    pub fn spawn_with_limit(command: &DriverCommand, max_line: usize) -> Result<Self, DriverError> {
+        let mut process = Command::new(&command.program);
+        process.args(&command.args);
+        Self::start(process, command, max_line)
+    }
+
+    fn start(mut process: Command, command: &DriverCommand, max_line: usize) -> Result<Self, DriverError> {
+        // The driver's stderr is its own log channel: it goes straight to ours, never through the engine.
+        let mut child = process
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -145,19 +220,8 @@ impl ProcessTransport {
         let stdin = child.stdin.take().expect("stdin was piped");
         let stdout = child.stdout.take().expect("stdout was piped");
 
-        let (sender, incoming) = mpsc::channel();
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let message = match line {
-                    Ok(line) if line.trim().is_empty() => continue,
-                    Ok(line) => jsonrpc::decode(&line).map_err(|e| format!("{e}: {line}")),
-                    Err(e) => Err(e.to_string()),
-                };
-                if sender.send(message).is_err() {
-                    break;
-                }
-            }
-        });
+        let (sender, incoming) = mpsc::sync_channel(QUEUE_LIMIT);
+        thread::spawn(move || read_messages(BufReader::new(stdout), max_line, &sender, &AtomicUsize::new(0)));
         Ok(Self {
             child,
             stdin,
@@ -426,6 +490,8 @@ impl Drivers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::sync::Arc;
 
     #[test]
     fn command_lines_split_on_whitespace_and_respect_quotes() {
@@ -445,6 +511,126 @@ mod tests {
             DriverCommand::parse(r"C:\Users\O'Brien\driver.exe -v").unwrap().args,
             ["-v"]
         );
+    }
+
+    const CHILD_SWITCH: &str = "TRACEQA_TEST_ENDLESS_LINE";
+
+    /// Not a test on its own: the child process of `a_driver_that_prints_an_endless_line...`
+    /// runs this one function of the test binary. It prints a 1 MiB line with no newline and
+    /// then stays alive, like a driver that has gone wrong.
+    #[test]
+    fn endless_line_child() {
+        if std::env::var_os(CHILD_SWITCH).is_none() {
+            return;
+        }
+        let mut out = std::io::stdout();
+        out.write_all(&vec![b'a'; 1 << 20]).unwrap();
+        out.flush().unwrap();
+        thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_driver_that_prints_an_endless_line_is_marked_lost_with_a_short_excerpt() {
+        let mut process = Command::new(std::env::current_exe().unwrap());
+        process
+            .args([
+                "--exact",
+                "driver::tests::endless_line_child",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_SWITCH, "1");
+        let command = DriverCommand {
+            program: "test-binary".into(),
+            args: vec![],
+        };
+        let mut transport = ProcessTransport::start(process, &command, 4096).unwrap();
+
+        // The test harness prints a few lines of its own first. Each is one bad line, answered
+        // with an error, until the long one arrives.
+        let mut error = None;
+        for _ in 0..5 {
+            let result = transport.call("page.eval", json!({}), Duration::from_secs(20));
+            let failure = result.unwrap_err();
+            if failure.message.contains("longer than 4096 bytes") {
+                error = Some(failure);
+                break;
+            }
+        }
+        let error = error.expect("the long line was reported");
+        assert_eq!(error.kind, "transport");
+        assert!(error.loses_driver());
+        assert!(
+            error.message.len() < 400,
+            "{} bytes: {}",
+            error.message.len(),
+            error.message
+        );
+        assert!(transport.unresponsive, "the driver is marked lost");
+
+        let started = Instant::now();
+        drop(transport);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "dropping a busy transport must not wait"
+        );
+    }
+
+    #[test]
+    fn garbage_line_error_shows_at_most_200_characters() {
+        let garbage = format!("{}\t{}", "x".repeat(150), "y".repeat(5000));
+        let shown = excerpt(garbage.as_bytes());
+        assert!(shown.starts_with(&"x".repeat(150)));
+        assert!(shown.contains("\\t"), "control characters are escaped: {shown}");
+        assert!(shown.ends_with("… (5151 bytes)"), "{shown}");
+        assert!(shown.chars().count() < 200 + 20, "{}", shown.chars().count());
+        assert_eq!(excerpt(b"short"), "short");
+
+        // Through the reader, a bad line gives an error with the same bound.
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let input = format!("{garbage}\n");
+        read_messages(input.as_bytes(), 1 << 20, &sender, &AtomicUsize::new(0));
+        let message = receiver.recv().unwrap().unwrap_err();
+        assert!(message.chars().count() < 300, "{message}");
+    }
+
+    #[test]
+    fn a_line_that_is_not_text_ends_the_reader() {
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let input: &[u8] = b"\xff\xfe not text\n{\"jsonrpc\":\"2.0\",\"method\":\"driver.log\"}\n";
+        read_messages(input, 1 << 20, &sender, &AtomicUsize::new(0));
+        drop(sender);
+        assert!(receiver.recv().unwrap().unwrap_err().starts_with("not valid UTF-8"));
+        assert!(receiver.recv().is_err(), "nothing after the bad line is read");
+    }
+
+    #[test]
+    fn the_channel_applies_backpressure() {
+        let notification = "{\"jsonrpc\":\"2.0\",\"method\":\"driver.log\",\"params\":{}}\n";
+        let input = notification.repeat(10_000);
+        let (sender, receiver) = mpsc::sync_channel(QUEUE_LIMIT);
+        let read = Arc::new(AtomicUsize::new(0));
+        let reader = {
+            let read = Arc::clone(&read);
+            thread::spawn(move || read_messages(input.as_bytes(), 1 << 20, &sender, &read))
+        };
+        // Nobody reads the queue: the reader may take a full queue and the one it is holding, no more.
+        thread::sleep(Duration::from_millis(300));
+        let waiting = read.load(Ordering::SeqCst);
+        assert!(waiting <= QUEUE_LIMIT + 1, "the reader ran ahead by {waiting} lines");
+        assert!(!reader.is_finished(), "the reader must be blocked, not done");
+
+        // Once the queue is read, everything arrives.
+        assert_eq!(receiver.iter().count(), 10_000);
+        reader.join().unwrap();
+
+        // A reader blocked on a full queue ends when the queue is dropped.
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let input = notification.repeat(10);
+        let reader = thread::spawn(move || read_messages(input.as_bytes(), 1 << 20, &sender, &AtomicUsize::new(0)));
+        thread::sleep(Duration::from_millis(100));
+        drop(receiver);
+        reader.join().unwrap();
     }
 
     #[test]
