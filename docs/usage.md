@@ -288,6 +288,15 @@ message. When a run that was given a state still lands on what looks like a
 sign-in page, its address or a password field, the target has a
 `session_not_accepted` warning: sign in again to make a new file.
 
+### Pictures of signed-in pages
+
+Pictures are opt-in (`--crops`), but when a run has both a state and `--crops`,
+the pictures show the signed-in page as it was: `page.png` and `crops/` in each
+target's folder can contain names, e-mail addresses or balances. Each such target
+gets a `signed_in_pictures` warning as a reminder. Keep the run folder private
+(the repository's `.gitignore` already ignores `/runs/`), and delete it when you
+are done. Leave out `--crops` when you only need the components.
+
 ## Python SDK
 
 ```python
@@ -488,6 +497,7 @@ of the element the previous part matched.
 | `closed_shadow_roots` | The page has closed shadow roots, which no script can read inside, so what they hold is not listed. Only Chromium-based browsers can tell. |
 | `elements_removed_while_scrolling` | The page removed controls it had shown as it was scrolled, as long tables and feeds that keep only the rows near the screen do. The rows that had left the screen are not listed. |
 | `session_not_accepted` | The run was given a state, but the page is still a sign-in page by its address or a password field. The session has probably expired. |
+| `signed_in_pictures` | The run used a stored session and `--crops`, so `page.png` and `crops/` may show personal data. Raised once per target; nothing else about what is saved changes. |
 | `viewport_not_reached` | The browser could not give the viewport asked for, for example Safari in a window macOS will not resize. The page was read at the size it really had, which `components.json` records. The target keeps its name, such as `safari-390x844`. |
 
 ## Speed

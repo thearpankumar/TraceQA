@@ -731,6 +731,12 @@ fn read_page(
     mark_changed_names(&mut reading, &before);
     if job.storage_state.is_some() {
         page_warnings.extend(sign_in_warning(&reading, &page.final_url));
+        if job.crops {
+            page_warnings.push(warning(
+                "signed_in_pictures",
+                "This run used a stored session and saved pictures (page.png and crops/). They can show personal data. Keep the run folder private and delete it when done.".to_string(),
+            ));
+        }
     }
     let reached_end = reached_end.unwrap_or_else(|| steps == 0 && at_end(&reading.scroll));
     if steps > 0 {

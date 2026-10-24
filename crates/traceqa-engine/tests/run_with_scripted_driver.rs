@@ -793,3 +793,57 @@ fn an_address_with_a_user_name_or_password_is_refused_before_a_run_folder_exists
     }
     assert!(!out.exists(), "no run folder may be created");
 }
+
+fn empty_state() -> StorageState {
+    serde_json::from_value(json!({ "cookies": [], "origins": [] })).unwrap()
+}
+
+fn signed_in_pictures_count(outcome: &Outcome) -> usize {
+    components(outcome)
+        .warnings
+        .iter()
+        .filter(|warning| warning.code == "signed_in_pictures")
+        .count()
+}
+
+#[test]
+fn a_signed_in_run_with_crops_warns_that_pictures_were_saved() {
+    let outcome = run_case(Case {
+        storage_state: Some(empty_state()),
+        crops: true,
+        ..Case::default()
+    });
+    assert_eq!(outcome.manifest.status, RunStatus::Completed);
+    assert_eq!(signed_in_pictures_count(&outcome), 1);
+    let warned = outcome
+        .events
+        .iter()
+        .filter(|event| {
+            event.type_ == "warning" && event.data.get("code").is_some_and(|code| code == "signed_in_pictures")
+        })
+        .count();
+    assert_eq!(warned, 1, "one warning event");
+    assert!(outcome.folder.join("firefox-1280x400").join("page.png").is_file());
+    // The warning counts in the target's summary like any other.
+    assert_eq!(
+        outcome.manifest.targets[0].warning_count as usize,
+        components(&outcome).warnings.len()
+    );
+}
+
+#[test]
+fn no_warning_without_crops_or_without_a_state() {
+    let without_crops = run_case(Case {
+        storage_state: Some(empty_state()),
+        crops: false,
+        ..Case::default()
+    });
+    assert_eq!(signed_in_pictures_count(&without_crops), 0);
+    let without_state = run_case(Case {
+        storage_state: None,
+        crops: true,
+        ..Case::default()
+    });
+    assert_eq!(signed_in_pictures_count(&without_state), 0);
+    assert_eq!(signed_in_pictures_count(&run_case(Case::default())), 0);
+}
