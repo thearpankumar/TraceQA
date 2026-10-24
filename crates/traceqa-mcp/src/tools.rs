@@ -322,7 +322,7 @@ impl Call<'_> {
     fn extract(&self, arguments: ExtractArgs) -> Result<Content, ToolError> {
         let request = build_request(self.config, arguments)?;
         // Before any request is made. Redirects are checked after navigation, by the engine.
-        traceqa_engine::url_safety::check_navigable(&request.url).map_err(ToolError::Refused)?;
+        traceqa_engine::check_navigable(&request.url).map_err(ToolError::Refused)?;
         self.config
             .policy
             .check_url_resolving(&request.url)

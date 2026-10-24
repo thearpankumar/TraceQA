@@ -4,18 +4,37 @@
 //! drivers through the driver protocol and adapts to the capabilities they
 //! report.
 
+//!
+//! The public surface is the driver side ([`driver`]), the run ([`Run`], [`Execution`]), the
+//! servers ([`serve`]), the operator's rules ([`UrlPolicy`]) and the places TraceQA keeps its
+//! files ([`home`]). How elements are fingerprinted and grouped is an internal detail, so it
+//! can change without a new major version:
+//!
+//! ```compile_fail,E0603
+//! use traceqa_engine::fingerprint::component_id;
+//! ```
+//!
+//! ```compile_fail,E0603
+//! use traceqa_engine::group::group;
+//! ```
+//!
+//! Scripted drivers for tests (`driver::Drivers::starting_with`) exist only with the
+//! `test-support` feature, which no release build enables.
+
 pub mod driver;
 mod extract;
-pub mod fingerprint;
-pub mod group;
+mod fingerprint;
+mod group;
 pub mod home;
 pub mod run;
 pub mod serve;
 pub mod url_policy;
-pub mod url_safety;
+mod url_safety;
 
 pub use run::{driver_commands, EngineError, Execution, Run};
 pub use url_policy::UrlPolicy;
+/// Refuses an address a run may not be started on. The MCP server asks before it accepts a call.
+pub use url_safety::check_navigable;
 
 /// Version reported to clients and drivers, and written into run folders.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
