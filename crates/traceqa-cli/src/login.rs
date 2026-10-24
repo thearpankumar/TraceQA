@@ -56,7 +56,7 @@ impl From<String> for LoginError {
     }
 }
 
-pub fn login(args: LoginArgs) -> ExitCode {
+pub fn login(args: &LoginArgs) -> ExitCode {
     match try_login(args) {
         Ok(message) => {
             eprintln!("{message}");
@@ -73,7 +73,7 @@ pub fn login(args: LoginArgs) -> ExitCode {
     }
 }
 
-fn try_login(args: LoginArgs) -> Result<String, LoginError> {
+fn try_login(args: &LoginArgs) -> Result<String, LoginError> {
     check_address(&args.url)?;
     // Before a browser opens: a file that cannot be written is found now, not after signing in.
     let pending = Pending::prepare(&args.save)?;

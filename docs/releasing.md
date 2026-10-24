@@ -121,6 +121,16 @@ all three archives and fix the workflow before the next release if anything fail
   newer compiler, and never lower it without building with the lower version first
   (`cargo +<version> check --workspace --locked`). The `msrv` job fails on its own
   when something starts needing a newer one.
+- The workspace is on Rust edition 2021 on purpose. Edition 2024 needs only Rust 1.85, so
+  the MSRV is no obstacle, but switching also changes the default rustfmt style (a reformat
+  of most files), makes `clippy::collapsible_if` ask for let chains throughout, and shifts the
+  drop order of temporaries in `run.rs`. That is a large diff with no behaviour gain. Revisit it
+  in a pull request of its own: `cargo fix --edition`, set `edition = "2024"` in the root
+  `Cargo.toml`, then `cargo fmt --all` and fix what clippy reports.
+- Lints live in `[workspace.lints]` in the root `Cargo.toml` (every crate opts in with
+  `[lints] workspace = true`) and `clippy.toml`. CI runs clippy with `-D warnings`, so a
+  `warn` there gates. Every crate has `publish = false` until a publish plan exists; with it
+  `cargo deny` can enforce `wildcards = "deny"`.
 - Tags must be on `master`. A tag on any other commit fails the first job.
 
 ## Code signing and drivers

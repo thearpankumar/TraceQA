@@ -510,32 +510,32 @@ mod tests {
         assert_eq!(error.to_string(), "pipe broke");
     }
 
-    fn round_trip(message: Message) {
-        let line = encode(&message);
+    fn round_trip(message: &Message) {
+        let line = encode(message);
         assert!(!line.contains('\n'));
-        assert_eq!(decode(&line).unwrap(), message);
+        assert_eq!(&decode(&line).unwrap(), message);
     }
 
     #[test]
     fn every_kind_round_trips() {
-        round_trip(Message::Request {
+        round_trip(&Message::Request {
             id: Id::Number(7),
             method: "page.goto".into(),
             params: json!({"sessionId": "s1", "url": "https://shop.test/"}),
         });
-        round_trip(Message::Notification {
+        round_trip(&Message::Notification {
             method: "driver.log".into(),
             params: json!({"level": "info", "message": "ready"}),
         });
-        round_trip(Message::Response {
+        round_trip(&Message::Response {
             id: Id::String("a".into()),
             result: Ok(json!({"ok": true})),
         });
-        round_trip(Message::Response {
+        round_trip(&Message::Response {
             id: Id::Number(1),
             result: Ok(Value::Null),
         });
-        round_trip(Message::Response {
+        round_trip(&Message::Response {
             id: Id::Number(2),
             result: Err(RpcError {
                 code: code::APPLICATION_ERROR,

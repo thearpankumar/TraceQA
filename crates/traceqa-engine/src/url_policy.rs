@@ -293,7 +293,10 @@ mod tests {
     }
 
     fn strict(allow: &[&str]) -> UrlPolicy {
-        UrlPolicy::new(true, &allow.iter().map(|h| h.to_string()).collect::<Vec<_>>())
+        UrlPolicy::new(
+            true,
+            &allow.iter().map(std::string::ToString::to_string).collect::<Vec<_>>(),
+        )
     }
 
     #[test]

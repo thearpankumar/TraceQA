@@ -6,7 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+publish.workspace = true
 
 [[bin]]
 name = "traceqa-replay"
@@ -14,3 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json.workspace = true
+
+[lints]
+workspace = true

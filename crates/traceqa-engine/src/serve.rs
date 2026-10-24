@@ -24,11 +24,11 @@ use traceqa_protocol::types::{
 use crate::driver::{DriverCommand, Drivers, ErrorKind};
 use crate::run::{failed_after_panic, Execution, Run, FEATURES};
 
-fn failure(rpc_code: i64, kind: ErrorKind, message: impl Into<String>) -> RpcError {
+fn failure(rpc_code: i64, kind: &ErrorKind, message: impl Into<String>) -> RpcError {
     failure_with(rpc_code, kind, false, message)
 }
 
-fn failure_with(rpc_code: i64, kind: ErrorKind, retryable: bool, message: impl Into<String>) -> RpcError {
+fn failure_with(rpc_code: i64, kind: &ErrorKind, retryable: bool, message: impl Into<String>) -> RpcError {
     let data = RpcErrorData {
         kind: kind.as_str().to_string(),
         retryable,
@@ -41,7 +41,7 @@ fn failure_with(rpc_code: i64, kind: ErrorKind, retryable: bool, message: impl I
 }
 
 fn parse<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, RpcError> {
-    serde_json::from_value(params).map_err(|e| failure(code::INVALID_PARAMS, ErrorKind::InvalidParams, e.to_string()))
+    serde_json::from_value(params).map_err(|e| failure(code::INVALID_PARAMS, &ErrorKind::InvalidParams, e.to_string()))
 }
 
 fn answer(result: impl Serialize) -> Result<Value, RpcError> {
@@ -121,7 +121,7 @@ fn serve_inner(
     let reading = serve_lines(
         input,
         &output,
-        |rpc_code, message| failure(rpc_code, ErrorKind::InvalidRequest, message),
+        |rpc_code, message| failure(rpc_code, &ErrorKind::InvalidRequest, message),
         |message| {
             // We never receive anything but requests that need an answer.
             let Message::Request { id, method, params } = message else {
@@ -131,10 +131,10 @@ fn serve_inner(
             runs.retain(|_, run| !run.thread.is_finished());
 
             let result = match method.as_str() {
-                method::ENGINE_HELLO => parse(params).and_then(hello),
+                method::ENGINE_HELLO => parse(params).and_then(|request: EngineHelloParams| hello(&request)),
                 method::RUN_START if shutting_down => Err(failure(
                     code::APPLICATION_ERROR,
-                    ErrorKind::Busy,
+                    &ErrorKind::Busy,
                     "the engine is shutting down and starts no new runs",
                 )),
                 method::RUN_START => parse(params)
@@ -151,14 +151,14 @@ fn serve_inner(
                         }
                         None => Err(failure(
                             code::INVALID_PARAMS,
-                            ErrorKind::InvalidParams,
+                            &ErrorKind::InvalidParams,
                             format!("no running run {}", request.run_id),
                         )),
                     })
                 }
                 other => Err(failure(
                     code::METHOD_NOT_FOUND,
-                    ErrorKind::Unsupported,
+                    &ErrorKind::Unsupported,
                     format!("unknown method {other}"),
                 )),
             };
@@ -191,11 +191,11 @@ fn cancel_every(runs: &HashMap<String, ActiveRun>) {
     runs.values().for_each(cancel);
 }
 
-fn hello(hello: EngineHelloParams) -> Result<Value, RpcError> {
+fn hello(hello: &EngineHelloParams) -> Result<Value, RpcError> {
     if hello.protocol_version != PROTOCOL_VERSION {
         return Err(failure(
             code::APPLICATION_ERROR,
-            ErrorKind::VersionMismatch,
+            &ErrorKind::VersionMismatch,
             format!(
                 "engine speaks client protocol {PROTOCOL_VERSION}, client asked for {}",
                 hello.protocol_version
@@ -205,7 +205,7 @@ fn hello(hello: EngineHelloParams) -> Result<Value, RpcError> {
     answer(EngineHelloResult {
         engine_version: crate::VERSION.to_string(),
         protocol_version: PROTOCOL_VERSION,
-        features: FEATURES.iter().map(|feature| feature.to_string()).collect(),
+        features: FEATURES.iter().map(std::string::ToString::to_string).collect(),
     })
 }
 
@@ -225,14 +225,14 @@ fn start_run(
         active.fetch_sub(1, Ordering::SeqCst);
         return Err(failure_with(
             code::APPLICATION_ERROR,
-            ErrorKind::Busy,
+            &ErrorKind::Busy,
             true,
             format!("busy: {max_runs} runs are already going. Wait for one to finish, then try again."),
         ));
     }
     let counted = RunSlot(Arc::clone(active));
     let run =
-        Run::prepare(request).map_err(|e| failure(code::INVALID_PARAMS, ErrorKind::InvalidParams, e.to_string()))?;
+        Run::prepare(request).map_err(|e| failure(code::INVALID_PARAMS, &ErrorKind::InvalidParams, e.to_string()))?;
     let run_id = run.id().to_string();
     let accepted = RunStartResult {
         run_id: run_id.clone(),
@@ -323,6 +323,8 @@ mod tests {
             .collect()
     }
 
+    // Callers pass `json!` literals; taking them by value keeps every call site short.
+    #[allow(clippy::needless_pass_by_value)]
     fn request(id: u64, method: &str, params: Value) -> Value {
         serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
     }

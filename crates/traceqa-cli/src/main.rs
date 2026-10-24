@@ -177,14 +177,14 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Command::Mcp(args) => mcp(args),
-        Command::Install(args) => install::install(args),
+        Command::Mcp(args) => mcp(&args),
+        Command::Install(args) => install::install(&args),
         Command::Doctor(args) => install::doctor(&args.drivers),
-        Command::Login(args) => login::login(args),
+        Command::Login(args) => login::login(&args),
     }
 }
 
-fn mcp(args: McpArgs) -> ExitCode {
+fn mcp(args: &McpArgs) -> ExitCode {
     let runs_dir = match std::path::absolute(Path::new(&args.out)) {
         Ok(dir) => dir,
         Err(error) => {

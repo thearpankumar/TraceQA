@@ -20,9 +20,10 @@ ignore = []
 [bans]
 multiple-versions = "warn"
 # A wildcard version is a dependency on whatever is newest. The workspace crates depend on each
-# other by path without a version, and cargo-deny only exempts path dependencies of crates marked
-# `publish = false`, which these are not yet. Once they are, change this to "deny".
-wildcards = "warn"
+# other by path without a version; cargo-deny exempts path dependencies of crates marked
+# `publish = false`, which every crate here is (workspace.package). When a crate is published,
+# its path dependencies need versions.
+wildcards = "deny"
 allow-wildcard-paths = true
 
 [licenses]

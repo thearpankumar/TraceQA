@@ -446,7 +446,7 @@ fn roll_up_status(targets: &[TargetSummary]) -> RunStatus {
 /// process that renders a page, so half the cores is a safe share, and beyond four the gain
 /// is small while the memory use is not.
 fn default_parallelism() -> usize {
-    let cores = thread::available_parallelism().map_or(1, |cores| cores.get());
+    let cores = thread::available_parallelism().map_or(1, std::num::NonZero::get);
     (cores / 2).clamp(1, 4)
 }
 

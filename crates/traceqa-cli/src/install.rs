@@ -173,7 +173,7 @@ fn step(dry_run: bool, what: &str, program: &Path, args: &[String]) -> Result<()
     }
 }
 
-pub fn install(args: InstallArgs) -> ExitCode {
+pub fn install(args: &InstallArgs) -> ExitCode {
     match try_install(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
@@ -183,7 +183,7 @@ pub fn install(args: InstallArgs) -> ExitCode {
     }
 }
 
-fn try_install(args: InstallArgs) -> Result<(), String> {
+fn try_install(args: &InstallArgs) -> Result<(), String> {
     let unknown: Vec<&String> = args
         .browsers
         .iter()
@@ -515,6 +515,6 @@ mod tests {
             with_deps: false,
             dry_run: false,
         };
-        assert!(try_install(args).unwrap_err().contains("unknown browser"));
+        assert!(try_install(&args).unwrap_err().contains("unknown browser"));
     }
 }
