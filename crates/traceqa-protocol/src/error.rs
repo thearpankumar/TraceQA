@@ -123,6 +123,10 @@ pub enum ParseError {
     BrowserTarget(String),
     #[error("expected WIDTHxHEIGHT such as 1280x800, got {0:?}")]
     Viewport(String),
+    #[error("viewport sides must be between 1 and {max}, got {0:?}", max = crate::MAX_VIEWPORT_SIDE)]
+    ViewportSize(String),
+    #[error("unknown browser {0:?}. Known: {known}", known = crate::KNOWN_BROWSERS.join(", "))]
+    UnknownBrowser(String),
 }
 
 #[cfg(test)]
