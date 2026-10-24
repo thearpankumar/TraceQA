@@ -357,8 +357,12 @@ The requirements file is made from `uv.lock` by
 
 Checks the setup and says what is missing: the commit the binary was built from
 (or `not a release build`), TraceQA's folder, uv, and for each
-driver where it was found, whether it starts, and which browsers it opens.
-Exits with 1 when no driver works.
+driver where it was found, whether it starts, and, for each browser it lists,
+whether that browser really opens (doctor starts a headless window and closes
+it, one to three seconds per browser). A browser that is not installed is named,
+with the command that installs it. `cdp` and `webdriver` need an address and
+are not tried; Safari is tried on macOS only. Honours `PLAYWRIGHT_BROWSERS_PATH`.
+Exits with 0 when at least one browser opens, and with 1 when none does.
 
 ```
 TraceQA 0.1.0
@@ -370,9 +374,15 @@ Drivers:
   /Users/me/.traceqa/env/bin/traceqa-driver-playwright
     installed: /Users/me/.traceqa/env/bin/traceqa-driver-playwright
     works: traceqa-driver-playwright 0.1.0, opens chromium, chrome, msedge, firefox, webkit, cdp
+    chromium: ok
+    chrome: ok
+    msedge: not installed -> msedge is not installed. Run: traceqa install msedge
+    firefox: ok
+    webkit: ok
   ...
 
-Ready. Browsers available: cdp, chrome, chromium, firefox, msedge, safari, webdriver, webkit
+Ready. Browsers that work: chrome, chromium, firefox, webkit
+Not installed: msedge. Run: traceqa install msedge
 ```
 
 ## Pages behind a sign-in

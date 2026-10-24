@@ -306,7 +306,29 @@ fn spawn_error(command: &DriverCommand, error: &std::io::Error) -> DriverError {
         std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied => ErrorKind::Unsupported,
         _ => ErrorKind::Transport,
     };
-    DriverError::new(kind, redact_text(&format!("could not start `{command}`: {error}")))
+    // The operating system's own words for a missing program ("program not found", "No such
+    // file or directory") say nothing about what to do, so the text says that instead.
+    let why = match error.kind() {
+        std::io::ErrorKind::NotFound => "it is not installed or not on PATH. Run: traceqa install".to_string(),
+        _ => error.to_string(),
+    };
+    DriverError::new(kind, redact_text(&format!("could not start `{command}`: {why}")))
+}
+
+#[cfg(test)]
+mod spawn_error_tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_driver_program_says_how_to_install_it() {
+        let command = DriverCommand::parse("traceqa-no-such-driver").unwrap();
+        let error = spawn_error(&command, &std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert_eq!(
+            error.message(),
+            "could not start `traceqa-no-such-driver`: it is not installed or not on PATH. Run: traceqa install"
+        );
+        assert_eq!(*error.kind(), ErrorKind::Unsupported);
+    }
 }
 
 impl Transport for ProcessTransport {
