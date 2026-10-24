@@ -166,6 +166,15 @@ gh api repos/actions/checkout/commits/v4.4.0 --jq .sha
 from a fork. `zizmor` with a GitHub token (`GH_TOKEN`) runs the online
 `impostor-commit` check that catches this.
 
+## Package checks
+
+The Lint job runs `npm run lint:package` in `sdks/typescript`: it builds, then
+`publint --strict` checks `package.json` (exports, types, files) and
+`attw --pack . --profile esm-only` checks the packed tarball's types for an ESM
+only package. `prepublishOnly` runs the type check and the build, so a publish
+from a clean checkout cannot ship a stale `dist/`. Every published package
+carries a copy of the root `LICENSE` (`tests/test_package_licenses.py`).
+
 ## Dependency audits and updates
 
 The Audit workflow (`.github/workflows/audit.yml`) runs every Monday, on demand,

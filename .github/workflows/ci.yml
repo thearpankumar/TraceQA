@@ -140,6 +140,9 @@ jobs:
       - name: TypeScript type check
         working-directory: sdks/typescript
         run: npm run typecheck
+      - name: Package metadata (publint, are-the-types-wrong)
+        working-directory: sdks/typescript
+        run: npm run lint:package
 
       # The workspace outlives the job on a persistent machine. Remove what the build left.
       - name: Clean the workspace

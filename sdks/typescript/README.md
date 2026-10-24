@@ -1,7 +1,7 @@
 # traceqa (TypeScript)
 
 TypeScript client for TraceQA. It starts the `traceqa` engine and talks to it;
-all logic lives in the engine. Node 18 or later, no runtime dependencies.
+all logic lives in the engine. Node 22 or later, no runtime dependencies.
 
 ```ts
 import { extract } from "traceqa";
@@ -28,6 +28,18 @@ Errors are `TraceQAError` and its subclasses `EngineStartError`,
 `EngineExitedError`, `EngineRefusedError` and `EngineProtocolError`; the original
 error is kept in `cause`. `engine.close({ timeoutMs })` kills an engine that does
 not exit in time.
+
+## ESM only
+
+The package is ESM only (`"type": "module"`, no CommonJS build). From ESM, `import`
+it as above. From CommonJS, use a dynamic import:
+
+```js
+const { extract } = await import("traceqa");
+```
+
+On Node 22.12 or later, `require("traceqa")` also works, because Node can load
+ES modules with `require`.
 
 ## Development
 
