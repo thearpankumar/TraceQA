@@ -164,23 +164,7 @@ impl Run {
         };
         save(&writer, &manifest);
 
-        // Every browser at every viewport, each with the folder name it will write to.
-        let mut used_names = HashSet::new();
-        let jobs: Vec<Planned> = params
-            .targets
-            .iter()
-            .flat_map(|target| params.viewports.iter().map(move |viewport| (target, viewport)))
-            .map(|(target, viewport)| Planned {
-                name: unique_name(&mut used_names, target, viewport),
-                target,
-                viewport,
-            })
-            .collect();
-        let workers = match params.parallel {
-            Some(asked) if asked > 0 => asked as usize,
-            _ => default_parallelism(),
-        }
-        .min(jobs.len());
+        let (jobs, workers) = plan(&params);
 
         let sink = Mutex::new(Sink { writer, listener });
         let progress = Progress { sink: &sink };
@@ -204,46 +188,8 @@ impl Run {
             cancel: execution.cancel,
             policy: execution.policy,
         };
-        let next = AtomicUsize::new(0);
-        let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
-        thread::scope(|scope| {
-            for _ in 0..workers {
-                scope.spawn(|| {
-                    // A driver process serves one browser at a time, so each worker has its own.
-                    let mut drivers = (execution.drivers)();
-                    while let Some((index, job)) = claim(&next, &jobs) {
-                        let outcome = run_target(job, &shared, &mut drivers);
-                        finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
-                    }
-                });
-            }
-        });
-        let mut finished: Vec<Finished> = finished
-            .into_inner()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .into_iter()
-            .map(|outcome| outcome.expect("every job is claimed by a worker"))
-            .collect();
-
-        // A page that is heavy to render can time out only because several browsers were
-        // rendering it at once. Such a target gets a second go with the machine to itself.
-        if workers > 1 {
-            for (job, outcome) in jobs.iter().zip(&mut finished).filter(|(_, outcome)| outcome.timed_out) {
-                if execution.cancel.load(Ordering::Relaxed) {
-                    break;
-                }
-                progress.emit(
-                    "target.retried",
-                    Some(&job.name),
-                    format!(
-                        "Trying {} again on its own: it timed out while other browsers were running",
-                        job.name
-                    ),
-                    json!({}),
-                );
-                *outcome = run_target(job, &shared, &mut (execution.drivers)());
-            }
-        }
+        let mut finished = run_workers(&jobs, workers, &shared, execution);
+        retry_timed_out(&jobs, &mut finished, workers, &shared, execution);
         // In the order they were asked for, whatever order they finished in.
         manifest.targets = finished.into_iter().map(|outcome| outcome.summary).collect();
 
@@ -251,14 +197,7 @@ impl Run {
             progress.emit("warning", None, message, json!({ "code": "browsers_disagree" }));
         }
 
-        let has = |status| manifest.targets.iter().any(|target| target.status == status);
-        manifest.status = if has(RunStatus::Cancelled) {
-            RunStatus::Cancelled
-        } else if has(RunStatus::Failed) {
-            RunStatus::Failed
-        } else {
-            RunStatus::Completed
-        };
+        manifest.status = roll_up_status(&manifest.targets);
         manifest.finished_at = Some(now_rfc3339());
         progress.emit(
             "run.finished",
@@ -302,6 +241,101 @@ struct Shared<'a, 'b> {
     exclusive: &'a Exclusive,
     cancel: &'a AtomicBool,
     policy: Option<&'a UrlPolicy>,
+}
+
+/// Every browser at every viewport, each with the folder name it will write to, and how many
+/// of them to run at once.
+fn plan(params: &RunStartParams) -> (Vec<Planned<'_>>, usize) {
+    let mut used_names = HashSet::new();
+    let jobs: Vec<Planned> = params
+        .targets
+        .iter()
+        .flat_map(|target| params.viewports.iter().map(move |viewport| (target, viewport)))
+        .map(|(target, viewport)| Planned {
+            name: unique_name(&mut used_names, target, viewport),
+            target,
+            viewport,
+        })
+        .collect();
+    let workers = match params.parallel {
+        Some(asked) if asked > 0 => asked as usize,
+        _ => default_parallelism(),
+    }
+    .min(jobs.len());
+    (jobs, workers)
+}
+
+/// Runs the jobs on `workers` threads, each with drivers of its own, and returns how each went
+/// in the order of `jobs`.
+fn run_workers(jobs: &[Planned], workers: usize, shared: &Shared, execution: &Execution) -> Vec<Finished> {
+    let next = AtomicUsize::new(0);
+    let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
+    thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                // A driver process serves one browser at a time, so each worker has its own.
+                let mut drivers = (execution.drivers)();
+                while let Some((index, job)) = claim(&next, jobs) {
+                    let outcome = run_target(job, shared, &mut drivers);
+                    finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
+                }
+            });
+        }
+    });
+    finished
+        .into_inner()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .into_iter()
+        .map(|outcome| outcome.expect("every job is claimed by a worker"))
+        .collect()
+}
+
+/// The targets to run a second time: only when several ran at once, and only those that failed
+/// because the browser or its driver did not answer in time.
+fn timed_out_targets(workers: usize, finished: &[Finished]) -> Vec<usize> {
+    if workers <= 1 {
+        return Vec::new();
+    }
+    (0..finished.len()).filter(|&index| finished[index].timed_out).collect()
+}
+
+/// A page that is heavy to render can time out only because several browsers were rendering it
+/// at once. Such a target gets a second go with the machine to itself.
+fn retry_timed_out(
+    jobs: &[Planned],
+    finished: &mut [Finished],
+    workers: usize,
+    shared: &Shared,
+    execution: &Execution,
+) {
+    for index in timed_out_targets(workers, finished) {
+        if execution.cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let job = &jobs[index];
+        shared.progress.emit(
+            "target.retried",
+            Some(&job.name),
+            format!(
+                "Trying {} again on its own: it timed out while other browsers were running",
+                job.name
+            ),
+            json!({}),
+        );
+        finished[index] = run_target(job, shared, &mut (execution.drivers)());
+    }
+}
+
+/// The run is cancelled if any target was, else failed if any failed, else completed.
+fn roll_up_status(targets: &[TargetSummary]) -> RunStatus {
+    let has = |status| targets.iter().any(|target| target.status == status);
+    if has(RunStatus::Cancelled) {
+        RunStatus::Cancelled
+    } else if has(RunStatus::Failed) {
+        RunStatus::Failed
+    } else {
+        RunStatus::Completed
+    }
 }
 
 /// How many browsers to run at once when the request does not say. Each one is a browser
@@ -607,6 +641,79 @@ mod tests {
         // A different browser is not held up by it.
         let _safari = exclusive.hold("safari");
         let _other = exclusive.hold("another");
+    }
+
+    fn summary_with(status: RunStatus) -> TargetSummary {
+        TargetSummary {
+            dir: "firefox-1280x800".into(),
+            target: BrowserTarget::named("firefox"),
+            viewport: Viewport {
+                width: 1280,
+                height: 800,
+            },
+            browser: None,
+            status,
+            component_count: 0,
+            instance_count: 0,
+            warning_count: 0,
+            duration_ms: 0,
+            timings: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn roll_up_status_prefers_cancelled_then_failed_then_completed() {
+        use RunStatus::{Cancelled, Completed, Failed};
+        let rolled = |statuses: &[RunStatus]| {
+            let targets: Vec<TargetSummary> = statuses.iter().map(|status| summary_with(*status)).collect();
+            roll_up_status(&targets)
+        };
+        assert_eq!(rolled(&[Completed, Completed]), Completed);
+        assert_eq!(rolled(&[Completed, Failed]), Failed);
+        assert_eq!(rolled(&[Failed, Cancelled, Completed]), Cancelled);
+        assert_eq!(rolled(&[Cancelled]), Cancelled);
+        // Nothing to report on is not a failure.
+        assert_eq!(rolled(&[]), Completed);
+    }
+
+    #[test]
+    fn only_timeouts_are_retried_and_only_when_targets_ran_side_by_side() {
+        let finished = |timed_out| Finished {
+            summary: summary_with(RunStatus::Failed),
+            timed_out,
+        };
+        let results = [finished(false), finished(true), finished(false), finished(true)];
+        assert_eq!(timed_out_targets(2, &results), [1, 3]);
+        // A target that had the machine to itself already got its fair chance.
+        assert!(timed_out_targets(1, &results).is_empty());
+        assert!(timed_out_targets(4, &[finished(false)]).is_empty());
+    }
+
+    #[test]
+    fn the_plan_names_every_browser_at_every_viewport_and_caps_the_workers() {
+        let mut params = request("extract", "https://shop.test", 2);
+        params.viewports.push(Viewport {
+            width: 390,
+            height: 844,
+        });
+        params.parallel = Some(16);
+        let (jobs, workers) = plan(&params);
+        let names: Vec<&str> = jobs.iter().map(|job| job.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "firefox-1280x800",
+                "firefox-390x844",
+                "firefox-1280x800-2",
+                "firefox-390x844-2"
+            ]
+        );
+        assert_eq!(workers, 4);
+        params.parallel = Some(2);
+        assert_eq!(plan(&params).1, 2);
+        params.parallel = Some(0);
+        assert!((1..=4).contains(&plan(&params).1));
     }
 
     #[test]
