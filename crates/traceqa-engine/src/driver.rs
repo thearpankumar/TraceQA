@@ -6,7 +6,7 @@
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -80,7 +80,21 @@ impl DriverError {
     /// True when the driver itself can no longer be trusted: it did not answer in time, or
     /// the pipe to it broke. Its state is unknown, so it must be replaced, not reused.
     pub(crate) fn loses_driver(&self) -> bool {
-        matches!(self.kind, ErrorKind::Timeout | ErrorKind::Transport)
+        matches!(self.kind, ErrorKind::Timeout | ErrorKind::Transport) || self.is_cancelled()
+    }
+
+    /// The engine stopped waiting because the run was cancelled. The driver was left in the
+    /// middle of a request, so it counts as lost.
+    fn cancelled() -> Self {
+        Self::new(
+            ErrorKind::Other(CANCELLED.to_string()),
+            "cancelled while waiting for the driver",
+        )
+    }
+
+    /// True when the call was given up on because the run was cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(&self.kind, ErrorKind::Other(kind) if kind == CANCELLED)
     }
 
     /// True when starting the driver failed in a way that may pass: it did not answer hello in
@@ -91,9 +105,32 @@ impl DriverError {
     }
 }
 
+/// The kind a call that was given up on because of a cancel carries. It never goes on a wire.
+const CANCELLED: &str = "cancelled";
+
+/// How often a wait for a driver looks at the cancel flag.
+const CANCEL_SLICE: Duration = Duration::from_millis(250);
+
+/// A flag that is never set, for calls that must not be cancelled.
+static NEVER: AtomicBool = AtomicBool::new(false);
+
 /// Carries one request to a driver and brings back its result.
 pub trait Transport: Send {
     fn call(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, DriverError>;
+
+    /// As [`call`](Self::call), but gives up soon after `cancel` is set, with an error for which
+    /// [`DriverError::is_cancelled`] is true. A transport that cannot be interrupted keeps this
+    /// default and simply waits for the call.
+    fn call_until(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<Value, DriverError> {
+        let _ = cancel;
+        self.call(method, params, timeout)
+    }
 }
 
 /// How to start a driver: a program and its arguments.
@@ -274,14 +311,30 @@ fn spawn_error(command: &DriverCommand, error: &std::io::Error) -> DriverError {
 
 impl Transport for ProcessTransport {
     fn call(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, DriverError> {
-        let result = self.exchange(method, params, timeout);
+        self.call_until(method, params, timeout, &NEVER)
+    }
+
+    fn call_until(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<Value, DriverError> {
+        let result = self.exchange(method, params, timeout, cancel);
         self.unresponsive |= result.as_ref().is_err_and(DriverError::loses_driver);
         result
     }
 }
 
 impl ProcessTransport {
-    fn exchange(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, DriverError> {
+    fn exchange(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<Value, DriverError> {
         self.next_id += 1;
         let id = Id::Number(self.next_id);
         let line = jsonrpc::encode(&Message::Request {
@@ -296,7 +349,8 @@ impl ProcessTransport {
         let deadline = Instant::now() + timeout;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            match self.incoming.recv_timeout(remaining) {
+            // Waits in slices, so a cancel is seen within one slice and not after the whole timeout.
+            match self.incoming.recv_timeout(remaining.min(CANCEL_SLICE)) {
                 Ok(Ok(Message::Response { id: answered, result })) if answered == id => {
                     return result.map_err(driver_error);
                 }
@@ -308,6 +362,10 @@ impl ProcessTransport {
                 // An answer to a request we gave up on, or a notification we do not know.
                 Ok(Ok(_)) => {}
                 Ok(Err(garbage)) => return Err(DriverError::transport(format!("driver sent a bad line: {garbage}"))),
+                Err(RecvTimeoutError::Timeout) if cancel.load(Ordering::Relaxed) => {
+                    return Err(DriverError::cancelled());
+                }
+                Err(RecvTimeoutError::Timeout) if Instant::now() < deadline => {}
                 Err(RecvTimeoutError::Timeout) => {
                     return Err(DriverError::new(
                         ErrorKind::Timeout,
@@ -369,7 +427,7 @@ impl Driver {
             protocol_version: PROTOCOL_VERSION,
             engine_version: crate::VERSION.to_string(),
         };
-        let info: DriverHelloResult = request(transport.as_mut(), method::DRIVER_HELLO, &hello, SHORT)?;
+        let info: DriverHelloResult = request(transport.as_mut(), method::DRIVER_HELLO, &hello, SHORT, &NEVER)?;
         if info.protocol_version != PROTOCOL_VERSION {
             return Err(DriverError::new(
                 ErrorKind::VersionMismatch,
@@ -392,13 +450,29 @@ impl Driver {
         self.lost
     }
 
+    /// The calls that can take long, which stop soon after `cancel` is set. A call that was
+    /// stopped leaves the driver lost: it is replaced, never asked for anything more.
+    pub fn until<'a>(&'a mut self, cancel: &'a AtomicBool) -> Cancellable<'a> {
+        Cancellable { driver: self, cancel }
+    }
+
     fn request<P: Serialize, R: DeserializeOwned>(
         &mut self,
         method: &str,
         params: &P,
         timeout: Duration,
     ) -> Result<R, DriverError> {
-        let result = request(self.transport.as_mut(), method, params, timeout);
+        self.request_until(method, params, timeout, &NEVER)
+    }
+
+    fn request_until<P: Serialize, R: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        params: &P,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<R, DriverError> {
+        let result = request(self.transport.as_mut(), method, params, timeout, cancel);
         self.lost |= result.as_ref().is_err_and(DriverError::loses_driver);
         result
     }
@@ -451,16 +525,54 @@ impl Driver {
     }
 }
 
+/// A driver whose calls give up soon after a cancel flag is set. See [`Driver::until`].
+pub struct Cancellable<'a> {
+    driver: &'a mut Driver,
+    cancel: &'a AtomicBool,
+}
+
+impl Cancellable<'_> {
+    pub fn open_session(&mut self, params: &SessionOpenParams) -> Result<SessionOpenResult, DriverError> {
+        self.driver
+            .request_until(method::SESSION_OPEN, params, SLOW, self.cancel)
+    }
+
+    pub fn goto(&mut self, params: &PageGotoParams) -> Result<PageGotoResult, DriverError> {
+        let own = Duration::from_millis(params.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
+        self.driver
+            .request_until(method::PAGE_GOTO, params, own + MARGIN, self.cancel)
+    }
+
+    pub fn eval(&mut self, params: &PageEvalParams) -> Result<PageEvalResult, DriverError> {
+        let own = Duration::from_millis(params.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
+        self.driver
+            .request_until(method::PAGE_EVAL, params, own + MARGIN, self.cancel)
+    }
+
+    pub fn scroll(&mut self, params: &PageScrollParams) -> Result<PageScrollResult, DriverError> {
+        self.driver
+            .request_until(method::PAGE_SCROLL, params, SHORT, self.cancel)
+    }
+
+    pub fn screenshot(&mut self, params: &PageScreenshotParams) -> Result<PageScreenshotResult, DriverError> {
+        self.driver
+            .request_until(method::PAGE_SCREENSHOT, params, SLOW, self.cancel)
+    }
+}
+
 fn request<P: Serialize, R: DeserializeOwned>(
     transport: &mut dyn Transport,
     method: &str,
     params: &P,
     timeout: Duration,
+    cancel: &AtomicBool,
 ) -> Result<R, DriverError> {
     let params = serde_json::to_value(params).expect("spec types always serialise");
     // A transport is trusted with nothing: a scripted or third-party one can hand back an error
     // that quotes an address, so what comes out of it is redacted here as well.
-    let result = transport.call(method, params, timeout).map_err(DriverError::redacted)?;
+    let result = transport
+        .call_until(method, params, timeout, cancel)
+        .map_err(DriverError::redacted)?;
     serde_json::from_value(result).map_err(|e| {
         DriverError::new(
             ErrorKind::Internal,
@@ -616,7 +728,7 @@ mod tests {
                 ))
             }
         }
-        let failed = request::<_, Empty>(&mut Quoting, "page.goto", &json!({}), SHORT).unwrap_err();
+        let failed = request::<_, Empty>(&mut Quoting, "page.goto", &json!({}), SHORT, &NEVER).unwrap_err();
         assert_eq!(failed.message(), "failed at http://h/?api_key=REDACTED");
         // And so is what the engine itself reports about a driver line that was not valid.
         let garbage = DriverError::transport("driver sent a bad line: {\"u\":\"https://h/?sig=abc\"");
@@ -851,6 +963,68 @@ mod tests {
         assert!(drivers.for_browser("firefox").is_err());
         assert_eq!(first_starts.load(Ordering::SeqCst), 2);
         assert_eq!(second_starts.load(Ordering::SeqCst), 2);
+    }
+
+    const SILENT_SWITCH: &str = "TRACEQA_TEST_SILENT_DRIVER";
+
+    /// Not a test on its own: the child process of `exchange_returns_early_when_cancelled` runs
+    /// this one function. It reads requests and never answers, like a hung driver.
+    #[test]
+    fn silent_child() {
+        if std::env::var_os(SILENT_SWITCH).is_none() {
+            return;
+        }
+        thread::sleep(Duration::from_secs(60));
+    }
+
+    #[test]
+    fn exchange_returns_early_when_cancelled() {
+        let mut process = Command::new(std::env::current_exe().unwrap());
+        process
+            .args([
+                "--exact",
+                "driver::tests::silent_child",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(SILENT_SWITCH, "1");
+        let command = DriverCommand {
+            program: "test-binary".into(),
+            args: vec![],
+        };
+        let mut transport = ProcessTransport::start(process, &command, 4096).unwrap();
+        // The test harness prints a line of its own first; each is answered as a bad line. Wait
+        // until the child is silent.
+        loop {
+            match transport.call("page.eval", json!({}), Duration::from_millis(400)) {
+                Err(error) if error.kind() == &ErrorKind::Timeout => break,
+                Err(error) => assert!(error.message().contains("bad line"), "{error}"),
+                Ok(_) => panic!("a silent driver answered"),
+            }
+            transport.unresponsive = false;
+        }
+        transport.unresponsive = false;
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let setter = {
+            let cancel = Arc::clone(&cancel);
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(100));
+                cancel.store(true, Ordering::SeqCst);
+            })
+        };
+        let started = Instant::now();
+        let error = transport
+            .call_until("page.goto", json!({}), Duration::from_secs(30), &cancel)
+            .unwrap_err();
+        let waited = started.elapsed();
+        setter.join().unwrap();
+        assert!(error.is_cancelled(), "{error}");
+        assert!(error.loses_driver(), "a driver stopped mid-request is lost");
+        assert!(waited < Duration::from_secs(1), "waited {waited:?}");
+        assert!(transport.unresponsive);
+        // And in the engine's own terms it is a cancelled run.
+        assert!(crate::EngineError::from(error).is_cancelled());
     }
 
     #[test]

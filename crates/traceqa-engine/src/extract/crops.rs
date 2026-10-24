@@ -1,6 +1,7 @@
 //! Pictures: screenshots and the crop of each component.
 
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 use traceqa_protocol::types::{Component, PageScreenshotParams, Warning};
 use traceqa_recorder::{save_crops, CropRequest, PageImage};
@@ -16,12 +17,13 @@ use crate::EngineError;
 /// that has stopped answering is a different matter and ends the extraction.
 pub(super) fn screenshot(
     driver: &mut Driver,
+    cancel: &AtomicBool,
     session_id: &str,
     path: &Path,
     full_page: bool,
     failure: &mut Option<Warning>,
 ) -> Result<bool, EngineError> {
-    let taken = driver.screenshot(&PageScreenshotParams {
+    let taken = driver.until(cancel).screenshot(&PageScreenshotParams {
         session_id: session_id.to_string(),
         path: path.to_string_lossy().into_owned(),
         full_page: Some(full_page),
