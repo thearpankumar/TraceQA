@@ -426,7 +426,9 @@ fn watch_for_abort(watched: &Watched) {
 /// What a failed run says when it panicked. The text is bounded, and is the only place the
 /// panic's own words reach a run folder.
 fn internal_error_text(message: &str) -> String {
-    let short: String = message.chars().take(200).collect();
+    // Redacted first, then cut: a cut cannot leave the start of a secret behind.
+    let safe = crate::url_safety::redact_text(message);
+    let short: String = safe.chars().take(200).collect();
     format!("internal error: {short}")
 }
 
@@ -1123,6 +1125,17 @@ mod tests {
         assert_eq!(unique_name(&mut used, &target("webkit"), &viewport), "webkit-390x844");
         assert_eq!(unique_name(&mut used, &target("webkit"), &viewport), "webkit-390x844-2");
         assert_eq!(unique_name(&mut used, &target("../evil"), &viewport), "___evil-390x844");
+    }
+
+    #[test]
+    fn internal_error_text_redacts_addresses_before_truncating() {
+        let text = internal_error_text("boom https://h/p?token=SECRET123 and more");
+        assert!(!text.contains("SECRET123"), "{text}");
+        assert!(text.starts_with("internal error: boom "), "{text}");
+        // A secret that straddles the 200th character must not leak its first half either.
+        let message = format!("{} https://h/p?token=SECRET123456789", "x".repeat(180));
+        let text = internal_error_text(&message);
+        assert!(!text.contains("SECRET") && !text.contains("SEC"), "{text}");
     }
 
     #[test]
