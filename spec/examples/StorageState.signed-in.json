@@ -13,7 +13,7 @@
   ],
   "origins": [
     {
-      "origin": "https://aether-clinic-umber.vercel.app",
+      "origin": "https://app.example.com",
       "localStorage": [
         {
           "name": "has_onboarded",
