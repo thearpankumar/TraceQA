@@ -1,0 +1,10 @@
+{
+  "finalUrl": "https://shop.test/home",
+  "status": 200,
+  "title": "Buggy Shop",
+  "redirectChain": [
+    { "url": "http://shop.test/", "remoteAddress": "127.0.0.1" },
+    { "url": "https://shop.test/", "remoteAddress": "127.0.0.1" },
+    { "url": "https://shop.test/home" }
+  ]
+}

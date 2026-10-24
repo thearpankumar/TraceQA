@@ -61,6 +61,17 @@ An address without any of them is stored byte for byte as given. An address with
 user name or password (`https://user:pass@host/`) is refused before a run folder is
 created. The list is `SECRET_KEYS` in `crates/traceqa-engine/src/url_safety.rs`.
 
+## Redirects and operator address rules
+
+`PageGotoResult.redirectChain` lists every request that led to the page, oldest
+first and `finalUrl` last, each with the IP address the browser connected to
+(`remoteAddress`) when the browser reports it. It is optional: a driver that
+cannot see the hops (classic WebDriver shows only the final address) leaves it
+out. The engine checks each hop against the address rules of the MCP server
+(`traceqa mcp --block-private`, see `docs/usage.md`). A refused hop fails the
+target with the `blocked_url` error kind (not retryable), and nothing from the
+page is written.
+
 ## Run folder layout
 
 ```

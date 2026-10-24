@@ -22,6 +22,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from traceqa_protocol import contracts, models
 from traceqa_protocol.frames import is_cross_origin
@@ -336,7 +337,9 @@ class WebDriverDriver:
             )
         except WebDriverError as error:
             if error.code == "timeout":
-                raise RpcError("timeout", f"{params.url} did not load in {timeout} ms", retryable=True) from error
+                raise RpcError(
+                    "timeout", f"{without_query(params.url)} did not load in {timeout} ms", retryable=True
+                ) from error
             raise RpcError("navigation_failed", error.message, retryable=True) from error
 
     def page_eval(self, params: models.PageEvalParams) -> models.PageEvalResult:
@@ -444,3 +447,19 @@ class WebDriverDriver:
         path.write_bytes(data)
         width, height = png_size(data)
         return models.PageScreenshotResult(path=str(path), width=width, height=height)
+
+
+def without_query(url: str) -> str:
+    """The address as scheme, host and path only: no user name, password, query or fragment.
+    Messages end up in logs and run files, and a query can carry a token."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        port = f":{parts.port}" if parts.port else ""
+        if parts.scheme and host:
+            return f"{parts.scheme}://{host}{port}{parts.path}"
+    except ValueError:
+        pass
+    return url.split("?", 1)[0].split("#", 1)[0]

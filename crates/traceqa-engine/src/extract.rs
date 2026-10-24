@@ -16,9 +16,10 @@ use traceqa_protocol::types::{
 };
 use traceqa_recorder::{now_rfc3339, save_crops, CropRequest, PageImage, RunWriter};
 
-use crate::driver::{Driver, Drivers, DEFAULT_TIMEOUT_MS};
+use crate::driver::{Driver, DriverError, Drivers, DEFAULT_TIMEOUT_MS};
 use crate::group::{group, Located};
 use crate::run::{Exclusive, RUN_FOLDER_VERSION};
+use crate::url_policy::UrlPolicy;
 use crate::url_safety::redact;
 use crate::{fingerprint, EngineError, COLLECTOR};
 
@@ -113,6 +114,8 @@ pub(crate) struct Job<'a> {
     /// Cookies and stored values every browser starts with, for pages behind a sign-in.
     pub storage_state: Option<&'a StorageState>,
     pub cancel: &'a AtomicBool,
+    /// Operator rules for where the page may lead, checked after the page has loaded.
+    pub policy: Option<&'a UrlPolicy>,
 }
 
 fn warning(code: &str, message: String) -> Warning {
@@ -629,6 +632,17 @@ fn read_page(
         wait_until: Some(WaitUntil::Settled),
         timeout_ms: Some(job.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
     })?;
+    // Redirects are only visible after the fact, so a refused place fails the target before
+    // anything on the page is read or written down.
+    if let Some(blocked) = job.policy.and_then(|policy| policy.check_landing(&page).err()) {
+        return Err(DriverError {
+            kind: "blocked_url".into(),
+            message: format!(
+                "the page led to a place this server does not allow: {blocked}. The request had already been made; nothing from the page was read"
+            ),
+        }
+        .into());
+    }
     // The browser may have been redirected to an address that carries a token: write it down hidden.
     let shown_final_url = redact(&page.final_url);
     progress.emit(

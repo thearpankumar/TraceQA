@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use traceqa_engine::driver::{Driver, DriverError, Drivers, Transport};
-use traceqa_engine::{Execution, Run};
+use traceqa_engine::{Execution, Run, UrlPolicy};
 use traceqa_protocol::types::{
     BrowserTarget, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState,
     Viewport,
@@ -38,6 +38,8 @@ struct Scripted {
     frame_url: String,
     /// Every address the engine asked the driver to open.
     opened: Arc<Mutex<Vec<String>>>,
+    /// The redirect chain the pretend page reports, as JSON, when it reports one.
+    chain: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -118,7 +120,13 @@ impl Transport for Scripted {
                 }
                 opened
             }
-            "page.goto" => json!({ "finalUrl": self.final_url, "status": 200, "title": "Buggy Shop" }),
+            "page.goto" => {
+                let mut page = json!({ "finalUrl": self.final_url, "status": 200, "title": "Buggy Shop" });
+                if let Some(chain) = self.chain {
+                    page["redirectChain"] = serde_json::from_str(chain).unwrap();
+                }
+                page
+            }
             "page.scroll" => {
                 self.y = match params["byY"].as_f64() {
                     Some(by) => (self.y + by).min(PAGE_HEIGHT - VIEW_HEIGHT),
@@ -211,6 +219,8 @@ struct Case {
     final_url: &'static str,
     frame_url: &'static str,
     storage_state: Option<StorageState>,
+    chain: Option<&'static str>,
+    policy: Option<UrlPolicy>,
 }
 
 impl Default for Case {
@@ -225,6 +235,8 @@ impl Default for Case {
             final_url: "https://shop.test/",
             frame_url: "https://pay.example.com/widget",
             storage_state: None,
+            chain: None,
+            policy: None,
         }
     }
 }
@@ -271,6 +283,7 @@ fn run_case(case: Case) -> Outcome {
                 final_url: case.final_url.into(),
                 frame_url: case.frame_url.into(),
                 opened: Arc::clone(&opened),
+                chain: case.chain,
             };
             Driver::connect(Box::new(transport))
         };
@@ -280,6 +293,7 @@ fn run_case(case: Case) -> Outcome {
     let mut events = Vec::new();
     let manifest = run.execute(
         &Execution {
+            policy: case.policy.as_ref(),
             drivers: &scripted,
             cancel: &cancel,
         },
@@ -487,6 +501,7 @@ fn run_six_targets_with(
                 final_url: "https://shop.test/".into(),
                 frame_url: "https://pay.example.com/widget".into(),
                 opened: Arc::default(),
+                chain: None,
             };
             Driver::connect(Box::new(transport))
         };
@@ -496,6 +511,7 @@ fn run_six_targets_with(
     let mut events = Vec::new();
     let manifest = run.execute(
         &Execution {
+            policy: None,
             drivers: &scripted,
             cancel: &cancel,
         },
@@ -846,4 +862,93 @@ fn no_warning_without_crops_or_without_a_state() {
     });
     assert_eq!(signed_in_pictures_count(&without_state), 0);
     assert_eq!(signed_in_pictures_count(&run_case(Case::default())), 0);
+}
+
+fn nothing_resolves(_: &str) -> Vec<std::net::IpAddr> {
+    Vec::new()
+}
+
+fn refused(case: Case) -> Outcome {
+    let outcome = run_case(Case { crops: false, ..case });
+    assert_eq!(outcome.manifest.status, RunStatus::Failed);
+    let target = &outcome.manifest.targets[0];
+    let error = target.error.as_deref().unwrap();
+    assert!(error.contains("blocked_url"), "{error}");
+    assert!(
+        !outcome.folder.join("firefox-1280x400").join("components.json").exists(),
+        "a refused page must leave no components.json"
+    );
+    // Nothing was read from the page, and its opening was not announced.
+    assert!(!outcome
+        .calls
+        .iter()
+        .any(|call| call.starts_with("page.eval") || call == "page.scroll"));
+    assert!(!outcome.events.iter().any(|event| event.type_ == "page.opened"));
+    for (path, text) in all_text_files(&outcome.folder) {
+        assert!(!text.contains("SEKRET"), "{} holds the secret", path.display());
+    }
+    outcome
+}
+
+#[test]
+fn a_redirect_chain_through_a_blocked_host_fails_the_target_and_writes_no_components() {
+    let strict = || UrlPolicy::new(true, &[]).with_resolver(nothing_resolves);
+    // A hop that is the metadata address, in the middle of a chain that ends somewhere fine.
+    let outcome = refused(Case {
+        chain: Some(
+            r#"[{"url":"https://shop.test/"},{"url":"http://169.254.169.254/latest?token=SEKRET"},{"url":"https://shop.test/"}]"#,
+        ),
+        policy: Some(strict()),
+        ..Case::default()
+    });
+    let error = outcome.manifest.targets[0].error.as_deref().unwrap();
+    assert!(
+        error.contains("169.254.169.254") && error.contains("already been made"),
+        "{error}"
+    );
+
+    // The browser says it connected to a private address for a public name.
+    refused(Case {
+        chain: Some(r#"[{"url":"https://shop.test/","remoteAddress":"10.0.0.7"},{"url":"https://shop.test/"}]"#),
+        policy: Some(strict()),
+        ..Case::default()
+    });
+    // ... and to the metadata address, which the default rules refuse too.
+    refused(Case {
+        chain: Some(r#"[{"url":"https://shop.test/","remoteAddress":"::ffff:169.254.169.254"}]"#),
+        policy: Some(UrlPolicy::default().with_resolver(nothing_resolves)),
+        ..Case::default()
+    });
+    // A driver that gives no chain is judged by where the page ended.
+    refused(Case {
+        chain: None,
+        final_url: "http://metadata.google.internal/computeMetadata?token=SEKRET",
+        policy: Some(UrlPolicy::default().with_resolver(nothing_resolves)),
+        ..Case::default()
+    });
+    refused(Case {
+        chain: None,
+        final_url: "http://192.168.1.1/",
+        policy: Some(strict()),
+        ..Case::default()
+    });
+}
+
+#[test]
+fn a_clean_chain_or_no_policy_leaves_the_run_alone() {
+    let clean = r#"[{"url":"https://shop.test/","remoteAddress":"93.184.216.34"},{"url":"https://shop.test/home"}]"#;
+    let with_policy = run_case(Case {
+        chain: Some(clean),
+        policy: Some(UrlPolicy::new(true, &[]).with_resolver(nothing_resolves)),
+        crops: false,
+        ..Case::default()
+    });
+    assert_eq!(with_policy.manifest.status, RunStatus::Completed);
+    // Without a policy even a metadata hop changes nothing: the CLI and `serve` are unchanged.
+    let without = run_case(Case {
+        chain: Some(r#"[{"url":"http://169.254.169.254/"}]"#),
+        crops: false,
+        ..Case::default()
+    });
+    assert_eq!(without.manifest.status, RunStatus::Completed);
 }

@@ -119,7 +119,8 @@ this way. See [architecture.md](architecture.md#client-protocol).
 ## `traceqa mcp`
 
 ```
-traceqa mcp [--out DIR] [--state-dir DIR] [--driver COMMAND]...
+traceqa mcp [--out DIR] [--state-dir DIR] [--allow-remote-browsers]
+            [--block-private] [--allow-host HOST]... [--driver COMMAND]...
 ```
 
 An MCP server: it lets AI tools such as Claude Code, Claude Desktop and Cursor
@@ -165,6 +166,45 @@ letter or digit, may not end in a dot, may not be a Windows device name (`CON`,
 and junctions are refused). `--state-dir` must be an existing folder, or the
 server exits with code 2. Errors never show a path, an operating system error
 or what the file holds.
+
+**Where the AI may send the browser (operator guide).** What the AI asks for
+is limited by options only you, the person who starts the server, can set:
+
+| Option | Effect |
+|---|---|
+| (default) | `cdp=ENDPOINT` and `webdriver=URL` browsers are refused and not even named in the tool's schema. Cloud metadata and link-local addresses are refused. Localhost and private networks work, so local dev servers can be tested. |
+| `--allow-remote-browsers` | The AI may attach to a running browser (`cdp=`) or a WebDriver server (`webdriver=`). They name a machine for this server to connect to, so turn this on only for an AI you trust with that. |
+| `--block-private` | Also refuse loopback, private (`10/8`, `172.16/12`, `192.168/16`), shared (`100.64/10`), unique-local (`fc00::/7`) and multicast addresses. |
+| `--allow-host HOST` | With `--block-private`, still allow this host (name or address). Repeat for several. |
+
+The address is read the way a browser reads it, so `http://2852039166/`,
+`http://0xA9FEA9FE/` and `http://[::ffff:a9fe:a9fe]/` are all seen as
+`169.254.169.254`. A name is looked up and every address it has is checked. The
+following are refused with or without `--block-private`, and `--allow-host`
+does not lift them: `169.254.0.0/16` (link-local, which holds the AWS, Azure
+and Google metadata service), `100.100.100.200`, `168.63.129.16`,
+`192.0.0.192`, `fd00:ec2::254`, `0.0.0.0/8`, `::`, `fe80::/10`, and the names
+`metadata.google.internal` and `metadata.goog`. A refused address is answered at
+once, before anything is requested.
+
+What this does not cover, so you can judge the risk:
+
+- **Redirects are checked after the fact (Playwright browsers).** A browser
+  shows its hops only once it has followed them, so the request to a refused
+  host has already been made when the check fails. The result is then thrown
+  away: the target fails with `blocked_url` and no components are written. Each
+  hop is checked by its address and by the IP address the browser connected to
+  (which defeats a name that answers differently the second time), where the
+  browser reports it. WebKit reports no connection address for a hop that
+  redirected; its name is looked up instead.
+- **WebDriver browsers** report only the final address, so only that is checked.
+- **Subresources and frames** (images, scripts, `fetch`, iframes) are not
+  checked. A page you let the browser load can make the browser request other
+  hosts. Run the server where that is harmless (no access to metadata or internal
+  services) if the AI should not be able to reach them.
+- A name that resolves to different addresses for the check and for the browser
+  (DNS rebinding) can pass the first check. The connection-address check is the
+  safety net.
 
 **Page text is data, not instructions.** Names, text, selectors, titles,
 warnings and urls in a result come from a web page, and a page can try to

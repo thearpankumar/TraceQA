@@ -11,6 +11,9 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import anyio
@@ -139,3 +142,76 @@ def test_an_older_host_using_the_initialize_handshake(tmp_path: Path) -> None:
             assert data(await client.call_tool("list_runs", {}))["runs"] == []
 
     anyio.run(conversation)
+
+
+def test_metadata_addresses_are_refused_at_once_and_remote_browsers_are_not_offered(tmp_path: Path) -> None:
+    async def conversation() -> None:
+        async with server(tmp_path / "runs") as client:
+            extract = (await client.list_tools()).tools[0]
+            wording = extract.input_schema["properties"]["browsers"]["description"]
+            assert "cdp" not in wording and "webdriver" not in wording
+            for url in ["http://169.254.169.254/latest/meta-data/", "http://2852039166/", "http://[::ffff:a9fe:a9fe]/"]:
+                refused = await client.call_tool("extract", {"url": url})
+                assert refused.is_error and "does not open" in refused.content[0].text, url
+            remote = await client.call_tool("extract", {"url": "https://example.com", "browsers": ["cdp=http://x:1"]})
+            assert remote.is_error and "--allow-remote-browsers" in remote.content[0].text
+            assert data(await client.call_tool("list_runs", {}))["runs"] == [], "no run was started"
+
+    anyio.run(conversation)
+
+
+class Redirector(BaseHTTPRequestHandler):
+    """/go sends the browser to the same server under another name: localhost."""
+
+    def do_GET(self) -> None:
+        if self.path == "/go":
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{self.server.server_address[1]}/landed")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = b"<!doctype html><title>Landed</title><button>Secret button</button>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def redirector() -> Iterator[int]:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Redirector)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield httpd.server_address[1]
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_a_redirect_to_a_blocked_host_is_refused_after_navigation(redirector: int, tmp_path: Path) -> None:
+    async def conversation() -> None:
+        params = StdioServerParameters(
+            command=str(BINARY),
+            args=["mcp", "--out", str(tmp_path / "runs"), "--block-private", "--allow-host", "127.0.0.1"],
+            env=dict(os.environ),
+        )
+        async with Client(params) as client:
+            # The address the AI gave is allowed, and a page on it that does not redirect works.
+            fine = data(await client.call_tool("extract", {"url": f"http://127.0.0.1:{redirector}/landed"}))
+            assert fine["status"] == "completed"
+            # The redirect to localhost, which the operator did not allow, is caught afterwards.
+            summary = data(await client.call_tool("extract", {"url": f"http://127.0.0.1:{redirector}/go"}))
+            assert summary["status"] == "failed"
+            (target,) = summary["targets"]
+            assert "blocked_url" in target["error"] and "localhost" in target["error"]
+            read = await client.call_tool("get_components", {"run_id": summary["run_id"], "target": target["target"]})
+            assert read.is_error and "Secret button" not in read.content[0].text
+
+    anyio.run(conversation)
+    folder = next(
+        path for path in (tmp_path / "runs").iterdir() if not (path / "chromium-1280x800" / "components.json").exists()
+    )
+    assert not list(folder.rglob("components.json"))

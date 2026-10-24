@@ -38,6 +38,8 @@ impl Host {
                 runs_dir,
                 drivers,
                 state_dir,
+                allow_remote_browsers: false,
+                policy: UrlPolicy::default(),
             };
             serve(BufReader::new(server_input), Box::new(server_output), config).unwrap();
         });
@@ -383,6 +385,8 @@ fn extract_asks_the_engine_for_visible_elements_only_unless_include_hidden_is_se
         runs_dir: std::env::temp_dir(),
         drivers: Vec::new(),
         state_dir: None,
+        allow_remote_browsers: false,
+        policy: UrlPolicy::default(),
     };
     let hidden = |arguments: Value| {
         let request = extract_request(&config, arguments).unwrap();
@@ -544,6 +548,8 @@ fn config_with(state_dir: Option<PathBuf>) -> Config {
         runs_dir: std::env::temp_dir(),
         drivers: Vec::new(),
         state_dir: state_dir.map(|dir| fs::canonicalize(dir).unwrap()),
+        allow_remote_browsers: false,
+        policy: UrlPolicy::default(),
     }
 }
 
@@ -905,6 +911,97 @@ fn get_crop_refuses_non_png_names() {
     let mut host = Host::start(runs.clone());
     let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
     assert_refused_without_leaking(&answer, &runs);
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+fn remote_targets() -> [Value; 5] {
+    [
+        json!({ "url": "https://example.test/", "browsers": ["cdp=http://127.0.0.1:9222"] }),
+        json!({ "url": "https://example.test/", "browsers": ["webdriver=http://x"] }),
+        json!({ "url": "https://example.test/", "browsers": ["chromium=ws://127.0.0.1:9222"] }),
+        json!({ "url": "https://example.test/", "browsers": ["chromium", "firefox=http://x"] }),
+        json!({ "url": "https://example.test/", "browsers": ["cdp"] }),
+    ]
+}
+
+#[test]
+fn extract_refuses_cdp_and_webdriver_targets_without_the_flag() {
+    use crate::tools::extract_request;
+    let config = config_with(None);
+    for arguments in remote_targets() {
+        let why = extract_request(&config, arguments.clone()).err().unwrap_or_default();
+        assert!(why.contains("--allow-remote-browsers"), "{arguments}: {why}");
+    }
+    // Plain names are fine.
+    assert!(extract_request(
+        &config,
+        json!({ "url": "https://example.test/", "browsers": ["chromium", "firefox", "webkit"] })
+    )
+    .is_ok());
+}
+
+#[test]
+fn extract_with_remote_browsers_off_answers_the_model_with_an_error() {
+    let runs = runs_folder("remote-off");
+    let mut host = Host::start(runs.clone());
+    for arguments in remote_targets() {
+        let result = host.call("extract", arguments.clone());
+        assert_eq!(result["isError"], true, "{arguments}");
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("--allow-remote-browsers"));
+    }
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn remote_targets_are_allowed_with_the_flag() {
+    use crate::tools::extract_request;
+    let mut config = config_with(None);
+    config.allow_remote_browsers = true;
+    for arguments in remote_targets() {
+        assert!(extract_request(&config, arguments.clone()).is_ok(), "{arguments}");
+    }
+}
+
+#[test]
+fn tools_list_hides_remote_browser_wording_unless_allowed() {
+    let wording = |config: &Config| {
+        let tools = crate::tools::list(config);
+        tools[0]["inputSchema"]["properties"]["browsers"]["description"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let mut config = config_with(None);
+    let off = wording(&config);
+    assert!(!off.contains("cdp") && !off.contains("webdriver"), "{off}");
+    config.allow_remote_browsers = true;
+    let on = wording(&config);
+    assert!(on.contains("cdp=ENDPOINT") && on.contains("webdriver=URL"), "{on}");
+}
+
+#[test]
+fn metadata_addresses_are_refused_before_any_run_is_made() {
+    let runs = runs_folder("metadata");
+    let mut host = Host::start(runs.clone());
+    for url in [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://2852039166/",
+        "http://[::ffff:a9fe:a9fe]/",
+        "http://metadata.google.internal./computeMetadata/v1/",
+    ] {
+        let result = host.call("extract", json!({ "url": url }));
+        assert_eq!(result["isError"], true, "{url}");
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("does not open"), "{url}: {text}");
+    }
+    // No run folder was made for any of them.
+    let made = fs::read_dir(&runs).unwrap().count();
+    assert_eq!(made, 1, "only the example run should be there");
     host.stop();
     fs::remove_dir_all(runs).unwrap();
 }

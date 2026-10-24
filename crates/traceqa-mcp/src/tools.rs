@@ -35,8 +35,7 @@ pub fn list(config: &Config) -> Value {
                     "url": { "type": "string", "description": "The page to read, for example https://example.com." },
                     "browsers": {
                         "type": "array", "items": { "type": "string" },
-                        "description": "Default [\"chromium\"]. Known values: chromium, chrome, msedge, firefox, webkit, safari. \
-                            cdp=ENDPOINT attaches to a running browser; webdriver=URL uses a WebDriver server."
+                        "description": "Default [\"chromium\"]. Known values: chromium, chrome, msedge, firefox, webkit, safari."
                     },
                     "viewports": {
                         "type": "array", "items": { "type": "string" },
@@ -114,6 +113,13 @@ pub fn list(config: &Config) -> Value {
             }
         }
     ]);
+    // Without the operator's say-so the AI is not told that remote browsers exist.
+    if config.allow_remote_browsers {
+        tools[0]["inputSchema"]["properties"]["browsers"]["description"] = json!(
+            "Default [\"chromium\"]. Known values: chromium, chrome, msedge, firefox, webkit, safari. \
+            cdp=ENDPOINT attaches to a running browser; webdriver=URL uses a WebDriver server."
+        );
+    }
     // Without a state folder the AI is not told that the option exists.
     if config.state_dir.is_some() {
         tools[0]["inputSchema"]["properties"]["storage_state"] = json!({
@@ -279,11 +285,18 @@ impl Call<'_> {
 
     fn extract(&self, arguments: ExtractArgs) -> Result<Content, String> {
         let request = build_request(self.config, arguments)?;
+        // Before any request is made. Redirects are checked after navigation, by the engine.
+        traceqa_engine::url_safety::check_navigable(&request.url)?;
+        self.config
+            .policy
+            .check_url_resolving(&request.url)
+            .map_err(|blocked| format!("this server does not open {blocked}"))?;
         let run = Run::prepare(request).map_err(|e| e.to_string())?;
         let commands = self.config.drivers.clone();
         let execution = Execution {
             drivers: &|| Drivers::new(commands.clone()),
             cancel: self.cancelled,
+            policy: Some(&self.config.policy),
         };
         let report = self.report;
         let runs_dir = &self.config.runs_dir;
@@ -339,6 +352,19 @@ fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, S
         .iter()
         .map(|b| BrowserTarget::parse(b))
         .collect::<Result<Vec<_>, _>>()?;
+    // Judged on what was parsed, not on the text: any browser name can carry `=ENDPOINT`.
+    if !config.allow_remote_browsers
+        && targets.iter().any(|t| {
+            t.cdp_endpoint.is_some() || t.webdriver_url.is_some() || matches!(t.browser.as_str(), "cdp" | "webdriver")
+        })
+    {
+        return Err(
+            "attaching to a running browser (cdp=...) or a WebDriver server (webdriver=...) is off. \
+            The person who started this server can enable it with: traceqa mcp --allow-remote-browsers. \
+            Use one of: chromium, chrome, msedge, firefox, webkit, safari."
+                .into(),
+        );
+    }
     for target in &mut targets {
         target.headless = Some(true);
     }

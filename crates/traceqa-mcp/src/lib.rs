@@ -18,6 +18,7 @@ use std::thread::{self, JoinHandle};
 
 use serde_json::{json, Value};
 use traceqa_engine::driver::DriverCommand;
+pub use traceqa_engine::UrlPolicy;
 use traceqa_protocol::jsonrpc::{self, code, Id, Message, RpcError};
 
 /// MCP versions this server speaks, newest first. A client asking for one of these gets it;
@@ -31,6 +32,12 @@ pub struct Config {
     /// The folder of saved sign-in states that `extract` may name. `None` turns the option off.
     /// The operator chooses it, never the AI.
     pub state_dir: Option<PathBuf>,
+    /// Whether `extract` may attach to a running browser (`cdp=`) or a WebDriver server
+    /// (`webdriver=`). Off unless the operator turns it on: those targets name a machine to
+    /// connect to, which the AI must not be able to choose.
+    pub allow_remote_browsers: bool,
+    /// Where browsers may be sent. The metadata and link-local addresses are always refused.
+    pub policy: UrlPolicy,
 }
 
 type Output = Arc<Mutex<Box<dyn Write + Send>>>;

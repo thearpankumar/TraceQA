@@ -11,9 +11,11 @@ pub mod group;
 pub mod home;
 pub mod run;
 pub mod serve;
+pub mod url_policy;
 pub mod url_safety;
 
 pub use run::{driver_commands, EngineError, Execution, Run};
+pub use url_policy::UrlPolicy;
 
 /// Version reported to clients and drivers, and written into run folders.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

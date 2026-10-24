@@ -54,6 +54,7 @@ SessionCloseParams?: SessionCloseParams
 WaitUntil?: WaitUntil
 PageGotoParams?: PageGotoParams
 PageGotoResult?: PageGotoResult
+RedirectHop?: RedirectHop
 PageEvalParams?: PageEvalParams
 FrameInfo?: FrameInfo
 FrameEvalResult?: FrameEvalResult
@@ -607,6 +608,17 @@ loadComplete?: boolean
  * How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.
  */
 closedShadowRoots?: number
+/**
+ * Every address the main document was requested from on the way to finalUrl, first request first, finalUrl last. Browsers stop following redirects at about 20, so the list is short. Lets the engine check each hop against an operator's address rules. Absent when the driver cannot see the hops (classic WebDriver shows only the final address).
+ */
+redirectChain?: RedirectHop[]
+}
+export interface RedirectHop {
+url: string
+/**
+ * The IP address the browser connected to for this request, when the browser reports it. Absent when unknown.
+ */
+remoteAddress?: string
 }
 export interface PageEvalParams {
 sessionId: string
@@ -735,7 +747,7 @@ message: string
  */
 export interface RpcErrorData {
 /**
- * Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, internal.
+ * Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, internal.
  */
 kind: string
 retryable: boolean

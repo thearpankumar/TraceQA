@@ -145,6 +145,22 @@
           "description": "How many closed shadow roots the page has once loaded. No script can read inside one, so the collector cannot list what they hold. Absent when the driver cannot tell, as only Chromium-based browsers let a driver see them.",
           "type": "integer",
           "minimum": 0
+        },
+        "redirectChain": {
+          "description": "Every address the main document was requested from on the way to finalUrl, first request first, finalUrl last. Browsers stop following redirects at about 20, so the list is short. Lets the engine check each hop against an operator's address rules. Absent when the driver cannot see the hops (classic WebDriver shows only the final address).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/RedirectHop" }
+        }
+      }
+    },
+    "RedirectHop": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string" },
+        "remoteAddress": {
+          "description": "The IP address the browser connected to for this request, when the browser reports it. Absent when unknown.",
+          "type": "string"
         }
       }
     },
@@ -285,7 +301,7 @@
       "required": ["kind", "retryable"],
       "properties": {
         "kind": {
-          "description": "Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, internal.",
+          "description": "Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, internal.",
           "type": "string"
         },
         "retryable": { "type": "boolean" }
