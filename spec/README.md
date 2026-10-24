@@ -26,6 +26,21 @@ Both protocols are JSON-RPC 2.0, one message per line.
 
 Stderr is free for human-readable logs on both sides.
 
+Limits on what a driver sends:
+
+- A line from the driver may be at most 64 MiB (`MAX_DRIVER_LINE` in the engine).
+  The engine reads it with a bounded reader (`jsonrpc::read_line_bounded` and
+  `read_line_or_give_up`), so a driver that never sends a newline cannot use up
+  the engine's memory. A longer line, or a line that is not UTF-8, makes the
+  driver count as lost: the target fails with a short message and a fresh driver
+  is started for the next one.
+- At most 64 driver messages wait to be read. Past that the engine stops reading
+  the driver's pipe, so a driver that floods notifications is slowed down, not
+  buffered.
+- Error messages that quote a bad line show at most 200 characters of it.
+- A driver's stderr is inherited, not read by the engine: it is the driver's own
+  log channel and is never buffered or stored.
+
 The method names, with their parameter and result types, are listed in the
 `x-traceqa` block at the top of each protocol file.
 
