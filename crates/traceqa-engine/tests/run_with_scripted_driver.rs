@@ -45,6 +45,8 @@ struct Scripted {
     chain: Option<&'static str>,
     /// What a failing method says.
     fail_text: &'static str,
+    /// The `requestsFailed` the pretend page reports with every page.eval, as JSON, when it reports one.
+    requests_failed: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -137,11 +139,15 @@ impl Transport for Scripted {
             "page.eval" => {
                 let mut collected: Value = serde_json::from_str(COLLECTED).unwrap();
                 collected["scroll"] = json!({ "y": self.y, "height": PAGE_HEIGHT, "viewportHeight": VIEW_HEIGHT });
-                json!({ "results": [
+                let mut evaluated = json!({ "results": [
                     { "frame": { "id": "main", "url": "https://shop.test/", "crossOrigin": false }, "value": collected },
                     { "frame": { "id": "f1", "url": self.frame_url, "crossOrigin": true },
                       "error": "blocked" }
-                ]})
+                ]});
+                if let Some(failed) = self.requests_failed {
+                    evaluated["requestsFailed"] = serde_json::from_str(failed).unwrap();
+                }
+                evaluated
             }
             "page.screenshot" => {
                 let whole_page = params["fullPage"] == json!(true);
@@ -222,6 +228,7 @@ struct Case {
     chain: Option<&'static str>,
     policy: Option<UrlPolicy>,
     fail_text: &'static str,
+    requests_failed: Option<&'static str>,
 }
 
 impl Default for Case {
@@ -239,6 +246,7 @@ impl Default for Case {
             chain: None,
             policy: None,
             fail_text: "connection refused",
+            requests_failed: None,
         }
     }
 }
@@ -289,6 +297,7 @@ fn run_case(case: Case) -> Outcome {
                 opened: Arc::clone(&opened),
                 chain: case.chain,
                 fail_text: case.fail_text,
+                requests_failed: case.requests_failed,
             };
             Driver::connect(Box::new(transport))
         };
@@ -508,6 +517,7 @@ fn run_six_targets_with(
                 opened: Arc::default(),
                 chain: None,
                 fail_text: "connection refused",
+                requests_failed: None,
             };
             Driver::connect(Box::new(transport))
         };
@@ -689,6 +699,40 @@ fn a_viewport_that_is_reached_raises_no_warning() {
         .iter()
         .all(|warning| warning.code != "viewport_not_reached"));
     fs::remove_dir_all(outcome.folder).unwrap();
+}
+
+#[test]
+fn failed_requests_reported_by_the_driver_become_one_warning() {
+    let outcome = run_case(Case {
+        crops: false,
+        requests_failed: Some(r#"{ "count": 2, "urls": ["https://shop.test/app.js", "https://shop.test/api/items"] }"#),
+        ..Case::default()
+    });
+    let target = &outcome.manifest.targets[0];
+    assert_eq!(target.status, RunStatus::Completed);
+    let file = components(&outcome);
+    let failed: Vec<_> = file.warnings.iter().filter(|w| w.code == "requests_failed").collect();
+    assert_eq!(failed.len(), 1, "{:?}", file.warnings);
+    assert!(failed[0].message.starts_with("2 request(s)"));
+    assert!(failed[0].message.contains("https://shop.test/app.js"));
+    assert_eq!(target.warning_count, file.warnings.len() as u64);
+    fs::remove_dir_all(outcome.folder).unwrap();
+}
+
+#[test]
+fn a_driver_that_reports_no_failed_requests_raises_no_warning() {
+    for reported in [None, Some(r#"{ "count": 0, "urls": [] }"#)] {
+        let outcome = run_case(Case {
+            crops: false,
+            requests_failed: reported,
+            ..Case::default()
+        });
+        assert!(components(&outcome)
+            .warnings
+            .iter()
+            .all(|w| w.code != "requests_failed"));
+        fs::remove_dir_all(outcome.folder).unwrap();
+    }
 }
 
 /// Every file under `dir`, read as text where it is text.

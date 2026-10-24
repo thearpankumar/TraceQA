@@ -6,7 +6,9 @@ what to test: each method does one thing to a browser and reports what happened,
 as defined in spec/driver-protocol.schema.json.
 
 WebDriver can do less than Playwright, and says so through its capabilities: it
-screenshots only the current viewport.
+screenshots only the current viewport. It cannot see the network either, so
+`failed_requests` stays False and page.eval never sends `requestsFailed`; the
+engine then cannot warn about scripts or styles that failed to load.
 """
 
 from __future__ import annotations
@@ -51,6 +53,7 @@ CAPABILITIES = models.Capabilities(
     set_viewport=True,
     console_events=False,
     network_events=False,
+    failed_requests=False,
 )
 
 LIST_FRAMES = """

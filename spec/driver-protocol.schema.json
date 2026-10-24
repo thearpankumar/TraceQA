@@ -75,7 +75,11 @@
         "parallelSessions": { "description": "Can hold more than one session at a time.", "type": "boolean" },
         "setViewport": { "description": "Can set an exact viewport size.", "type": "boolean" },
         "consoleEvents": { "type": "boolean" },
-        "networkEvents": { "type": "boolean" }
+        "networkEvents": { "type": "boolean" },
+        "failedRequests": {
+          "description": "Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
+          "type": "boolean"
+        }
       }
     },
     "SessionOpenParams": {
@@ -209,6 +213,21 @@
           "description": "One entry per frame, main frame first.",
           "type": "array",
           "items": { "$ref": "#/$defs/FrameEvalResult" }
+        },
+        "requestsFailed": { "$ref": "#/$defs/RequestsFailed" }
+      }
+    },
+    "RequestsFailed": {
+      "description": "Only from a driver whose capabilities say failedRequests. Requests for scripts, styles, fetch/XHR data and frames that failed (a network error, or an HTTP status of 400 or more) since the last page.goto began. Cumulative, so the latest answer covers the whole load. Pictures, fonts and media are not counted, and neither are requests cancelled by a navigation.",
+      "type": "object",
+      "required": ["count", "urls"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "urls": {
+          "description": "The first five failed addresses, with the query and fragment removed by the driver.",
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string" }
         }
       }
     },

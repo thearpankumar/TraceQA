@@ -230,7 +230,7 @@ class Warning(BaseModel):
     )
     code: str = Field(
         ...,
-        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted, signed_in_pictures, collector_tampered.",
+        description="Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted, signed_in_pictures, collector_tampered, requests_failed.",
     )
     message: str
 
@@ -348,6 +348,11 @@ class Capabilities(BaseModel):
     )
     console_events: bool = Field(..., alias="consoleEvents")
     network_events: bool = Field(..., alias="networkEvents")
+    failed_requests: bool | None = Field(
+        None,
+        alias="failedRequests",
+        description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
+    )
 
 
 class SessionStorageParams(BaseModel):
@@ -468,12 +473,19 @@ class FrameEvalResult(BaseModel):
     )
 
 
-class PageEvalResult(BaseModel):
+class RequestsFailed(BaseModel):
+    """
+    Only from a driver whose capabilities say failedRequests. Requests for scripts, styles, fetch/XHR data and frames that failed (a network error, or an HTTP status of 400 or more) since the last page.goto began. Cumulative, so the latest answer covers the whole load. Pictures, fonts and media are not counted, and neither are requests cancelled by a navigation.
+    """
+
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    results: list[FrameEvalResult] = Field(
-        ..., description="One entry per frame, main frame first."
+    count: int = Field(..., ge=0)
+    urls: list[str] = Field(
+        ...,
+        description="The first five failed addresses, with the query and fragment removed by the driver.",
+        max_length=5,
     )
 
 
@@ -765,6 +777,16 @@ class PageGotoResult(BaseModel):
         alias="redirectChain",
         description="Every address the main document was requested from on the way to finalUrl, first request first, finalUrl last. Browsers stop following redirects at about 20, so the list is short. Lets the engine check each hop against an operator's address rules. Absent when the driver cannot see the hops (classic WebDriver shows only the final address).",
     )
+
+
+class PageEvalResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    results: list[FrameEvalResult] = Field(
+        ..., description="One entry per frame, main frame first."
+    )
+    requests_failed: RequestsFailed | None = Field(None, alias="requestsFailed")
 
 
 class TargetSummary(BaseModel):

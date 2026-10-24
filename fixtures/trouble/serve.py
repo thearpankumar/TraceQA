@@ -24,9 +24,16 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+
+# This file runs as a script and is also loaded by path, so the shared module is found by path too.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from _server import FixtureServer, serve_in_thread
 
 OK = b"""<!doctype html><title>Fine</title><main><button>Continue</button></main>"""
 MISSING = b"""<!doctype html><title>Not found</title><h1>Not found</h1><a href="/ok">Home</a>"""
@@ -186,15 +193,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, MISSING)
 
 
-def start(port: int = 0) -> ThreadingHTTPServer:
+def start(port: int = 0) -> FixtureServer:
     """Start the server on a background thread and return it. Port 0 picks a free port."""
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    server = FixtureServer(("127.0.0.1", port), Handler)
+    serve_in_thread(server)
     return server
 
 
-def stop(server: ThreadingHTTPServer) -> None:
+def stop(server: FixtureServer) -> None:
     STOPPING.set()
     server.shutdown()
 

@@ -2,7 +2,7 @@
 
 use serde_json::json;
 use traceqa_protocol::types::{
-    CollectorResult, FrameInfo, PageEvalParams, Rect, ScrollInfo, SessionOpenResult, Warning,
+    CollectorResult, FrameInfo, PageEvalParams, Rect, RequestsFailed, ScrollInfo, SessionOpenResult, Warning,
 };
 
 use super::{warning, Job};
@@ -18,6 +18,9 @@ pub(super) struct Reading {
     pub(super) scroll: ScrollInfo,
     pub(super) warnings: Vec<Warning>,
     pub(super) frames: usize,
+    /// Requests that failed since the page began loading, when the driver reports them. Cumulative,
+    /// so the last reading covers the whole load.
+    pub(super) requests_failed: Option<RequestsFailed>,
 }
 
 /// Runs the collector in the main page and every frame the driver can reach.
@@ -31,6 +34,7 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
     })?;
 
     let frames = evaluated.results.len();
+    let requests_failed = evaluated.requests_failed;
     let mut elements = Vec::new();
     let mut warnings = Vec::new();
     let mut main: Option<(String, ScrollInfo)> = None;
@@ -84,6 +88,7 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
         scroll,
         warnings,
         frames,
+        requests_failed,
     })
 }
 

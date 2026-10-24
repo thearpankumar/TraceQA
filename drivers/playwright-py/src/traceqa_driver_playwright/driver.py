@@ -21,6 +21,8 @@ from playwright.sync_api import (
     Frame,
     Page,
     Playwright,
+    Request,
+    Response,
     ViewportSize,
     sync_playwright,
 )
@@ -60,7 +62,17 @@ CAPABILITIES = models.Capabilities(
     set_viewport=True,
     console_events=False,
     network_events=False,
+    failed_requests=True,
 )
+
+# Requests that change the list of components when they fail. Pictures, fonts and media do not, and a
+# page loads dozens of them, so counting them would only add noise.
+COUNTED_RESOURCES = frozenset({"script", "stylesheet", "fetch", "xhr"})
+# A navigation, a redirect or a replaced frame cancels its requests. That is normal, not a failure.
+# WebKit says "Load request cancelled" (and also reports the response of such a request).
+CANCELLED = ("ERR_ABORTED", "NS_BINDING_ABORTED", "aborted", "cancelled")
+# How many addresses are named.
+FAILED_URLS_SHOWN = 5
 
 SCROLL_STATE = "() => ({ y: window.scrollY, height: document.documentElement.scrollHeight, view: window.innerHeight })"
 
@@ -74,6 +86,50 @@ class Session:
     # Only Chromium lets a driver see closed shadow roots, through its own protocol.
     chromium: bool = False
     frame_ids: dict[Frame, str] = field(default_factory=dict)
+    # Requests that failed since the last page.goto began: how many, and the first few addresses
+    # (without query or fragment, which can carry a token).
+    failed_count: int = 0
+    failed_urls: list[str] = field(default_factory=list)
+    failed_seen: set[Request] = field(default_factory=set)
+
+    def note_failed(self, request: Request) -> None:
+        # One request counts once, even when the browser reports both its answer and its failure.
+        if request in self.failed_seen:
+            return
+        self.failed_seen.add(request)
+        self.failed_count += 1
+        if len(self.failed_urls) < FAILED_URLS_SHOWN:
+            self.failed_urls.append(without_query(request.url))
+
+    def reset_failed(self) -> None:
+        self.failed_count = 0
+        self.failed_urls = []
+        self.failed_seen = set()
+
+    def watch_requests(self) -> None:
+        """Counts failed requests for scripts, styles, data and frames. A response with status 400 or
+        more is not a `requestfailed` event in Playwright, so both events are needed."""
+        self.page.on("requestfailed", self._request_failed)
+        self.page.on("response", self._responded)
+
+    def _counted(self, request: Request) -> bool:
+        if request.resource_type in COUNTED_RESOURCES:
+            return True
+        if request.resource_type != "document":
+            return False
+        try:
+            return request.frame.parent_frame is not None
+        except PlaywrightError:
+            return False
+
+    def _request_failed(self, request: Request) -> None:
+        reason = request.failure or ""
+        if self._counted(request) and not any(mark in reason for mark in CANCELLED):
+            self.note_failed(request)
+
+    def _responded(self, response: Response) -> None:
+        if response.status >= 400 and self._counted(response.request):
+            self.note_failed(response.request)
 
     def frame_id(self, frame: Frame) -> str:
         if frame == self.page.main_frame:
@@ -511,7 +567,9 @@ class PlaywrightDriver(BaseDriver[Session]):
 
         session_id = self._new_session_id()
         chromium = target.browser == CDP or BROWSERS.get(target.browser, ("",))[0] == "chromium"
-        self._sessions[session_id] = Session(browser, context, page, owns_context, chromium)
+        session = Session(browser, context, page, owns_context, chromium)
+        session.watch_requests()
+        self._sessions[session_id] = session
         self._channel.log("info", f"opened {target.browser} {browser.version}")
         return models.SessionOpenResult(
             session_id=session_id,
@@ -550,6 +608,7 @@ class PlaywrightDriver(BaseDriver[Session]):
         page = session.page
         timeout = params.timeout_ms or DEFAULT_TIMEOUT_MS
         started = time.monotonic()
+        session.reset_failed()
         try:
             # The content first. Without it there is nothing to read, so this is the one that can fail.
             response = page.goto(params.url, wait_until="domcontentloaded", timeout=timeout)
@@ -618,7 +677,10 @@ class PlaywrightDriver(BaseDriver[Session]):
                 if frame == page.main_frame:
                     raise RpcError("eval_failed", error.message) from error
                 results.append(models.FrameEvalResult(frame=info, error=error.message))
-        return models.PageEvalResult(results=results)
+        return models.PageEvalResult(
+            results=results,
+            requests_failed=models.RequestsFailed(count=session.failed_count, urls=list(session.failed_urls)),
+        )
 
     def page_scroll(self, params: models.PageScrollParams) -> models.PageScrollResult:
         page = self._session(params.session_id).page

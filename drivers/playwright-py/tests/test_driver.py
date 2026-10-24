@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import subprocess
 import threading
@@ -275,3 +276,68 @@ def test_a_timeout_message_does_not_carry_the_query(driver: DriverClient, redire
     assert failure.value.kind == "timeout"
     assert "SEKRET" not in str(failure.value)
     assert f"{redirecting}/hang did not load" in str(failure.value)
+
+
+class Failing(BaseHTTPRequestHandler):
+    """/page loads a script that answers 503 and a picture that answers 404. /navigates starts a
+    slow request and leaves the page at once, so the browser cancels it. /clean fails at nothing."""
+
+    def do_GET(self) -> None:
+        path = self.path.split("?")[0]
+        status, kind, body = 200, "text/html", b"<!doctype html><title>Page</title><p>hi</p>"
+        if path == "/page":
+            body = b'<!doctype html><title>P</title><script src="/app.js?token=SEKRET"></script><img src="/pic.png">'
+        elif path == "/app.js":
+            status, kind, body = 503, "application/javascript", b"nope"
+        elif path == "/pic.png":
+            status, kind, body = 404, "image/png", b""
+        elif path == "/navigates":
+            body = b"<!doctype html><title>N</title><script>fetch('/slow'); location.replace('/clean');</script>"
+        elif path == "/slow":
+            time.sleep(2)
+        with contextlib.suppress(OSError):
+            self.send_response(status)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture
+def failing() -> Iterator[str]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Failing)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def failed_requests(driver: DriverClient, session_id: str) -> models.RequestsFailed | None:
+    raw = driver.call("page.eval", {"sessionId": session_id, "script": "() => 1", "arg": {}})
+    return models.PageEvalResult.model_validate(raw).requests_failed
+
+
+@pytest.mark.parametrize("browser", ["chromium", "firefox", "webkit"])
+def test_failed_script_requests_are_counted_without_the_query(driver: DriverClient, failing: str, browser: str) -> None:
+    hello = driver.call("driver.hello", HELLO)
+    assert browser in hello["browsers"]
+    session = driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
+    assert session["capabilities"]["failedRequests"] is True
+    sid = session["sessionId"]
+
+    # The script answers 503 and counts; the picture answers 404 and does not.
+    driver.call("page.goto", {"sessionId": sid, "url": f"{failing}/page", "waitUntil": "settled"})
+    result = failed_requests(driver, sid)
+    assert result is not None
+    assert (result.count, result.urls) == (1, [f"{failing}/app.js"])
+
+    # A request the page's own navigation cancels is not a failure, and the count starts over.
+    driver.call("page.goto", {"sessionId": sid, "url": f"{failing}/navigates", "waitUntil": "settled"})
+    result = failed_requests(driver, sid)
+    assert result is not None
+    assert (result.count, result.urls) == (0, [])
+    driver.call("session.close", {"sessionId": sid})

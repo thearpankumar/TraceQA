@@ -7,6 +7,7 @@ use traceqa_protocol::types::{Component, PageGotoResult, Warning};
 
 use super::frames::{element_key, ElementKey, Reading};
 use super::warning;
+use crate::url_safety::redact;
 
 /// Address words that mean a sign-in page.
 const SIGN_IN_WORDS: [&str; 6] = ["login", "log-in", "signin", "sign-in", "sign_in", "auth"];
@@ -145,6 +146,26 @@ pub(super) fn covered_warning(components: &[Component]) -> Option<Warning> {
     ))
 }
 
+/// One warning when requests for scripts, styles, data or frames failed while the page loaded: the
+/// page may then be missing parts, and so may the list. Only drivers that can see the network report it.
+pub(super) fn requests_failed_warning(reading: &Reading) -> Option<Warning> {
+    let failed = reading.requests_failed.as_ref().filter(|failed| failed.count > 0)?;
+    // The driver already removed query strings. Redacting again keeps a secret in a path from leaking.
+    let urls: Vec<String> = failed.urls.iter().map(|url| redact(url)).collect();
+    let first = if urls.is_empty() {
+        String::new()
+    } else {
+        format!(" (first: {})", urls.join(", "))
+    };
+    Some(warning(
+        "requests_failed",
+        format!(
+            "{} request(s) for scripts, styles or data failed while the page loaded{first}, so parts of the page may be missing from this list.",
+            failed.count
+        ),
+    ))
+}
+
 /// What the answer to the page request already says: an error status, closed shadow roots, a
 /// page that had not finished loading.
 pub(super) fn landing_warnings(page: &PageGotoResult) -> Vec<Warning> {
@@ -191,7 +212,7 @@ pub(super) fn stored_session_warnings(reading: &Reading, final_url: &str, saved_
 mod tests {
     use super::*;
     use crate::group::Located;
-    use traceqa_protocol::types::{CollectorResult, ComponentsFile};
+    use traceqa_protocol::types::{CollectorResult, ComponentsFile, RequestsFailed};
 
     /// The shop example's elements, as one reading of a page.
     fn reading() -> Reading {
@@ -213,6 +234,7 @@ mod tests {
             scroll: collected.scroll,
             warnings: Vec::new(),
             frames: 1,
+            requests_failed: None,
         }
     }
 
@@ -222,6 +244,46 @@ mod tests {
             .attrs
             .insert("type".into(), "Password".into());
         reading
+    }
+
+    fn failed(count: u64, urls: &[&str]) -> Reading {
+        let mut reading = reading();
+        reading.requests_failed = Some(RequestsFailed {
+            count,
+            urls: urls.iter().map(ToString::to_string).collect(),
+        });
+        reading
+    }
+
+    #[test]
+    fn requests_failed_warning_names_count_and_first_urls() {
+        let urls = [
+            "https://shop.test/a.js",
+            "https://shop.test/b.js?token=SEKRET",
+            "https://shop.test/c.css",
+            "https://shop.test/api/d",
+            "https://shop.test/e.js",
+        ];
+        let warning = requests_failed_warning(&failed(7, &urls)).unwrap();
+        assert_eq!(warning.code, "requests_failed");
+        assert!(warning.message.starts_with("7 request(s)"), "{}", warning.message);
+        for url in [
+            "https://shop.test/a.js",
+            "https://shop.test/c.css",
+            "https://shop.test/e.js",
+        ] {
+            assert!(warning.message.contains(url), "{}", warning.message);
+        }
+        assert!(!warning.message.contains("SEKRET"), "{}", warning.message);
+        // The count is shown even when the driver names no address.
+        let bare = requests_failed_warning(&failed(2, &[])).unwrap();
+        assert!(bare.message.starts_with("2 request(s)") && !bare.message.contains("first:"));
+    }
+
+    #[test]
+    fn requests_failed_warning_is_absent_for_zero_or_none() {
+        assert!(requests_failed_warning(&failed(0, &[])).is_none());
+        assert!(requests_failed_warning(&reading()).is_none());
     }
 
     #[test]

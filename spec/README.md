@@ -53,6 +53,14 @@ Limits on what a driver sends:
 - A driver's stderr is inherited, not read by the engine: it is the driver's own
   log channel and is never buffered or stored.
 
+- **Failed requests:** a driver whose capabilities say `failedRequests: true`
+  (optional; absent means false) adds `requestsFailed` to every `page.eval` result:
+  `count` and the first five `urls`, with query and fragment removed by the driver.
+  It is cumulative since the last `page.goto` began and counts only scripts,
+  styles, fetch/XHR and frames, never pictures, fonts or navigation-cancelled
+  requests. The engine turns a non-zero count into the `requests_failed` warning.
+  The WebDriver driver cannot observe the network, so it sends neither.
+
 The method names, with their parameter and result types, are listed in the
 `x-traceqa` block at the top of each protocol file.
 

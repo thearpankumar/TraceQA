@@ -13,12 +13,16 @@ import argparse
 import contextlib
 import functools
 import socket
-import threading
+import sys
 import time
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+# This file runs as a script and is also loaded by path, so the shared module is found by path too.
+sys.path.insert(0, str(HERE.parent))
+
+from _server import FixtureServer, serve_in_thread  # noqa: E402
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -26,23 +30,23 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
-def start(port: int) -> list[ThreadingHTTPServer]:
+def start(port: int) -> list[FixtureServer]:
     """Start both servers on background threads and return them."""
-    servers: list[ThreadingHTTPServer] = []
+    servers: list[FixtureServer] = []
     try:
         for offset, folder in enumerate(["site", "third-party"]):
             handler = functools.partial(QuietHandler, directory=str(HERE / folder))
-            servers.append(ThreadingHTTPServer(("127.0.0.1", port + offset), handler))
+            servers.append(FixtureServer(("127.0.0.1", port + offset), handler))
     except OSError:
         for server in servers:
             server.server_close()
         raise
     for server in servers:
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        serve_in_thread(server)
     return servers
 
 
-def start_on_free_ports() -> tuple[int, list[ThreadingHTTPServer]]:
+def start_on_free_ports() -> tuple[int, list[FixtureServer]]:
     """Start the shop on any free pair of neighbouring ports. Used by tests."""
     for _ in range(50):
         with socket.socket() as probe:
