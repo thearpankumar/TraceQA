@@ -93,7 +93,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          components: rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
@@ -112,8 +112,8 @@ jobs:
         run: python3 scripts/check_version.py
       - name: Rust format
         run: cargo fmt --all --check
-      - name: Rust lint
-        run: cargo clippy --all-targets --locked -- -D warnings
+      # Rust lint (clippy) runs in the Test job, on every operating system: code behind cfg(windows)
+      # or cfg(target_os) is only linted where it is compiled.
       - name: Python lint
         run: uv run ruff check .
       - name: Python format
@@ -220,6 +220,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
+          components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
@@ -233,6 +234,8 @@ jobs:
       # Rust: every crate's tests, then the binaries, which reuse what the tests compiled.
       - name: Rust tests
         run: cargo test --locked
+      - name: Rust lint (clippy)
+        run: cargo clippy --all-targets --locked -- -D warnings
       - name: Build the binaries
         run: cargo build --locked
       - name: The binaries start

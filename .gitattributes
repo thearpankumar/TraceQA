@@ -1,4 +1,12 @@
 # Keep line endings the same on every system, so files compare equal on Windows too.
 * text=auto eol=lf
 
+# Audit: the only binary type tracked today is png (tests/test_workflows.py checks that every
+# tracked non-UTF-8 file is covered below). Other common binary types are listed ahead of time.
 *.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
