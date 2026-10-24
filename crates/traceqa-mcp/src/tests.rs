@@ -1176,3 +1176,21 @@ fn tool_errors_read_as_the_strings_they_replaced() {
         .to_string()
         .starts_with("invalid arguments: "));
 }
+
+#[test]
+fn a_panicking_tool_returns_an_error_result_and_the_server_keeps_answering() {
+    let dir = std::env::temp_dir().join(format!("traceqa-mcp-panic-{}", process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let mut host = Host::start(dir.clone());
+    let result = host.call("panic_for_test", json!({}));
+    assert_eq!(result["isError"], true, "{result}");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert_eq!(text, "internal error in tool panic_for_test");
+    assert!(!text.contains("page text"), "the panic text stays on stderr");
+    // The slot was freed and the server goes on answering.
+    assert_eq!(host.request("ping", json!({}))["result"], json!({}));
+    let listed = host.call("list_runs", json!({}));
+    assert_eq!(listed["isError"], false, "{listed}");
+    host.stop();
+    let _ = fs::remove_dir_all(dir);
+}

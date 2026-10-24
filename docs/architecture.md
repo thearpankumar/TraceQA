@@ -207,6 +207,12 @@ A target that fails does not stop the others. One that times out while others
 are running is tried again on its own. The session is closed whether or
 not the extraction succeeded.
 
+A panic is a failure too. The engine supervises each run: a panic on a worker ends that
+worker's target as `failed` with an `internal error: ...` message, the other workers carry
+on, and the run still writes `run.finished`, a `failed` `run.json` and sends `run.done`.
+The MCP server answers a tool call that panicked with an `isError` result that only names
+the tool; the panic text goes to stderr.
+
 Errors are typed inside the engine. `ErrorKind` (in `traceqa-protocol`) names the
 `RpcErrorData.kind` values and keeps an unknown kind as it came, so a driver
 that reports a new kind never breaks the engine; on the wire it is still the same

@@ -6,6 +6,7 @@
 
 pub mod error;
 pub mod jsonrpc;
+pub mod supervise;
 
 pub use error::{ErrorKind, ParseError};
 

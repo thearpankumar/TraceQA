@@ -292,6 +292,8 @@ impl Call<'_> {
             "list_runs" => args(arguments).and_then(|a| self.list_runs(a)),
             "get_components" => args(arguments).and_then(|a| self.get_components(a)),
             "get_crop" => args(arguments).and_then(|a| self.get_crop(a)),
+            #[cfg(test)]
+            "panic_for_test" => panic!("page text that must not reach the host"),
             other => {
                 return Err(RpcError {
                     code: code::INVALID_PARAMS,
