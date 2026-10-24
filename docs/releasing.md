@@ -133,6 +133,17 @@ pull requests, and every run when the variable is unset use GitHub-hosted
 GitHub-hosted machine. A persistent machine keeps state between jobs, so
 GitHub advises against self-hosted runners for public repositories.
 
+Even a same-repository pull request can carry changed build scripts, and the
+machine keeps its disk between jobs. So on the pool a pull request run works
+in its own tool homes (Cargo, rustup, uv, npm, Playwright browsers, TraceQA's
+home) under the runner's temporary folder, set by the first step of the lint
+and test jobs, and a last step removes `target/`, `.venv` and `node_modules`.
+Pushes to `master` keep the shared folders. Without this, a pull request could
+leave a changed toolchain or cache for a later `master` run. The Rust cache is
+saved only by pushes to `master`; GitHub already scopes a pull request's cache
+writes to its own merge ref, so that is a second layer. Ephemeral runners
+(below) make all of this unnecessary.
+
 The workflow cannot enforce the settings outside the repository. These are
 owner actions:
 

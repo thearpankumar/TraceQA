@@ -74,6 +74,34 @@ def test_no_run_script_interpolates_event_data() -> None:
             assert "github.event." not in step.get("run", ""), (name, job, step.get("name"))
 
 
+def test_rust_cache_saves_only_on_master_pushes() -> None:
+    seen = 0
+    for name, wf in all_workflows().items():
+        for job, step in steps_of(wf):
+            if step.get("uses", "").startswith("Swatinem/rust-cache@"):
+                seen += 1
+                save_if = step.get("with", {}).get("save-if", "")
+                assert "refs/heads/master" in save_if and "'push'" in save_if, (name, job)
+    assert seen == 2
+
+
+def test_pull_requests_on_the_self_hosted_pool_use_isolated_tool_homes() -> None:
+    ci = load("ci.yml")
+    for job in ("lint", "test"):
+        steps = ci["jobs"][job]["steps"]
+        isolate = [i for i, s in enumerate(steps) if "runner.environment == 'self-hosted'" in s.get("if", "")]
+        assert isolate, job
+        step = steps[isolate[0]]
+        assert "github.event_name == 'pull_request'" in step["if"]
+        for var in ("CARGO_HOME", "RUSTUP_HOME", "UV_CACHE_DIR", "npm_config_cache", "TRACEQA_HOME"):
+            assert f"{var}=$RUNNER_TEMP/" in step["run"], (job, var)
+        toolchain = next(i for i, s in enumerate(steps) if "rust-toolchain" in s.get("uses", ""))
+        assert isolate[0] < toolchain, job
+        # The final step cleans the workspace on the pool, whatever happened before.
+        assert steps[-1]["if"] == "always() && runner.environment == 'self-hosted'", job
+        assert "rm -rf target" in steps[-1]["run"]
+
+
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
 
 

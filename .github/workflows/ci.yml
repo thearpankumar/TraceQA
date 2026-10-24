@@ -83,11 +83,34 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # A pull request on the self-hosted pool gets its own tool homes under the temporary folder,
+      # which the runner clears after the job. The pool is one persistent machine: without this,
+      # a pull request could leave a changed toolchain or cache in ~/.cargo, ~/.rustup, ~/.cache/uv,
+      # ~/.npm or ~/.cache/ms-playwright for a later master run. This must come before the
+      # toolchain step, or the toolchain installs into the shared folders. Pushes to master keep
+      # the shared folders and stay fast. The service caches below are scoped to the pull request
+      # by GitHub and cannot reach master; they only restore here (see save-if).
+      - name: Isolate the tool homes of this pull request
+        if: runner.environment == 'self-hosted' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          {
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/uv-python"
+            echo "npm_config_cache=$RUNNER_TEMP/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright"
+            echo "TRACEQA_HOME=$RUNNER_TEMP/traceqa-home"
+          } >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/cargo/bin" >> "$GITHUB_PATH"
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       - run: uv sync --locked
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -118,6 +141,12 @@ jobs:
         working-directory: sdks/typescript
         run: npm run typecheck
 
+      # The workspace outlives the job on a persistent machine. Remove what the build left.
+      - name: Clean the workspace
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf target .venv node_modules sdks/typescript/node_modules
+
   # Everything that runs: the Rust crates, the binary, both drivers, both SDKs, the MCP server,
   # the installer and the bench. Built once, in debug, which keeps Rust's overflow and sanity
   # checks on. Release binaries are built by the release workflow when a version is tagged.
@@ -143,10 +172,33 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # A pull request on the self-hosted pool gets its own tool homes under the temporary folder,
+      # which the runner clears after the job. The pool is one persistent machine: without this,
+      # a pull request could leave a changed toolchain or cache in ~/.cargo, ~/.rustup, ~/.cache/uv,
+      # ~/.npm or ~/.cache/ms-playwright for a later master run. This must come before the
+      # toolchain step, or the toolchain installs into the shared folders. Pushes to master keep
+      # the shared folders and stay fast. The service caches below are scoped to the pull request
+      # by GitHub and cannot reach master; they only restore here (see save-if).
+      - name: Isolate the tool homes of this pull request
+        if: runner.environment == 'self-hosted' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          {
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/uv-python"
+            echo "npm_config_cache=$RUNNER_TEMP/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright"
+            echo "TRACEQA_HOME=$RUNNER_TEMP/traceqa-home"
+          } >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/cargo/bin" >> "$GITHUB_PATH"
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -213,6 +265,12 @@ jobs:
           name: bench-scores-${{ matrix.os }}
           path: bench-scores.json
           if-no-files-found: ignore
+
+      # The workspace outlives the job on a persistent machine. Remove what the build left.
+      - name: Clean the workspace
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf target .venv node_modules sdks/typescript/node_modules
 
   # The one check to require before merging. It passes when the jobs above passed, or were
   # skipped because only documentation changed, and fails when any of them failed.
