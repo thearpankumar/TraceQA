@@ -26,7 +26,14 @@ id = "c_" + first 12 hex characters of SHA-256(
 ### Special case 1: no name
 
 An element with an empty name uses the first of these that exists:
-`testid:<data-testid>`, then `id:<id>`, then `<tag[type]>#n`. Here `n` counts
+`testid:<data-testid>`, then `id:<id>`, then `<tag[type]>#n`. The `id` counts
+only when it is stable, by the same rule the collector uses for its `#id`
+selectors: after trimming, it is not empty, does not start with a digit, `:` or
+`_`, has no run of 4 or more digits and no run of 8 or more lower-case hex digits
+(`0-9a-f`; upper case does not count). So `search-toggle` is used, while
+`:r1:`, `_x` and `radix-12345` are generated per page load and fall through to
+`<tag[type]>#n`. `spec/fingerprint-vectors.json` holds the cases; the engine
+(`is_stable_attr_id`) and the collector are both tested against it. Here `n` counts
 the unnamed elements with the same role at the same place: three icon buttons
 side by side are `#0`, `#1` and `#2`, while the single icon button in each card
 of a grid is `#0` in every card and so stays one component. It also gets an
@@ -107,6 +114,9 @@ a list is reordered.
 - **Names that change slowly.** A name the page rewrites while it is read is
   left out of the id (special case 3). One that changes less often than that,
   or only between visits, still changes the id.
+- **Generated ids that look stable.** The rule for a stable `id` is a
+  heuristic. A framework id such as `react-select-a` passes it, and a chosen id
+  such as `item-2024` does not.
 - **Renames.** Changing a button's label changes its id. The old and new ids are
   not linked.
 - **Translated pages.** The same page in another language gets different ids,

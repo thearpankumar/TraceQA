@@ -12,6 +12,7 @@ from them, so the sides cannot drift apart.
 | `run-folder.schema.json` | Run folder | The engine and anything that reads results |
 | `common.schema.json` | Shared types | Used by the files above |
 | `fingerprint.md` | Component id recipe | The engine and anything that compares runs |
+| `fingerprint-vectors.json` | Shared test vectors for the recipe | The engine's unit tests and the collector test (`tests/test_fingerprint_vectors.py`) |
 | `transcripts/` | Recorded client conversations | Every client is tested against them. See `transcripts/README.md`. |
 
 ## How messages travel

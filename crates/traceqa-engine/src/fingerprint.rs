@@ -28,6 +28,34 @@ pub fn normalize_name(name: &str) -> String {
     composed.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
+/// Whether an `id` attribute is one the page's author chose, as opposed to one a framework
+/// generates. A port of `stableId` in `collector/collector.js`; `spec/fingerprint-vectors.json`
+/// keeps the two in step. Generated ids start with a digit, `:` or `_`, or hold four digits in a
+/// row or eight lower-case hex digits in a row (upper case does not count, as in the collector).
+pub fn is_stable_attr_id(id: &str) -> bool {
+    // JavaScript's `trim`, which the collector applies to every attribute it reads.
+    let id = id.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let Some(first) = id.chars().next() else {
+        return false;
+    };
+    if first.is_ascii_digit() || first == ':' || first == '_' {
+        return false;
+    }
+    let (mut digits, mut hex) = (0, 0);
+    for c in id.chars() {
+        digits = if c.is_ascii_digit() { digits + 1 } else { 0 };
+        hex = if c.is_ascii_digit() || ('a'..='f').contains(&c) {
+            hex + 1
+        } else {
+            0
+        };
+        if digits >= 4 || hex >= 8 {
+            return false;
+        }
+    }
+    true
+}
+
 /// Roles that name a part of the page. Their names are written by the page's author, so they
 /// are structure even when several of them sit side by side.
 const LANDMARKS: [&str; 8] = [
@@ -64,6 +92,21 @@ mod tests {
             name: name.map(Into::into),
             repeat_index: repeat.map(|r| r.0),
             repeat_count: repeat.map(|r| r.1),
+        }
+    }
+
+    fn vectors() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../spec/fingerprint-vectors.json")).unwrap()
+    }
+
+    #[test]
+    fn stable_attr_id_matches_the_shared_vectors() {
+        let vectors = vectors();
+        let cases = vectors["stableId"].as_array().unwrap();
+        assert!(cases.len() >= 15);
+        for case in cases {
+            let id = case["id"].as_str().unwrap();
+            assert_eq!(is_stable_attr_id(id), case["stable"].as_bool().unwrap(), "id {id:?}");
         }
     }
 
