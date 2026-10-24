@@ -19,8 +19,9 @@ use std::thread::{self, JoinHandle};
 use serde_json::{json, Value};
 use traceqa_engine::driver::DriverCommand;
 pub use traceqa_engine::UrlPolicy;
-use traceqa_protocol::jsonrpc::{self, code, Id, Line, Message, RpcError, MAX_REQUEST_LINE};
+use traceqa_protocol::jsonrpc::{code, serve_lines, Id, Message, Output, RpcError};
 use traceqa_protocol::supervise::guard;
+use traceqa_protocol::sync::LockExt;
 
 /// MCP versions this server speaks, newest first. A client asking for one of these gets it;
 /// any other client is offered the newest and decides for itself.
@@ -61,14 +62,6 @@ impl Config {
         }
         traceqa_engine::driver::Drivers::new(self.drivers.clone())
     }
-}
-
-type Output = Arc<Mutex<Box<dyn Write + Send>>>;
-
-fn send(output: &Output, message: &Message) {
-    let mut output = output.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    // A host that has gone away cannot be told anything, so a failed write is dropped.
-    let _ = writeln!(output, "{}", jsonrpc::encode(message)).and_then(|()| output.flush());
 }
 
 fn error(rpc_code: i64, message: impl Into<String>) -> RpcError {
@@ -125,91 +118,53 @@ impl Drop for Slot {
             &self.slots.others
         };
         counter.fetch_sub(1, Ordering::SeqCst);
-        self.running
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&self.id);
+        self.running.lock_ok().remove(&self.id);
     }
 }
 
 /// Serves one host until `input` ends. Tool calls still running are then cancelled and
 /// waited for, so no run folder is left half written.
-pub fn serve(mut input: impl BufRead, output: Box<dyn Write + Send>, config: Config) -> io::Result<()> {
-    let output: Output = Arc::new(Mutex::new(output));
+pub fn serve(input: impl BufRead, output: Box<dyn Write + Send>, config: Config) -> io::Result<()> {
+    let output = Output::new(output);
     let config = Arc::new(config);
     let running: Running = Arc::default();
     let slots: Arc<Slots> = Arc::default();
     let mut calls: Vec<JoinHandle<()>> = Vec::new();
 
-    let mut failure_reading = None;
-    let mut buf = Vec::new();
-    loop {
-        // Lines are read with a limit: a host that never sends a newline cannot use all the memory.
-        match jsonrpc::read_line_bounded(&mut input, MAX_REQUEST_LINE, &mut buf) {
-            Ok(Line::Eof) => break,
-            Ok(Line::Complete) => {}
-            Ok(Line::TooLong) => {
-                let message = format!(
-                    "request larger than {} MiB was skipped",
-                    MAX_REQUEST_LINE / (1024 * 1024)
-                );
-                let result = Err(error(code::INVALID_REQUEST, message));
-                send(&output, &Message::Response { id: Id::Null, result });
-                continue;
-            }
-            Err(e) => {
-                failure_reading = Some(e);
-                break;
-            }
-        }
-        let line = match std::str::from_utf8(&buf) {
-            Ok(line) => line,
-            Err(e) => {
-                let result = Err(error(code::PARSE_ERROR, format!("the request is not valid UTF-8: {e}")));
-                send(&output, &Message::Response { id: Id::Null, result });
-                continue;
-            }
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
+    let reading = serve_lines(input, &output, error, |message| {
         calls.retain(|call| !call.is_finished());
-        match jsonrpc::decode(line) {
-            Err(e) => {
-                let result = Err(error(code::PARSE_ERROR, e.to_string()));
-                send(&output, &Message::Response { id: Id::Null, result });
-            }
-            Ok(Message::Notification { method, params }) => {
+        match message {
+            Message::Notification { method, params } => {
                 if method == "notifications/cancelled" {
                     cancel(&running, &params);
                 }
                 // notifications/initialized and others need nothing from us.
             }
             // We never send requests, so there is nothing a response could answer.
-            Ok(Message::Response { .. }) => {}
-            Ok(Message::Request { id, method, params }) => {
+            Message::Response { .. } => {}
+            Message::Request { id, method, params } => {
                 let result = match method.as_str() {
                     "initialize" => Ok(initialize(&params)),
                     "ping" => Ok(json!({})),
                     "tools/list" => Ok(json!({ "tools": tools::list(&config) })),
                     "tools/call" => {
                         calls.extend(start_call(id, params, &output, &config, &running, &slots));
-                        continue;
+                        return;
                     }
                     other => Err(error(code::METHOD_NOT_FOUND, format!("unknown method {other}"))),
                 };
-                send(&output, &Message::Response { id, result });
+                output.send(&Message::Response { id, result });
             }
         }
-    }
+    });
 
-    for flag in running.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).values() {
+    for flag in running.lock_ok().values() {
         flag.store(true, Ordering::Relaxed);
     }
     for call in calls {
         let _ = call.join();
     }
-    failure_reading.map_or(Ok(()), Err)
+    reading
 }
 
 fn initialize(params: &Value) -> Value {
@@ -243,7 +198,7 @@ fn cancel(running: &Running, params: &Value) {
     let Ok(id) = serde_json::from_value::<Id>(id) else {
         return;
     };
-    if let Some(flag) = running.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&id) {
+    if let Some(flag) = running.lock_ok().get(&id) {
         flag.store(true, Ordering::Relaxed);
     }
 }
@@ -273,28 +228,22 @@ fn start_call(
                 format!("busy: {limit} tool calls are already running. Wait for one to finish, then try again.")
             };
             let result = Ok(json!({ "content": [{ "type": "text", "text": text }], "isError": true }));
-            send(output, &Message::Response { id, result });
+            output.send(&Message::Response { id, result });
             return None;
         }
     };
     let cancelled = Arc::new(AtomicBool::new(false));
-    running
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(id.clone(), Arc::clone(&cancelled));
-    let (output, config) = (Arc::clone(output), Arc::clone(config));
+    running.lock_ok().insert(id.clone(), Arc::clone(&cancelled));
+    let (output, config) = (output.clone(), Arc::clone(config));
     Some(thread::spawn(move || {
         let progress_token = params.pointer("/_meta/progressToken").cloned();
         let report = |progress: u64, message: &str| {
             let Some(token) = &progress_token else { return };
             let params = json!({ "progressToken": token, "progress": progress, "message": message });
-            send(
-                &output,
-                &Message::Notification {
-                    method: "notifications/progress".into(),
-                    params,
-                },
-            );
+            output.send(&Message::Notification {
+                method: "notifications/progress".into(),
+                params,
+            });
         };
         let call = tools::Call {
             config: &config,
@@ -321,7 +270,7 @@ fn start_call(
         drop(slot);
         // A cancelled request is not answered: the host has already stopped waiting for it.
         if !cancelled.load(Ordering::Relaxed) {
-            send(&output, &Message::Response { id, result });
+            output.send(&Message::Response { id, result });
         }
     }))
 }

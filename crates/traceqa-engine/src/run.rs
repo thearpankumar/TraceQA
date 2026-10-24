@@ -10,6 +10,7 @@ use std::time::Instant;
 use serde_json::json;
 use thiserror::Error;
 use traceqa_protocol::supervise::guard;
+use traceqa_protocol::sync::{CondvarExt, LockExt};
 use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, TargetSummary, Viewport};
 use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
 
@@ -198,7 +199,7 @@ impl Run {
             worker_panic
         });
 
-        let finished = finished.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let finished = finished.into_inner_ok();
         // The first panic wins: a worker's own words, else the supervisor's.
         let internal_error = match supervised {
             Ok(None) => None,
@@ -234,10 +235,7 @@ impl Run {
             format!("Run {}", manifest.status),
             json!({ "status": manifest.status }),
         );
-        let writer = sink
-            .into_inner()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .writer;
+        let writer = sink.into_inner_ok().writer;
         save(&writer, &manifest);
         manifest
     }
@@ -380,19 +378,16 @@ fn run_workers(
                     let mut drivers = (execution.drivers)();
                     while let Some((index, job)) = claim(&next, jobs) {
                         let outcome = run_target(job, shared, &mut drivers);
-                        finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
+                        finished.lock_ok()[index] = Some(outcome);
                     }
                 });
                 if let Err(message) = worked {
-                    panicked
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .get_or_insert(message);
+                    panicked.lock_ok().get_or_insert(message);
                 }
             });
         }
     });
-    panicked.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner())
+    panicked.into_inner_ok()
 }
 
 /// The targets to run a second time: only when several ran at once, and only those that failed
@@ -415,10 +410,7 @@ fn retry_timed_out(
     shared: &Shared,
     execution: &Execution,
 ) {
-    let again = timed_out_targets(
-        workers,
-        &finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
-    );
+    let again = timed_out_targets(workers, &finished.lock_ok());
     for index in again {
         if execution.cancel.load(Ordering::Relaxed) {
             break;
@@ -434,7 +426,7 @@ fn retry_timed_out(
             json!({}),
         );
         let outcome = run_target(job, shared, &mut (execution.drivers)());
-        finished.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index] = Some(outcome);
+        finished.lock_ok()[index] = Some(outcome);
     }
 }
 
@@ -585,17 +577,13 @@ impl Exclusive {
     /// Waits until `browser` is free and takes it until the returned value is dropped. Looks at
     /// `cancel` every [`CANCEL_SLICE`] while it waits and gives up with `None` once it is set.
     pub(crate) fn hold<'a>(&'a self, browser: &str, cancel: &AtomicBool) -> Option<Held<'a>> {
-        let mut busy = self.busy.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut busy = self.busy.lock_ok();
         while busy.contains(browser) {
             if cancel.load(Ordering::Relaxed) {
                 return None;
             }
             // Woken early by a release, or after a slice; either way the predicate is checked again.
-            busy = self
-                .freed
-                .wait_timeout(busy, CANCEL_SLICE)
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .0;
+            busy = self.freed.wait_timeout_ok(busy, CANCEL_SLICE);
         }
         busy.insert(browser.to_string());
         Some(Held {
@@ -612,11 +600,7 @@ pub(crate) struct Held<'a> {
 
 impl Drop for Held<'_> {
     fn drop(&mut self) {
-        self.owner
-            .busy
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&self.browser);
+        self.owner.busy.lock_ok().remove(&self.browser);
         self.owner.freed.notify_all();
     }
 }

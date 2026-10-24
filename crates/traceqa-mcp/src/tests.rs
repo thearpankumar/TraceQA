@@ -2,11 +2,11 @@ use std::io::{BufRead, BufReader, PipeReader, PipeWriter, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, process};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use traceqa_engine::driver::{DriverCommand, Drivers};
 
 use super::*;
-use crate::tools::base64;
 
 const EXAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../spec/examples");
 const RUN_ID: &str = "r_20261013_210455_a1b2";
@@ -223,7 +223,7 @@ fn reads_a_run_back() {
     let crop = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
     assert_eq!(crop["content"][1]["type"], "image");
     assert_eq!(crop["content"][1]["mimeType"], "image/png");
-    assert_eq!(crop["content"][1]["data"], base64(PICTURE));
+    assert_eq!(crop["content"][1]["data"], STANDARD.encode(PICTURE));
     host.stop();
     fs::remove_dir_all(runs).unwrap();
 }
@@ -351,9 +351,9 @@ fn base64_matches_the_standard() {
         ("foobar", "Zm9vYmFy"),
     ];
     for (plain, encoded) in cases {
-        assert_eq!(base64(plain.as_bytes()), encoded);
+        assert_eq!(STANDARD.encode(plain.as_bytes()), encoded);
     }
-    assert_eq!(base64(&[0xff, 0xfe, 0x00]), "//4A");
+    assert_eq!(STANDARD.encode([0xff, 0xfe, 0x00]), "//4A");
 }
 
 #[test]
@@ -765,7 +765,7 @@ fn assert_refused_without_leaking(answer: &Value, runs: &Path) {
     let text = answer.to_string();
     assert!(text.contains("outside the runs folder"), "{text}");
     assert!(
-        !text.contains(&base64(SECRET)) && !text.contains("TOP-SECRET"),
+        !text.contains(&STANDARD.encode(SECRET)) && !text.contains("TOP-SECRET"),
         "{text}"
     );
     assert!(!text.contains(runs.to_str().unwrap()), "{text}");
@@ -833,7 +833,7 @@ fn get_crop_still_serves_a_normal_crop() {
     let mut host = Host::start(runs.clone());
     let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
     assert_eq!(answer["isError"], false, "{answer}");
-    assert_eq!(answer["content"][1]["data"], base64(PICTURE));
+    assert_eq!(answer["content"][1]["data"], STANDARD.encode(PICTURE));
     host.stop();
     fs::remove_dir_all(runs).unwrap();
 }
@@ -1193,4 +1193,30 @@ fn a_panicking_tool_returns_an_error_result_and_the_server_keeps_answering() {
     assert_eq!(listed["isError"], false, "{listed}");
     host.stop();
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn png_content_is_standard_base64_with_padding() {
+    // One picture for every length modulo 3, with the answers worked out by hand.
+    let pictures: [(&[u8], &str); 4] = [
+        (&[0xff], "/w=="),
+        (&[0xff, 0xfe], "//4="),
+        (&[0xff, 0xfe, 0x00], "//4A"),
+        (&[0xff, 0xfe, 0x00, 0x01], "//4AAQ=="),
+    ];
+    let runs = runs_folder("base64-padding");
+    let crop = runs
+        .join(RUN_ID)
+        .join("firefox-1280x800")
+        .join("crops")
+        .join(format!("{COMPONENT}.png"));
+    let mut host = Host::start(runs.clone());
+    for (bytes, encoded) in pictures {
+        fs::write(&crop, bytes).unwrap();
+        let answer = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
+        assert_eq!(answer["isError"], false, "{answer}");
+        assert_eq!(answer["content"][1]["data"], encoded);
+    }
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
 }

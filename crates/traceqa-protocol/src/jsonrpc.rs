@@ -3,11 +3,14 @@
 //! This module only turns messages into lines and back. Reading and writing
 //! the lines is the caller's job, so it works over any transport.
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+
+use crate::sync::LockExt;
 
 const VERSION: &str = "2.0";
 
@@ -224,6 +227,86 @@ fn read_line_inner<R: BufRead>(reader: &mut R, max: usize, buf: &mut Vec<u8>, sk
     Ok(Line::Complete)
 }
 
+/// Where a server writes its messages: one line each, and never two lines mixed, whichever
+/// thread writes. Cheap to clone, so every thread of a server holds one.
+#[derive(Clone)]
+pub struct Output(Arc<Mutex<Box<dyn Write + Send>>>);
+
+impl Output {
+    pub fn new(writer: Box<dyn Write + Send>) -> Self {
+        Self(Arc::new(Mutex::new(writer)))
+    }
+
+    /// Writes `message` as one line. A peer that has gone away cannot be told anything, so a
+    /// failed write is dropped.
+    pub fn send(&self, message: &Message) {
+        let mut writer = self.0.lock_ok();
+        let _ = writeln!(writer, "{}", encode(message)).and_then(|()| writer.flush());
+    }
+
+    /// Sends a notification whose parameters are `params`.
+    pub fn notify(&self, method: &str, params: &impl Serialize) {
+        let params = serde_json::to_value(params).expect("spec types always serialise");
+        self.send(&Message::Notification {
+            method: method.to_string(),
+            params,
+        });
+    }
+}
+
+/// Reads the messages a peer sends, one per line, and hands each to `dispatch`. What cannot be
+/// handed on is answered here with an error and an id of `null`, and reading goes on: a line
+/// longer than [`MAX_REQUEST_LINE`] (skipped, so one huge line costs no memory), a line that is
+/// not UTF-8, and a line that is not a JSON-RPC message. Blank lines are skipped. `refuse`
+/// builds the error for a code and a message.
+///
+/// Returns at the end of `input`, or with the error that ended the reading. The caller then
+/// waits for the work it started.
+pub fn serve_lines<R: BufRead>(
+    mut input: R,
+    output: &Output,
+    refuse: impl Fn(i64, String) -> RpcError,
+    mut dispatch: impl FnMut(Message),
+) -> io::Result<()> {
+    let refuse_line = |rpc_code: i64, message: String| {
+        output.send(&Message::Response {
+            id: Id::Null,
+            result: Err(refuse(rpc_code, message)),
+        });
+    };
+    let mut buf = Vec::new();
+    loop {
+        // Lines are read with a limit: a peer that never sends a newline cannot use all the memory.
+        match read_line_bounded(&mut input, MAX_REQUEST_LINE, &mut buf)? {
+            Line::Eof => return Ok(()),
+            Line::Complete => {}
+            Line::TooLong => {
+                let message = format!(
+                    "request larger than {} MiB was skipped",
+                    MAX_REQUEST_LINE / (1024 * 1024)
+                );
+                refuse_line(code::INVALID_REQUEST, message);
+                continue;
+            }
+        }
+        // A line that is not UTF-8 is a bad request, not a reason to stop serving.
+        let line = match std::str::from_utf8(&buf) {
+            Ok(line) => line,
+            Err(e) => {
+                refuse_line(code::PARSE_ERROR, format!("the request is not valid UTF-8: {e}"));
+                continue;
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        match decode(line) {
+            Ok(message) => dispatch(message),
+            Err(e) => refuse_line(code::PARSE_ERROR, e.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +411,103 @@ mod tests {
             100_000_000,
             "the whole line was read and dropped"
         );
+    }
+
+    /// Collects what a server writes.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock_ok().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn written(captured: &Captured) -> Vec<Value> {
+        let bytes = captured.0.lock_ok().clone();
+        String::from_utf8(bytes)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    fn plain(rpc_code: i64, message: String) -> RpcError {
+        RpcError {
+            code: rpc_code,
+            message,
+            data: None,
+        }
+    }
+
+    #[test]
+    fn line_server_dispatches_and_joins_threads_at_eof() {
+        let captured = Captured::default();
+        let output = Output::new(Box::new(captured.clone()));
+        let input = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a\"}\n\n{\"jsonrpc\":\"2.0\",\"method\":\"note\"}\n";
+        let mut threads = Vec::new();
+        let mut seen = Vec::new();
+        serve_lines(input.as_bytes(), &output, plain, |message| match message {
+            Message::Request { id, method, .. } => {
+                let output = output.clone();
+                threads.push(std::thread::spawn(move || {
+                    output.send(&Message::Response {
+                        id,
+                        result: Ok(json!({ "method": method })),
+                    });
+                }));
+            }
+            other => seen.push(other),
+        })
+        .unwrap();
+        // At the end of the input the caller waits for what it started.
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(seen.len(), 1);
+        assert!(matches!(&seen[0], Message::Notification { method, .. } if method == "note"));
+        let replies = written(&captured);
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0]["id"], 1);
+        assert_eq!(replies[0]["result"]["method"], "a");
+    }
+
+    #[test]
+    fn oversized_line_still_answers_with_an_error_and_continues() {
+        let mut input = vec![b'a'; MAX_REQUEST_LINE + 1];
+        input.push(b'\n');
+        input.extend_from_slice(b"\xff\xfe not text\nnot json\n{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n");
+        let captured = Captured::default();
+        let output = Output::new(Box::new(captured.clone()));
+        let mut dispatched = Vec::new();
+        serve_lines(input.as_slice(), &output, plain, |message| dispatched.push(message)).unwrap();
+        let replies = written(&captured);
+        assert_eq!(replies.len(), 3);
+        assert!(replies.iter().all(|reply| reply["id"].is_null()));
+        assert_eq!(replies[0]["error"]["code"], code::INVALID_REQUEST);
+        assert!(replies[0]["error"]["message"].as_str().unwrap().contains("8 MiB"));
+        assert_eq!(replies[1]["error"]["code"], code::PARSE_ERROR);
+        assert_eq!(replies[2]["error"]["code"], code::PARSE_ERROR);
+        // The request after all of that still arrives.
+        assert!(matches!(&dispatched[..], [Message::Request { id: Id::Number(7), .. }]));
+    }
+
+    #[test]
+    fn a_read_error_ends_the_server_with_that_error() {
+        struct Broken;
+        impl io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("pipe broke"))
+            }
+        }
+        let output = Output::new(Box::new(Captured::default()));
+        let error = serve_lines(io::BufReader::new(Broken), &output, plain, |_| {}).unwrap_err();
+        assert_eq!(error.to_string(), "pipe broke");
     }
 
     fn round_trip(message: Message) {
