@@ -27,7 +27,7 @@
     "lint:collector": "cd ../.. && node sdks/typescript/node_modules/eslint/bin/eslint.js -c sdks/typescript/eslint.collector.config.mjs collector/collector.js collector/pristine.js",
     "gen": "node scripts/gen-protocol.mjs",
     "gen:check": "node scripts/gen-protocol.mjs --check",
-    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "test": "npm run build && node --test dist/test/00-preflight.test.js && node --test \"dist/test/*.test.js\"",
     "prepublishOnly": "npm run typecheck && npm run build",
     "lint:package": "npm run build && publint --strict && attw --pack . --profile esm-only"
   },
