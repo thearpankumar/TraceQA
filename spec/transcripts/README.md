@@ -54,6 +54,9 @@ reason.
 | `cancel.jsonl` | Extract the shop at both viewports, 1 browser at a time, and cancel the run when the `page.opened` event arrives. | Send `run.cancel` for the run. |
 | `version-mismatch.jsonl` | Start an engine. | Fail with kind `version_mismatch`. |
 
+Every conversation that got past `engine.hello` ends with the client sending
+`engine.shutdown` (the engine answers `{}`) before it closes the engine's input.
+
 Default options mean pictures off (`crops: false`), hidden elements included
 (`includeHidden: true`), and headless browsers. Leave out every option the
 caller did not set.

@@ -255,6 +255,36 @@ def test_close_lets_a_well_behaved_engine_exit_without_a_kill(install) -> None:
     assert process.wait_calls == [30.0]
 
 
+def test_close_sends_engine_shutdown_before_it_ends_the_input(install) -> None:
+    process, engine = extract_with(good, install)
+    engine.close()
+    assert [request["method"] for request in process.written] == ["engine.hello", "engine.shutdown"]
+    assert process.written[1]["params"] == {}
+    assert process.stdin.closed
+
+
+def test_close_tolerates_an_engine_that_does_not_know_engine_shutdown(install) -> None:
+    def old_engine(request: dict[str, Any]) -> list[str] | None:
+        if request["method"] == "engine.shutdown":
+            error = {"code": -32601, "message": "unknown method engine.shutdown", "data": {"kind": "unsupported"}}
+            return [line({"jsonrpc": "2.0", "id": request["id"], "error": error})]
+        return good(request)
+
+    process, engine = extract_with(old_engine, install)
+    engine.close()  # does not raise
+    assert not process.killed
+
+
+def test_a_failed_hello_closes_without_engine_shutdown(install) -> None:
+    def reply(request: dict[str, Any]) -> list[str] | None:
+        return [""]
+
+    process = install(FakeProcess(reply, returncode=3))
+    with pytest.raises(traceqa.EngineExitedError):
+        traceqa.Engine(binary="fake-traceqa")
+    assert [request["method"] for request in process.written] == ["engine.hello"]
+
+
 def test_cancel_from_another_thread_sends_run_cancel(install) -> None:
     def reply(request: dict[str, Any]) -> list[str] | None:
         if request["method"] == "run.cancel":
@@ -281,7 +311,7 @@ def test_cancel_with_no_run_does_nothing(install) -> None:
     process, engine = extract_with(good, install)
     with engine:
         engine.cancel()
-    assert [r["method"] for r in process.written] == ["engine.hello"]
+    assert [r["method"] for r in process.written] == ["engine.hello", "engine.shutdown"]
 
 
 def test_an_error_answer_to_run_cancel_is_ignored(install) -> None:

@@ -159,11 +159,13 @@ class Engine:
         self._cancel_requested = False
         self._active_run: str | None = None
         self._last_line = ""
+        self._greeted = False  # engine.hello was answered, so engine.shutdown is understood
         hello = models.EngineHelloParams(
             protocol_version=contracts.CLIENT_PROTOCOL_VERSION, client_name="traceqa-python"
         )
         try:
             self.info = self._validated(models.EngineHelloResult, self._call("engine.hello", hello))
+            self._greeted = True
         except BaseException:
             self.close()  # the engine was started, so it must not be left behind
             raise
@@ -191,10 +193,16 @@ class Engine:
     def close(self, timeout: float = 30.0) -> None:
         """Stop the engine. A run that is still going is cancelled first.
 
+        Tells the engine this is a deliberate close (`engine.shutdown`), then ends its input. An engine
+        that sees its input end without that request assumes the client died and cancels its runs.
         Waits up to `timeout` seconds for the engine to exit on its own, then kills it.
         """
         process = self._process
         self.cancel()
+        if self._greeted:
+            # The answer is not awaited. An older engine answers "unknown method", which changes nothing.
+            with contextlib.suppress(TraceQAError):
+                self._send("engine.shutdown", models.Empty())
         with self._lock, contextlib.suppress(OSError, ValueError):  # the engine may already be gone
             if process.stdin and not process.stdin.closed:
                 process.stdin.close()

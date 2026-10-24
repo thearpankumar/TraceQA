@@ -54,7 +54,7 @@ function serve(script: string): Promise<Shop> {
 }
 
 /** What a fake engine does. `run` keeps a run going until it is cancelled; `hang` also ignores the end of its input. */
-export type FakeMode = "good" | "garbage" | "closed" | "badhello" | "refused" | "badevent" | "run" | "hang";
+export type FakeMode = "good" | "garbage" | "closed" | "badhello" | "refused" | "badevent" | "run" | "hang" | "needsshutdown" | "oldengine";
 
 // A stand-in engine for the error tests: a node script that answers with canned lines.
 const FAKE_ENGINE = `
@@ -65,9 +65,15 @@ const RUN_ID = "r_20261014_065509_925a";
 const event = { seq: 0, type: "run.started", ts: "2026-10-14T06:55:09Z", runId: RUN_ID, message: "go" };
 const manifest = { formatVersion: 1, runId: RUN_ID, feature: "extract", url: "http://x/", status: "cancelled",
   startedAt: "2026-10-14T06:55:09Z", engineVersion: "0.1.0", targets: [] };
+let shutdownSeen = false;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
   const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+  if (request.method === "engine.shutdown") {
+    if (mode === "oldengine") return send({ jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "unknown method engine.shutdown", data: { kind: "unsupported" } } });
+    shutdownSeen = true;
+    return reply({});
+  }
   if (request.method === "engine.hello") {
     if (mode === "garbage") return process.stdout.write("this is not json " + "x".repeat(500) + "\\n");
     if (mode === "closed") return process.exit(3);
@@ -86,7 +92,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "run.done", params: { runId: RUN_ID, manifest } });
   }
 });
-process.stdin.on("end", () => { if (mode !== "hang") process.exit(0); });
+// "needsshutdown" behaves like the real engine: the end of input with no engine.shutdown first means a crashed client.
+process.stdin.on("end", () => { if (mode !== "hang") process.exit(mode === "needsshutdown" && !shutdownSeen ? 7 : 0); });
 if (mode === "hang") setInterval(() => {}, 1000);
 `;
 

@@ -111,6 +111,8 @@ def record(name: str, scenario: dict[str, Any], port: int, runs: str) -> list[di
         # The run folder path, written with the separators of this system.
         for spelling in {runs, runs.replace("\\", "\\\\"), json.dumps(runs)[1:-1]}:
             text = text.replace(spelling, RUNS)
+        # What follows the run folder was joined with this system's separator too (an escaped backslash in the JSON text).
+        text = text.replace(RUNS + "\\\\", RUNS + "/")
         message = json.loads(text)
         lines.append({"engine": message})
         return message
@@ -135,6 +137,11 @@ def record(name: str, scenario: dict[str, Any], port: int, runs: str) -> list[di
             # The answer to run.cancel may come after run.done.
             while not any(line.get("engine", {}).get("id") == 3 for line in lines):
                 receive()
+    # A client that closes on purpose says so. Without this the engine would take the end of its input
+    # for a crashed client and cancel whatever is running.
+    shutdown = {"jsonrpc": "2.0", "id": 4, "method": "engine.shutdown", "params": {}}
+    send(shutdown, shutdown)
+    receive()
     process.stdin.close()
     rest = process.stdout.read()
     if process.wait() != 0 or rest.strip():

@@ -148,6 +148,23 @@ describe("a fake engine", () => {
   });
 });
 
+describe("close and engine.shutdown", () => {
+  test("close sends engine.shutdown before it ends the engine's input", async () => {
+    const { child, engine: attached } = attach("needsshutdown");
+    const engine = await attached;
+    await engine.close();
+    assert.equal(child.exitCode, 0, "the engine saw engine.shutdown, so it did not take the close for a crash");
+  });
+
+  test("close tolerates an engine that does not know engine.shutdown", async () => {
+    const { child, engine: attached } = attach("oldengine");
+    const engine = await attached;
+    await engine.close();
+    assert.equal(child.exitCode, 0);
+    assert.equal(child.killed, false);
+  });
+});
+
 describe("validate", () => {
   const example = readFileSync(join(ROOT, "spec", "examples", "ComponentsFile.shop.json"), "utf8");
 

@@ -162,6 +162,15 @@ most `--max-runs` runs (default 4) go at once; a `run.start` beyond that gets an
 error with kind `busy` and `retryable: true`, and can be sent again when a run
 has ended (as soon as its `run.done` arrives).
 
+Closing: a client that means to close sends `engine.shutdown` (answered with
+`{}`), then ends the engine's input. From then on `run.start` is refused with
+kind `busy`, runs still going finish, and the engine exits when its input has
+ended. If the input ends **without** `engine.shutdown`, the client is taken to
+have crashed: every run is cancelled the way `run.cancel` cancels it, each run
+folder is finalised with status `cancelled`, and the engine exits. No browser
+is left running for a client that is gone. The SDKs send `engine.shutdown` in
+`close()`.
+
 ## `traceqa mcp`
 
 ```

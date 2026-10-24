@@ -15,6 +15,10 @@ CLIENT_PROTOCOL_METHODS = {
     "run.cancel": {
         "params": "RunCancelParams",
         "result": "Empty"
+    },
+    "engine.shutdown": {
+        "params": "Empty",
+        "result": "Empty"
     }
 }
 CLIENT_PROTOCOL_NOTIFICATIONS = {
