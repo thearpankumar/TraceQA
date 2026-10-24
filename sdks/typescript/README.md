@@ -24,6 +24,11 @@ for (const target of result.targets) {
 
 All options are in [docs/usage.md](../../docs/usage.md#typescript-sdk).
 
+Errors are `TraceQAError` and its subclasses `EngineStartError`,
+`EngineExitedError`, `EngineRefusedError` and `EngineProtocolError`; the original
+error is kept in `cause`. `engine.close({ timeoutMs })` kills an engine that does
+not exit in time.
+
 ## Development
 
 ```sh

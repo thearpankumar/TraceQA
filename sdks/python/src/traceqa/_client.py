@@ -5,25 +5,56 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 from traceqa_protocol import contracts, models, to_wire
 
 Browser = str | models.BrowserTarget
 EventHandler = Callable[[models.Event], None]
 
 BINARY_ENV = "TRACEQA_BIN"
+EXCERPT_CHARS = 80
 
 
 class TraceQAError(Exception):
-    """The engine refused a request, or could not be started or reached."""
+    """Base of every error this package raises.
+
+    Used as is for a caller's mistake (a bad browser string, a bad storage file, several targets).
+    The engine's own failures are the subclasses below.
+    """
 
     def __init__(self, message: str, kind: str | None = None) -> None:
         super().__init__(message)
         self.kind = kind
+
+
+class EngineStartError(TraceQAError):
+    """The engine binary was not found or could not be started."""
+
+
+class EngineExitedError(TraceQAError):
+    """The engine's pipe closed or the process died. `exit_code` is set when it is known."""
+
+    def __init__(self, message: str, exit_code: int | None = None) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class EngineRefusedError(TraceQAError):
+    """The engine answered a request with a JSON-RPC error. `kind` and `code` are the engine's."""
+
+    def __init__(self, message: str, kind: str | None = None, code: int | None = None) -> None:
+        super().__init__(message, kind)
+        self.code = code
+
+
+class EngineProtocolError(TraceQAError):
+    """The engine sent a line that is not JSON, or JSON that does not have the protocol's shape."""
 
 
 @dataclass
@@ -50,7 +81,10 @@ class ExtractResult:
         path = self.run_folder / target_dir / "components.json"
         if not path.is_file():
             raise TraceQAError(f"{target_dir} produced no components.json. Check its status and error in `targets`.")
-        return models.ComponentsFile.model_validate_json(path.read_text(encoding="utf-8"))
+        try:
+            return models.ComponentsFile.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValidationError as error:
+            raise EngineProtocolError(f"{path.name} in {target_dir} does not match the protocol") from error
 
 
 def _target(browser: Browser) -> models.BrowserTarget:
@@ -91,12 +125,17 @@ def _storage_state(
 def _find_binary(binary: str | os.PathLike[str] | None) -> str:
     candidate = binary or os.environ.get(BINARY_ENV) or shutil.which("traceqa")
     if not candidate:
-        raise TraceQAError(f"the traceqa engine was not found. Put it on PATH, set {BINARY_ENV}, or pass binary=.")
+        raise EngineStartError(f"the traceqa engine was not found. Put it on PATH, set {BINARY_ENV}, or pass binary=.")
     return str(candidate)
 
 
 class Engine:
-    """A running engine process. Use it as a context manager to make several calls on one process."""
+    """A running engine process. Use it as a context manager to make several calls on one process.
+
+    One Engine runs one extraction at a time, on purpose: a second `extract` while another is
+    active raises `TraceQAError`. Use one Engine per concurrent run. `cancel()` may be called
+    from any thread.
+    """
 
     def __init__(self, binary: str | os.PathLike[str] | None = None, drivers: Sequence[str] = ()) -> None:
         command = [_find_binary(binary), "serve"]
@@ -107,14 +146,18 @@ class Engine:
                 command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8"
             )
         except OSError as error:
-            raise TraceQAError(f"could not start {command[0]}: {error}") from error
+            raise EngineStartError(f"could not start {command[0]}: {error}") from error
         self._next_id = 0
+        self._lock = threading.Lock()  # guards _next_id, the writes to stdin and the run state below
+        self._extracting = False
+        self._cancel_requested = False
         self._active_run: str | None = None
+        self._last_line = ""
         hello = models.EngineHelloParams(
             protocol_version=contracts.CLIENT_PROTOCOL_VERSION, client_name="traceqa-python"
         )
         try:
-            self.info = models.EngineHelloResult.model_validate(self._call("engine.hello", hello))
+            self.info = self._validated(models.EngineHelloResult, self._call("engine.hello", hello))
         except BaseException:
             self.close()  # the engine was started, so it must not be left behind
             raise
@@ -125,33 +168,96 @@ class Engine:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def close(self) -> None:
-        """Stop the engine. A run that is still going is cancelled first."""
+    def cancel(self) -> None:
+        """Cancel the extraction that is running, if any. Safe to call from another thread.
+
+        `extract` then returns normally with status `cancelled`. Does nothing when no run is active.
+        """
+        with self._lock:
+            run_id = self._active_run
+            if run_id is None:
+                if self._extracting:
+                    self._cancel_requested = True  # run.start has not been answered yet
+                return
+        with contextlib.suppress(TraceQAError):  # a gone engine has nothing left to cancel
+            self._send("run.cancel", models.RunCancelParams(run_id=run_id))
+
+    def close(self, timeout: float = 30.0) -> None:
+        """Stop the engine. A run that is still going is cancelled first.
+
+        Waits up to `timeout` seconds for the engine to exit on its own, then kills it.
+        """
         process = self._process
-        if process.stdin and not process.stdin.closed:
-            with contextlib.suppress(OSError, ValueError):  # the engine may already be gone
-                if self._active_run is not None:
-                    self._send("run.cancel", models.RunCancelParams(run_id=self._active_run))
+        self.cancel()
+        with self._lock, contextlib.suppress(OSError, ValueError):  # the engine may already be gone
+            if process.stdin and not process.stdin.closed:
                 process.stdin.close()
+        drain: threading.Thread | None = None
         if process.stdout and not process.stdout.closed:
-            # Read until the engine closes its end. An engine blocked on a full pipe would never exit.
-            for _ in process.stdout:
-                pass
-            process.stdout.close()
-        process.wait()
+            stdout = process.stdout
+
+            def drain_stdout() -> None:
+                # Read until the engine closes its end. An engine blocked on a full pipe would never exit.
+                with contextlib.suppress(OSError, ValueError):
+                    for _ in stdout:
+                        pass
+
+            drain = threading.Thread(target=drain_stdout, daemon=True)
+            drain.start()
+        try:
+            process.wait(timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        if drain is not None:
+            drain.join(5)
+            if not drain.is_alive():
+                with contextlib.suppress(OSError, ValueError):
+                    process.stdout.close()
+
+    def _exit_code(self) -> int | None:
+        try:
+            return self._process.wait(1)
+        except subprocess.TimeoutExpired:
+            return None
 
     def _read(self) -> dict[str, Any]:
         line = self._process.stdout.readline()
         if not line:
-            raise TraceQAError("the engine exited unexpectedly")
-        return json.loads(line)
+            code = self._exit_code()
+            suffix = f" with code {code}" if code is not None else ""
+            raise EngineExitedError(f"the engine exited unexpectedly{suffix}", code)
+        self._last_line = line
+        try:
+            message = json.loads(line)
+        except ValueError as error:
+            raise self._protocol_error("sent a line that is not JSON") from error
+        if not isinstance(message, dict):
+            raise self._protocol_error("sent a message that is not a JSON object")
+        return message
+
+    def _protocol_error(self, what: str) -> EngineProtocolError:
+        # Never more than the first characters of the line: it comes from outside.
+        excerpt = self._last_line.strip()[:EXCERPT_CHARS]
+        return EngineProtocolError(f"the engine {what}: {excerpt!r}")
+
+    def _validated(self, model: type[Any], value: Any) -> Any:
+        try:
+            return model.model_validate(value)
+        except ValidationError as error:
+            raise self._protocol_error(f"sent a {model.__name__} that does not match the protocol") from error
 
     def _send(self, method: str, params: models.BaseModel) -> int:
-        self._next_id += 1
-        request = {"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": to_wire(params)}
-        self._process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
-        self._process.stdin.flush()
-        return self._next_id
+        with self._lock:
+            self._next_id += 1
+            request_id = self._next_id
+            request = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": to_wire(params)}
+            try:
+                self._process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+                self._process.stdin.flush()
+            except (OSError, ValueError) as error:  # a broken pipe, or stdin already closed
+                raise EngineExitedError("the engine exited unexpectedly", self._process.poll()) from error
+        return request_id
 
     def _call(self, method: str, params: models.BaseModel) -> dict[str, Any]:
         request_id = self._send(method, params)
@@ -161,8 +267,20 @@ class Engine:
                 continue  # the engine never sends a run's events before the answer that names the run
             if "error" in message:
                 error = message["error"]
-                raise TraceQAError(error["message"], (error.get("data") or {}).get("kind"))
-            return message["result"]
+                if not isinstance(error, dict) or not isinstance(error.get("message"), str):
+                    raise self._protocol_error("sent an error answer without a message")
+                data = error.get("data")
+                kind = data.get("kind") if isinstance(data, dict) else None
+                code = error.get("code")
+                raise EngineRefusedError(
+                    error["message"],
+                    kind if isinstance(kind, str) else None,
+                    code if isinstance(code, int) else None,
+                )
+            result = message.get("result")
+            if not isinstance(result, dict):
+                raise self._protocol_error("sent an answer without a result")
+            return result
 
     def extract(
         self,
@@ -192,6 +310,11 @@ class Engine:
 
         Blocks until the run is finished. A browser that fails does not raise: look at
         `result.status` and at each target's `status` and `error`.
+
+        One Engine runs one extraction at a time, on purpose. A second call while this one is
+        active raises `TraceQAError`; use one Engine per concurrent run. Call `cancel()` from
+        another thread to stop this run: it then returns with status `cancelled`. Ctrl+C cancels
+        the run before `KeyboardInterrupt` propagates.
         """
         targets = [_target(browser) for browser in browsers]
         for target in targets:
@@ -213,20 +336,40 @@ class Engine:
             ),
             storage_state=_storage_state(storage_state),
         )
-        accepted = models.RunStartResult.model_validate(self._call("run.start", request))
-        # Stays set if anything below raises, so that close() cancels the run.
-        self._active_run = accepted.run_id
+        with self._lock:
+            if self._extracting:
+                raise TraceQAError("this engine is already running an extraction; use one Engine per concurrent run")
+            self._extracting = True
+            self._cancel_requested = False
+        try:
+            accepted = self._validated(models.RunStartResult, self._call("run.start", request))
+            # Stays set if anything below raises, so that close() cancels the run.
+            with self._lock:
+                self._active_run = accepted.run_id
+                cancel_now = self._cancel_requested
+            if cancel_now:
+                self.cancel()
+            try:
+                return self._follow(accepted, on_event)
+            except KeyboardInterrupt:
+                self.cancel()
+                raise
+        finally:
+            with self._lock:
+                self._extracting = False
 
+    def _follow(self, accepted: models.RunStartResult, on_event: EventHandler | None) -> ExtractResult:
         while True:
             message = self._read()
-            params = message.get("params") or {}
-            if params.get("runId") != accepted.run_id:
-                continue
+            params = message.get("params")
+            if not isinstance(params, dict) or params.get("runId") != accepted.run_id:
+                continue  # also the answer, or an error answer, to run.cancel
             if message.get("method") == "run.event" and on_event is not None:
-                on_event(models.RunEventParams.model_validate(params).event)
+                on_event(self._validated(models.RunEventParams, params).event)
             elif message.get("method") == "run.done":
-                done = models.RunDoneParams.model_validate(params)
-                self._active_run = None
+                done = self._validated(models.RunDoneParams, params)
+                with self._lock:
+                    self._active_run = None
                 return ExtractResult(manifest=done.manifest, run_folder=Path(accepted.run_folder))
 
 

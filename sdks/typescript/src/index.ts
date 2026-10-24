@@ -15,13 +15,21 @@
  */
 
 export {
+  EngineExitedError,
+  EngineProtocolError,
+  EngineRefusedError,
+  EngineStartError,
+  TraceQAError,
+} from "./errors.js";
+
+export {
   BINARY_ENV,
   Engine,
   ExtractResult,
-  TraceQAError,
   extract,
   toTarget,
   type Browser,
+  type CloseOptions,
   type EngineOptions,
   type ExtractOptions,
 } from "./client.js";

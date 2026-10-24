@@ -140,3 +140,17 @@ def test_a_bad_storage_state_is_refused_without_showing_it(tmp_path: Path) -> No
     assert "secret-token-123" not in str(refused.value)
     with pytest.raises(traceqa.TraceQAError, match="not a storage state"):
         traceqa.extract("https://example.com", binary=BINARY, storage_state={"token": "x"})
+
+
+def test_cancel_from_another_thread_ends_a_slow_run(trouble: str, tmp_path: Path) -> None:
+    import threading
+
+    # /hang never fires its load event, so only the cancel ends this run within the timeout.
+    with traceqa.Engine(binary=BINARY) as engine:
+        timer = threading.Timer(1, engine.cancel)
+        timer.start()
+        try:
+            result = engine.extract(trouble + "hang", out_dir=tmp_path, timeout_ms=60000)
+        finally:
+            timer.cancel()
+    assert result.status == models.RunStatus.cancelled

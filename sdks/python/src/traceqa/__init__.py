@@ -11,6 +11,24 @@ This package holds no logic. It starts the `traceqa` engine as a child process
 and exchanges the JSON messages defined in spec/client-protocol.schema.json.
 """
 
-from ._client import Engine, ExtractResult, TraceQAError, extract
+from ._client import (
+    Engine,
+    EngineExitedError,
+    EngineProtocolError,
+    EngineRefusedError,
+    EngineStartError,
+    ExtractResult,
+    TraceQAError,
+    extract,
+)
 
-__all__ = ["Engine", "ExtractResult", "TraceQAError", "extract"]
+__all__ = [
+    "Engine",
+    "EngineExitedError",
+    "EngineProtocolError",
+    "EngineRefusedError",
+    "EngineStartError",
+    "ExtractResult",
+    "TraceQAError",
+    "extract",
+]

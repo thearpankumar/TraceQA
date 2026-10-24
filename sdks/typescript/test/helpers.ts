@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 /** The repository root. Tests run from dist/test/, four folders down. */
@@ -50,4 +51,50 @@ function serve(script: string): Promise<Shop> {
       resolveShop({ url, stop: () => child.kill() });
     });
   });
+}
+
+/** What a fake engine does. `run` keeps a run going until it is cancelled; `hang` also ignores the end of its input. */
+export type FakeMode = "good" | "garbage" | "closed" | "badhello" | "refused" | "badevent" | "run" | "hang";
+
+// A stand-in engine for the error tests: a node script that answers with canned lines.
+const FAKE_ENGINE = `
+const readline = require("node:readline");
+const mode = process.argv[1];
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const RUN_ID = "r_20261014_065509_925a";
+const event = { seq: 0, type: "run.started", ts: "2026-10-14T06:55:09Z", runId: RUN_ID, message: "go" };
+const manifest = { formatVersion: 1, runId: RUN_ID, feature: "extract", url: "http://x/", status: "cancelled",
+  startedAt: "2026-10-14T06:55:09Z", engineVersion: "0.1.0", targets: [] };
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const request = JSON.parse(line);
+  const reply = (result) => send({ jsonrpc: "2.0", id: request.id, result });
+  if (request.method === "engine.hello") {
+    if (mode === "garbage") return process.stdout.write("this is not json " + "x".repeat(500) + "\\n");
+    if (mode === "closed") return process.exit(3);
+    if (mode === "badhello") return reply({ nothing: "useful" });
+    return reply({ engineVersion: "0.1.0", protocolVersion: 1, features: ["extract"] });
+  }
+  if (request.method === "run.start") {
+    if (mode === "refused") {
+      return send({ jsonrpc: "2.0", id: request.id, error: { code: -32602, message: "url must start with http://", data: { kind: "invalid_params" } } });
+    }
+    reply({ runId: RUN_ID, runFolder: "/tmp/" + RUN_ID });
+    return send({ jsonrpc: "2.0", method: "run.event", params: { runId: RUN_ID, event: mode === "badevent" ? { ...event, seq: "one" } : event } });
+  }
+  if (request.method === "run.cancel") {
+    reply({});
+    send({ jsonrpc: "2.0", method: "run.done", params: { runId: RUN_ID, manifest } });
+  }
+});
+process.stdin.on("end", () => { if (mode !== "hang") process.exit(0); });
+if (mode === "hang") setInterval(() => {}, 1000);
+`;
+
+export type FakeEngine = ChildProcessByStdio<Writable, Readable, null>;
+
+/** Starts the fake engine. The caller attaches an Engine to it; the child is killed when the process exits. */
+export function fakeEngine(mode: FakeMode): FakeEngine {
+  const child = spawn(process.execPath, ["-e", FAKE_ENGINE, mode], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+  process.on("exit", () => child.kill());
+  return child;
 }
