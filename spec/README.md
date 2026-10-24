@@ -48,6 +48,13 @@ Limits on what a driver sends:
 - Error messages that quote a bad line show at most 200 characters of it.
 - A client request line longer than 8 MiB (`MAX_REQUEST_LINE`) is skipped and
   answered with code `-32600` and a `null` id; the engine reads the next line.
+- Error codes for a line that is not a request, as in JSON-RPC 2.0: text that is
+  not JSON (or not UTF-8) is `-32700` with a `null` id. JSON that is not a
+  request object (a missing or wrong `jsonrpc`, no `method` or `id`, a `method`
+  that is not a string, a number, `null`, or an array including `[]`) is
+  `-32600`, with the request's `id` echoed when it is a non-negative whole
+  number or a string, and `null` otherwise. Batches are not supported: an array
+  is `-32600`. The next line is read as usual.
 - At most `--max-runs` runs go at once (default 4). A `run.start` beyond that is
   answered with an error whose `data.kind` is `busy` and `retryable` is true.
 - A driver's stderr is inherited, not read by the engine: it is the driver's own
