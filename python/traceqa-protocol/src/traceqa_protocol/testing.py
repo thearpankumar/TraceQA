@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Any
+from typing import IO, Any
 
 
 class RpcFailure(Exception):
@@ -22,15 +22,21 @@ class DriverClient:
         self.process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8"
         )
+        # Popen types the pipes as optional. Both were requested, so they are set; this narrows the type.
+        if self.process.stdin is None or self.process.stdout is None:
+            self.process.kill()
+            raise RuntimeError("could not open the pipes of the driver")
+        self._stdin: IO[str] = self.process.stdin
+        self._stdout: IO[str] = self.process.stdout
         self._next_id = 0
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self._next_id += 1
         request = {"jsonrpc": "2.0", "id": self._next_id, "method": method, "params": params or {}}
-        self.process.stdin.write(json.dumps(request) + "\n")
-        self.process.stdin.flush()
+        self._stdin.write(json.dumps(request) + "\n")
+        self._stdin.flush()
         while True:
-            line = self.process.stdout.readline()
+            line = self._stdout.readline()
             if not line:
                 raise RuntimeError(f"driver exited while handling {method}")
             message = json.loads(line)

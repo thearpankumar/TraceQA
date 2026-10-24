@@ -18,7 +18,9 @@ needs_uv = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to re
 
 @needs_uv
 def test_the_committed_requirements_match_uv_lock() -> None:
-    check = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True, cwd=ROOT)
+    check = subprocess.run(
+        [sys.executable, str(SCRIPT), "--check"], check=False, capture_output=True, text=True, cwd=ROOT
+    )
     assert check.returncode == 0, check.stderr
 
 

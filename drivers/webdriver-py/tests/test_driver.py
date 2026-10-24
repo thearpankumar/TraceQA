@@ -129,7 +129,10 @@ def read_the_shop(driver: DriverClient, target: dict[str, Any], shop_url: str, t
     assert [element.in_shadow_dom for element in main.elements if element.name == "Increase quantity"] == [True]
     pay = frames["pay"]
     assert pay.frame.cross_origin and not frames["newsletter"].frame.cross_origin
-    assert pay.frame.box.w == 320 and pay.frame.box.y > frames["newsletter"].frame.box.y
+    pay_box, newsletter_box = pay.frame.box, frames["newsletter"].frame.box
+    assert pay_box is not None
+    assert newsletter_box is not None
+    assert pay_box.w == 320 and pay_box.y > newsletter_box.y
     assert names(models.CollectorResult.model_validate(pay.value), "button") == ["Pay now"]
 
     scrolled, again = scroll_until_the_reviews_load(driver, session_id)

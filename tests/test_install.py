@@ -36,7 +36,9 @@ def without_workspace_drivers(home: Path) -> dict[str, str]:
 
 
 def traceqa(*args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(BINARY), *args], env=env, capture_output=True, text=True, encoding="utf-8", timeout=600)
+    return subprocess.run(
+        [str(BINARY), *args], env=env, check=False, capture_output=True, text=True, encoding="utf-8", timeout=600
+    )
 
 
 def test_install_then_doctor_then_extract(shop_url: str, tmp_path: Path, run_folder_checker) -> None:

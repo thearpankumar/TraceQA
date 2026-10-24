@@ -17,6 +17,7 @@ dev = [
     "ruff>=0.6",
     "mcp>=1.9",
     "jsonschema>=4.18",
+    "pyright>=1.1.414",
 ]
 
 [tool.uv]
@@ -45,5 +46,35 @@ extend-exclude = [
 
 [tool.ruff.lint]
 # Stated here so a contributor's own ruff settings cannot change what CI checks.
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]  # line length is the formatter's job
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PT", "C4", "S", "PLE", "PLW"]
+ignore = [
+    "E501",  # line length is the formatter's job
+    "PT018",  # a composite assert (a and b) reads fine in a test; splitting it adds noise
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert by design and run the built binaries, fixture servers and local URLs.
+"**/tests/**" = ["S101", "S105", "S310", "S603", "S607"]
+# Code that starts a fixed command (the engine, a driver, chromedriver, uv, python) with an argument
+# list and no shell. Nothing here builds the command from untrusted input.
+"sdks/python/src/**" = ["S603"]
+"drivers/*/src/**" = ["S603", "S310"]  # S310: urlopen only talks to the local WebDriver / fixture server
+"python/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
+"scripts/*.py" = ["S603"]
+"bench/*.py" = ["S603"]
+
+[tool.pyright]
+include = ["python", "drivers", "sdks/python"]
+exclude = [
+    "**/node_modules",
+    "**/.venv",
+    "python/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
+    "python/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
+]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+# The generated pydantic models declare camelCase aliases and set populate_by_name, so the code
+# builds them with snake_case names. Pyright reads only the alias as the constructor parameter
+# and reports every such call. This hides real arity errors too; remove it once the generator
+# emits models whose synthesized __init__ takes the field names (alias_generator).
+reportCallIssue = "none"

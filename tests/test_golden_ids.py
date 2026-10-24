@@ -50,6 +50,7 @@ def ids_of(components: dict[str, Any]) -> dict[str, Any]:
 def test_the_shop_keeps_its_ids(shop_url: str, tmp_path: Path) -> None:
     result = subprocess.run(
         [str(BINARY), "extract", shop_url, "--out", str(tmp_path), "--viewport", "1280x800"],
+        check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -103,6 +104,7 @@ def test_ids_survive_a_responsive_reparent(responsive_url: str, tmp_path: Path) 
     """
     result = subprocess.run(
         [str(BINARY), "extract", responsive_url, "--out", str(tmp_path), "--viewport", "1280x800,390x844"],
+        check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",

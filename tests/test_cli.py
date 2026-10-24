@@ -29,13 +29,18 @@ pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine f
 
 
 def traceqa(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(BINARY), *args], capture_output=True, text=True, encoding="utf-8", timeout=180)
+    return subprocess.run(
+        [str(BINARY), *args], check=False, capture_output=True, text=True, encoding="utf-8", timeout=180
+    )
 
 
 def test_the_version_is_the_packages_version() -> None:
     result = traceqa("--version")
     expected = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_version.py")], capture_output=True, text=True, check=True
+        [sys.executable, str(ROOT / "scripts" / "check_version.py")],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     assert (result.returncode, result.stdout.strip()) == (0, f"traceqa {expected}")
 

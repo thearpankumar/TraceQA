@@ -110,7 +110,7 @@ def results(site: str, tmp_path_factory, run_folder_checker):
         if page not in cache:
             out = tmp_path_factory.mktemp(page.removesuffix(".html"))
             command = [str(BINARY), "extract", site + page, "--browser", ",".join(BROWSERS), "--out", str(out)]
-            run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=300)
+            run = subprocess.run(command, check=False, capture_output=True, text=True, encoding="utf-8", timeout=300)
             assert run.returncode == 0, run.stderr
             (folder,) = out.iterdir()
             run_folder_checker(folder)

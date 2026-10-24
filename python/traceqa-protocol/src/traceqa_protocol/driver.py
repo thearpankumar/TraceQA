@@ -11,7 +11,7 @@ from __future__ import annotations
 import importlib.metadata
 import struct
 from abc import ABC, abstractmethod
-from typing import ClassVar, Generic, TypeVar
+from typing import ClassVar, Generic, TypeVar, cast
 
 from . import contracts, models
 from .rpc import Channel, Handler, RpcError
@@ -52,7 +52,7 @@ class BaseDriver(ABC, Generic[S]):
         for method in contracts.DRIVER_PROTOCOL_METHODS:
             handler = getattr(self, method_name(method), None)
             if callable(handler):
-                table[method] = handler
+                table[method] = cast(Handler, handler)  # getattr gives Any; the driver contract fixes the signature
         return table
 
     def _session(self, session_id: str) -> S:

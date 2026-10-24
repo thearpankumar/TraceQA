@@ -9,7 +9,7 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from pydantic import ValidationError
 from traceqa_protocol import contracts, models, to_wire
@@ -147,6 +147,12 @@ class Engine:
             )
         except OSError as error:
             raise EngineStartError(f"could not start {command[0]}: {error}") from error
+        # Popen types the pipes as optional. Both were requested, so they are set; this narrows the type.
+        if self._process.stdin is None or self._process.stdout is None:
+            self._process.kill()
+            raise EngineStartError(f"could not open the pipes of {command[0]}")
+        self._stdin: IO[str] = self._process.stdin
+        self._stdout: IO[str] = self._process.stdout
         self._next_id = 0
         self._lock = threading.Lock()  # guards _next_id, the writes to stdin and the run state below
         self._extracting = False
@@ -213,7 +219,7 @@ class Engine:
             drain.join(5)
             if not drain.is_alive():
                 with contextlib.suppress(OSError, ValueError):
-                    process.stdout.close()
+                    self._stdout.close()
 
     def _exit_code(self) -> int | None:
         try:
@@ -222,7 +228,7 @@ class Engine:
             return None
 
     def _read(self) -> dict[str, Any]:
-        line = self._process.stdout.readline()
+        line = self._stdout.readline()
         if not line:
             code = self._exit_code()
             suffix = f" with code {code}" if code is not None else ""
@@ -253,8 +259,8 @@ class Engine:
             request_id = self._next_id
             request = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": to_wire(params)}
             try:
-                self._process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
-                self._process.stdin.flush()
+                self._stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+                self._stdin.flush()
             except (OSError, ValueError) as error:  # a broken pipe, or stdin already closed
                 raise EngineExitedError("the engine exited unexpectedly", self._process.poll()) from error
         return request_id

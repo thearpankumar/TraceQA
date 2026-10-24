@@ -35,6 +35,7 @@ def test_extract_returns_what_the_engine_wrote(shop_url: str, tmp_path: Path, ru
     desktop = result.components("chromium-1280x800")
     add_to_cart = next(c for c in desktop.components if c.name == "Add to cart")
     assert len(add_to_cart.instances) == 12
+    assert add_to_cart.crop is not None
     assert (result.run_folder / "chromium-1280x800" / add_to_cart.crop).is_file()
     # The same component has the same id at another viewport.
     mobile_ids = {c.id for c in result.components("chromium-390x844").components}
@@ -62,7 +63,7 @@ def test_one_engine_serves_several_calls_and_reports_refusals(
         # A browser no driver can open fails that target, not the call.
         failed = engine.extract(shop_url, browsers=["netscape"], out_dir=tmp_path)
         assert failed.status == models.RunStatus.failed
-        assert "no driver can open" in failed.targets[0].error
+        assert "no driver can open" in (failed.targets[0].error or "")
         run_folder_checker(failed.run_folder)
 
         # Pictures are off unless asked for.

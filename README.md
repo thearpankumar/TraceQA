@@ -393,6 +393,14 @@ uv run pytest                                       # collector cases, drivers, 
 uv run bench/run.py                                 # end to end on the demo site
 ```
 
+Run the linters:
+
+```sh
+uv run ruff check . && uv run ruff format --check .   # Python style
+uv run pyright                                        # Python types
+(cd sdks/typescript && npm run lint && npm run lint:collector)   # TypeScript SDK, and the ES5 collector
+```
+
 Every part of the repository has tests, from unit tests of each crate to
 end-to-end runs in real browsers. The collector is checked case by case in
 three browsers against pages that state their own expected results, and every
@@ -405,7 +413,7 @@ Continuous integration runs on every pull request:
 | Job | Platforms | Checks |
 |---|---|---|
 | Changes | Linux | Decides whether the change touches code. A change to documentation only skips Lint and Test. |
-| Lint | Linux | Formatting and lint for Rust and Python, the TypeScript type check, that generated types match `spec/`, and that every package has the same version. |
+| Lint | Linux | Formatting and lint for Rust, Python and TypeScript, Python and TypeScript type checks, the collector's ES5 profile, that every `$ref` in `spec/` resolves, that generated types match `spec/`, and that every package has the same version. |
 | Test | Linux, macOS, Windows | All Rust, Python and TypeScript tests against the built binary and real browsers, and the bench. |
 | CI | Linux | One result for the whole run: passes when every job passed or was skipped for a documentation change. |
 

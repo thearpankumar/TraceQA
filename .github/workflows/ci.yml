@@ -132,6 +132,10 @@ jobs:
         run: uv run ruff check .
       - name: Python format
         run: uv run ruff format --check .
+      - name: Every $ref in spec/ is #/$defs/Name
+        run: python3 scripts/check_spec_refs.py
+      - name: Python types (pyright)
+        run: uv run pyright
       - name: Generated Python types match spec/
         run: uv run scripts/gen_python_protocol.py --check
       - name: Generated TypeScript types match spec/
@@ -140,6 +144,12 @@ jobs:
       - name: TypeScript type check
         working-directory: sdks/typescript
         run: npm run typecheck
+      - name: TypeScript lint (eslint)
+        working-directory: sdks/typescript
+        run: npm run lint
+      - name: Collector lint (ES5 profile)
+        working-directory: sdks/typescript
+        run: npm run lint:collector
       - name: Package metadata (publint, are-the-types-wrong)
         working-directory: sdks/typescript
         run: npm run lint:package
