@@ -115,6 +115,8 @@ fn serve_inner(
     let mut runs: HashMap<String, ActiveRun> = HashMap::new();
     let active = Arc::new(AtomicUsize::new(0));
     let max_runs = options.max_runs.max(1);
+    // Set by engine.shutdown: the client is closing on purpose and wants no new runs.
+    let mut shutting_down = false;
 
     let reading = serve_lines(
         input,
@@ -130,12 +132,21 @@ fn serve_inner(
 
             let result = match method.as_str() {
                 method::ENGINE_HELLO => parse(params).and_then(hello),
+                method::RUN_START if shutting_down => Err(failure(
+                    code::APPLICATION_ERROR,
+                    ErrorKind::Busy,
+                    "the engine is shutting down and starts no new runs",
+                )),
                 method::RUN_START => parse(params)
                     .and_then(|request| start_run(request, make_drivers, &output, &mut runs, &active, max_runs)),
+                method::ENGINE_SHUTDOWN => {
+                    shutting_down = true;
+                    answer(serde_json::json!({}))
+                }
                 method::RUN_CANCEL => {
                     parse(params).and_then(|request: RunCancelParams| match runs.get(&request.run_id) {
                         Some(run) => {
-                            run.cancel.store(true, Ordering::Relaxed);
+                            cancel(run);
                             answer(serde_json::json!({}))
                         }
                         None => Err(failure(
@@ -158,12 +169,26 @@ fn serve_inner(
         },
     );
 
-    // Runs are always allowed to finish, so no run folder is left half written.
+    // The input ended. After engine.shutdown the client meant to close, so its runs finish. Without it
+    // the client may have died, so nobody wants the results: cancel every run, through the same path as
+    // run.cancel. Either way the threads are joined, so every run folder is finalised before we return.
+    if !shutting_down {
+        cancel_every(&runs);
+    }
     for run in runs.into_values() {
         drop(run.go);
         let _ = run.thread.join();
     }
     reading
+}
+
+/// Asks a run to stop. It ends as cancelled, with its folder finalised.
+fn cancel(run: &ActiveRun) {
+    run.cancel.store(true, Ordering::Relaxed);
+}
+
+fn cancel_every(runs: &HashMap<String, ActiveRun>) {
+    runs.values().for_each(cancel);
 }
 
 fn hello(hello: EngineHelloParams) -> Result<Value, RpcError> {
@@ -381,7 +406,11 @@ mod tests {
             "viewports": [{ "width": 1280, "height": 800 }],
             "outDir": out_dir,
         });
-        let replies = converse(&[request(1, "run.start", start)]);
+        // A client that closes on purpose says so, or its run would be cancelled when the input ends.
+        let replies = converse(&[
+            request(1, "run.start", start),
+            request(2, "engine.shutdown", serde_json::json!({})),
+        ]);
 
         // The response comes first and only says the run was accepted.
         let run_id = replies[0]["result"]["runId"].as_str().unwrap();
@@ -389,6 +418,7 @@ mod tests {
         // Everything after it is a notification about that run, ending with run.done.
         let methods: Vec<&str> = replies[1..]
             .iter()
+            .filter(|message| message["id"] != 2)
             .map(|message| message["method"].as_str().unwrap())
             .collect();
         assert!(methods.len() >= 2 && methods[..methods.len() - 1].iter().all(|method| *method == "run.event"));
@@ -597,5 +627,137 @@ mod tests {
         drop(input);
         server.join().unwrap();
         let _ = std::fs::remove_dir_all(out_dir);
+    }
+
+    /// Drivers whose start blocks until `release` is dropped, then fails. The first start also says it began.
+    fn slow_drivers(started: mpsc::Sender<()>, release: mpsc::Receiver<()>) -> MakeDrivers {
+        use crate::driver::{DriverError, Starter};
+        let started = Mutex::new(started);
+        let release = Arc::new(Mutex::new(release));
+        Arc::new(move || {
+            let release = Arc::clone(&release);
+            let started = started.lock().unwrap().clone();
+            let start: Starter = Box::new(move || {
+                let _ = started.send(());
+                let _ = release.lock().unwrap().recv();
+                Err(DriverError::new(ErrorKind::Unsupported, "scripted: no browser"))
+            });
+            Drivers::starting_with(vec![start])
+        })
+    }
+
+    fn two_target_start(id: u64, out_dir: &std::path::Path) -> Value {
+        request(
+            id,
+            "run.start",
+            serde_json::json!({
+                "feature": "extract",
+                "url": "https://shop.test",
+                "targets": [{ "browser": "firefox" }],
+                "viewports": [{ "width": 1280, "height": 800 }, { "width": 390, "height": 844 }],
+                "parallel": 1,
+                "outDir": out_dir,
+            }),
+        )
+    }
+
+    /// Serves on a pipe in a thread. Returns the way to write to it and to wait for it to return.
+    fn serve_on_a_pipe(make: MakeDrivers, captured: &Captured) -> (io::PipeWriter, JoinHandle<()>) {
+        let (server_input, input) = io::pipe().unwrap();
+        let server = thread::spawn({
+            let captured = captured.clone();
+            move || {
+                serve_inner(
+                    io::BufReader::new(server_input),
+                    Box::new(captured),
+                    &make,
+                    &ServeOptions::default(),
+                )
+                .unwrap();
+            }
+        });
+        (input, server)
+    }
+
+    fn run_json(captured: &Captured) -> Value {
+        let replies = replies_in(captured);
+        let folder = replies[0]["result"]["runFolder"].as_str().unwrap();
+        serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(folder).join("run.json")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn eof_without_shutdown_cancels_running_runs_and_finalises_folders() {
+        let (started, started_rx) = mpsc::channel();
+        let (release, wait) = mpsc::channel::<()>();
+        let out_dir = std::env::temp_dir().join(format!("traceqa-serve-eof-{}", std::process::id()));
+        let captured = Captured::default();
+        let (mut input, server) = serve_on_a_pipe(slow_drivers(started, wait), &captured);
+        writeln!(input, "{}", two_target_start(1, &out_dir)).unwrap();
+        started_rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+        // The client dies: its end of the pipe closes with no engine.shutdown.
+        drop(input);
+        thread::sleep(std::time::Duration::from_millis(300));
+        // The first browser start is still blocked. Once it ends, the cancelled run must not start the second target.
+        drop(release);
+        server.join().unwrap();
+
+        let done = replies_in(&captured)
+            .into_iter()
+            .find(|reply| reply["method"] == "run.done")
+            .unwrap();
+        assert_eq!(done["params"]["status"], "cancelled", "{done}");
+        let on_disk = run_json(&captured);
+        assert_eq!(on_disk["status"], "cancelled");
+        assert!(on_disk["finishedAt"].is_string(), "{on_disk}");
+        let _ = std::fs::remove_dir_all(out_dir);
+    }
+
+    #[test]
+    fn shutdown_request_lets_runs_finish_then_exits() {
+        let (started, started_rx) = mpsc::channel();
+        let (release, wait) = mpsc::channel::<()>();
+        let out_dir = std::env::temp_dir().join(format!("traceqa-serve-shutdown-{}", std::process::id()));
+        let captured = Captured::default();
+        let (mut input, server) = serve_on_a_pipe(slow_drivers(started, wait), &captured);
+        writeln!(input, "{}", two_target_start(1, &out_dir)).unwrap();
+        started_rx.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+        writeln!(input, "{}", request(2, "engine.shutdown", serde_json::json!({}))).unwrap();
+        drop(input);
+        thread::sleep(std::time::Duration::from_millis(300));
+        drop(release);
+        server.join().unwrap();
+
+        let replies = replies_in(&captured);
+        let answer = replies.iter().find(|reply| reply["id"] == 2).unwrap();
+        assert_eq!(answer["result"], serde_json::json!({}));
+        // Nobody cancelled it, so both targets ran (and failed, as the scripted driver cannot start).
+        let done = replies.iter().find(|reply| reply["method"] == "run.done").unwrap();
+        assert_eq!(done["params"]["status"], "failed", "{done}");
+        assert_eq!(run_json(&captured)["status"], "failed");
+        let _ = std::fs::remove_dir_all(out_dir);
+    }
+
+    #[test]
+    fn run_start_after_shutdown_is_refused() {
+        let out_dir = std::env::temp_dir().join("traceqa-serve-after-shutdown");
+        let replies = converse(&[
+            request(1, "engine.shutdown", serde_json::json!({})),
+            two_target_start(2, &out_dir),
+            request(
+                3,
+                "engine.hello",
+                serde_json::json!({ "protocolVersion": PROTOCOL_VERSION }),
+            ),
+        ]);
+        assert_eq!(replies.len(), 3, "{replies:?}");
+        assert_eq!(replies[0]["result"], serde_json::json!({}));
+        assert_eq!(replies[1]["error"]["code"], code::APPLICATION_ERROR);
+        assert_eq!(replies[1]["error"]["data"]["kind"], "busy");
+        assert!(replies[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("shutting down"));
+        assert!(!out_dir.exists());
+        assert!(replies[2]["result"]["engineVersion"].is_string());
     }
 }

@@ -252,10 +252,15 @@ export class Connection {
   }
 
   /**
-   * Ends the engine's input and waits for it to exit. The engine finishes its runs first. An
-   * engine that has not exited after `timeoutMs` is killed.
+   * Ends the engine's input and waits for it to exit. With `deliberate`, `engine.shutdown` is sent
+   * first: an engine that sees its input end without it assumes the client died and cancels its
+   * runs. An engine that has not exited after `timeoutMs` is killed.
    */
-  async close(timeoutMs: number = DEFAULT_CLOSE_TIMEOUT_MS): Promise<void> {
+  async close(timeoutMs: number = DEFAULT_CLOSE_TIMEOUT_MS, deliberate = false): Promise<void> {
+    if (deliberate) {
+      // The answer is not awaited. An older engine answers "unknown method", which changes nothing.
+      this.call("engine.shutdown", {}).catch(() => {});
+    }
     this.process.stdin.end();
     let timer: NodeJS.Timeout | undefined;
     const timedOut = new Promise<boolean>((resolve) => {
@@ -382,7 +387,7 @@ export class Engine {
    */
   async close(options: CloseOptions = {}): Promise<void> {
     for (const runId of this.connection.activeRuns()) this.cancel(runId);
-    await this.connection.close(options.timeoutMs);
+    await this.connection.close(options.timeoutMs, true);
   }
 
   /**

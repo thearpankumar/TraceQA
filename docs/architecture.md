@@ -106,7 +106,10 @@ Between a caller and the engine. The caller starts `traceqa serve`.
 
 `run.start` is answered as soon as the run is accepted, so the caller can cancel
 it with `run.cancel` or start another while it executes. Each run executes on
-its own thread.
+its own thread. A caller that is done sends `engine.shutdown` and then closes
+the engine's input; the engine lets running runs finish. If the input ends
+without `engine.shutdown`, the engine takes the caller to have crashed and
+cancels every run (the same path as `run.cancel`) before it exits.
 
 The CLI and the MCP server do not use this protocol. They are compiled into the
 same binary and call the engine directly.

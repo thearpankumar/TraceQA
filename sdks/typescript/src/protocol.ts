@@ -852,6 +852,10 @@ export const CLIENT_PROTOCOL_METHODS = {
   "run.cancel": {
     "params": "RunCancelParams",
     "result": "Empty"
+  },
+  "engine.shutdown": {
+    "params": "Empty",
+    "result": "Empty"
   }
 } as const;
 export const CLIENT_PROTOCOL_NOTIFICATIONS = {

@@ -24,7 +24,8 @@ can be a client.
 | 5 | Engine | `{"jsonrpc":"2.0","id":2,"result":{"runId":"r_20261014_065509_925a","runFolder":"/abs/path/runs/r_20261014_065509_925a"}}` |
 | 6 | Engine | `{"jsonrpc":"2.0","method":"run.event","params":{"runId":"r_...","event":{...}}}`, many times |
 | 7 | Engine | `{"jsonrpc":"2.0","method":"run.done","params":{"runId":"r_...","status":"completed","manifest":{...}}}`, once |
-| 8 | Client | Close the engine's standard input. The engine finishes any run still going, then exits. |
+| 8 | Client | `{"jsonrpc":"2.0","id":4,"method":"engine.shutdown","params":{}}`. The engine answers `{}`, starts no more runs and lets the ones going finish. An engine from before this method answers `-32601`; ignore that. |
+| 9 | Client | Close the engine's standard input. The engine exits once its runs are done. If the input ends without step 8, the engine assumes the client crashed: it cancels every run, finalises the run folders and exits. |
 
 To cancel, send `{"jsonrpc":"2.0","id":3,"method":"run.cancel","params":{"runId":"r_..."}}`.
 The run still ends with `run.done`, with status `cancelled`.

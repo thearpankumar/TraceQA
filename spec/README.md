@@ -25,7 +25,10 @@ Both protocols are JSON-RPC 2.0, one message per line.
 
 - **Client protocol:** the client starts the engine (`traceqa serve`) and writes
   requests to its stdin. The engine writes responses and notifications to its
-  stdout.
+  stdout. A client that closes on purpose sends `engine.shutdown` first; end of
+  input without it means the client died, and the engine cancels its runs. The
+  method was added without a version bump: it is additive, and an older engine
+  answers `-32601`, which clients ignore.
 - **Driver protocol:** the engine starts the driver and is always the caller.
   The driver only sends responses and `driver.log` notifications.
 

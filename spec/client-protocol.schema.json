@@ -9,7 +9,8 @@
     "methods": {
       "engine.hello": { "params": "EngineHelloParams", "result": "EngineHelloResult" },
       "run.start": { "params": "RunStartParams", "result": "RunStartResult" },
-      "run.cancel": { "params": "RunCancelParams", "result": "Empty" }
+      "run.cancel": { "params": "RunCancelParams", "result": "Empty" },
+      "engine.shutdown": { "params": "Empty", "result": "Empty" }
     },
     "notifications": {
       "run.event": { "params": "RunEventParams" },
