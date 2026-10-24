@@ -410,6 +410,16 @@ The run manifest: run id, URL, start and finish time, overall status, and one
 entry per target with its status, component count, instance count, warning
 count, duration and, on failure, the error.
 
+The URL here, in `components.json` (`url` and `finalUrl`) and in events is
+written with the value of secret parameters hidden: `token`, `access_token`,
+`id_token`, `refresh_token`, `api_key`, `apikey`, `secret`, `client_secret`,
+`password`, `passwd`, `sig`, `signature`, `x_amz_signature`,
+`x_amz_credential` and `x_amz_security_token`, in the query and in the fragment,
+become `REDACTED`. The browser still loads the address as you gave it. A URL
+without these is stored exactly as given. A URL with a user name or password
+(`https://user:pw@host/`) is refused with exit code 2: sign in with
+`traceqa login` and pass `--storage-state` instead.
+
 Each completed target also has `timings`, in milliseconds:
 
 | Field | Time spent |

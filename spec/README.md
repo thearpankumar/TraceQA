@@ -29,6 +29,23 @@ Stderr is free for human-readable logs on both sides.
 The method names, with their parameter and result types, are listed in the
 `x-traceqa` block at the top of each protocol file.
 
+## Addresses in the run folder
+
+The browser is always sent the address as given, but nothing the engine saves or
+reports holds a secret from it. `run.json`, `events.jsonl` and `components.json`
+(`url`, `finalUrl`, the `page.opened` event and warnings that name a frame) carry
+the address with the value of these parameters replaced by `REDACTED`, in the
+query and in the fragment (where OAuth implicit flows put `access_token`). Names
+are compared after percent-decoding, in lower case, with `-` read as `_`:
+
+`token`, `access_token`, `id_token`, `refresh_token`, `api_key`, `apikey`,
+`secret`, `client_secret`, `password`, `passwd`, `sig`, `signature`,
+`x_amz_signature`, `x_amz_credential`, `x_amz_security_token`.
+
+An address without any of them is stored byte for byte as given. An address with a
+user name or password (`https://user:pass@host/`) is refused before a run folder is
+created. The list is `SECRET_KEYS` in `crates/traceqa-engine/src/url_safety.rs`.
+
 ## Run folder layout
 
 ```

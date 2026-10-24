@@ -14,6 +14,7 @@ use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
 
 use crate::driver::{DriverCommand, DriverError, Drivers};
 use crate::extract::{extract_target, Job, Progress, Sink};
+use crate::url_safety::{check_navigable, redact};
 
 pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_protocol::contracts::run_folder::VERSION;
 
@@ -117,12 +118,7 @@ impl Run {
                 FEATURES.join(", ")
             )));
         }
-        if !(params.url.starts_with("http://") || params.url.starts_with("https://")) {
-            return Err(EngineError::new(format!(
-                "url must start with http:// or https://, got {:?}",
-                params.url
-            )));
-        }
+        check_navigable(&params.url).map_err(EngineError::new)?;
         if params.targets.is_empty() || params.viewports.is_empty() {
             return Err(EngineError::new("a run needs at least one target and one viewport"));
         }
@@ -158,7 +154,7 @@ impl Run {
             format_version: RUN_FOLDER_VERSION,
             run_id: run_id.clone(),
             feature: params.feature.clone(),
-            url: params.url.clone(),
+            url: redact(&params.url),
             status: RunStatus::Running,
             started_at: now_rfc3339(),
             finished_at: None,
@@ -192,7 +188,7 @@ impl Run {
             None,
             format!(
                 "Extracting {} in {} browser and viewport combinations, {workers} at a time",
-                params.url,
+                manifest.url,
                 jobs.len()
             ),
             json!({ "targets": jobs.len(), "parallel": workers }),
@@ -354,9 +350,11 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
         .with_writer(|writer| writer.target_dir(name))
         .map_err(EngineError::from)
         .and_then(|dir| {
+            let display_url = redact(&shared.params.url);
             let extraction = Job {
                 run_id: shared.run_id,
                 url: &shared.params.url,
+                display_url: &display_url,
                 target: job.target,
                 viewport: job.viewport,
                 max_scroll_steps: options.and_then(|o| o.max_scroll_steps),

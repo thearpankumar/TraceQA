@@ -19,6 +19,7 @@ use traceqa_recorder::{now_rfc3339, save_crops, CropRequest, PageImage, RunWrite
 use crate::driver::{Driver, Drivers, DEFAULT_TIMEOUT_MS};
 use crate::group::{group, Located};
 use crate::run::{Exclusive, RUN_FOLDER_VERSION};
+use crate::url_safety::redact;
 use crate::{fingerprint, EngineError, COLLECTOR};
 
 /// How many screens the engine scrolls through before it stops reading a very long page.
@@ -92,7 +93,10 @@ fn timed<T>(spent: &mut Duration, work: impl FnOnce() -> T) -> T {
 /// Everything that identifies one extraction.
 pub(crate) struct Job<'a> {
     pub run_id: &'a str,
+    /// The real address: the only one the browser is sent to.
     pub url: &'a str,
+    /// The address with secrets hidden: the one to write down or report.
+    pub display_url: &'a str,
     pub target: &'a BrowserTarget,
     pub viewport: &'a Viewport,
     pub max_scroll_steps: Option<u64>,
@@ -243,7 +247,7 @@ fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job: &Job) -> R
                 };
                 warnings.push(warning(
                     code,
-                    format!("Could not read the frame at {}: {reason}", frame.url),
+                    format!("Could not read the frame at {}: {reason}", redact(&frame.url)),
                 ));
             }
         }
@@ -625,14 +629,16 @@ fn read_page(
         wait_until: Some(WaitUntil::Settled),
         timeout_ms: Some(job.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
     })?;
+    // The browser may have been redirected to an address that carries a token: write it down hidden.
+    let shown_final_url = redact(&page.final_url);
     progress.emit(
         "page.opened",
         Some(job.name),
         format!(
             "Opened {} in {} {}",
-            page.final_url, session.browser.name, session.browser.version
+            shown_final_url, session.browser.name, session.browser.version
         ),
-        json!({ "finalUrl": page.final_url, "status": page.status, "title": page.title }),
+        json!({ "finalUrl": shown_final_url, "status": page.status, "title": page.title }),
     );
     // The page is read either way: an error page or a page still loading can be the thing under test.
     let mut page_warnings = Vec::new();
@@ -808,8 +814,8 @@ fn read_page(
         format_version: RUN_FOLDER_VERSION,
         fingerprint_version: fingerprint::VERSION,
         run_id: job.run_id.to_string(),
-        url: job.url.to_string(),
-        final_url: page.final_url,
+        url: job.display_url.to_string(),
+        final_url: shown_final_url,
         title,
         browser: session.browser.clone(),
         viewport: job.viewport.clone(),

@@ -13,6 +13,7 @@ sha2 = "0.11.1"
 traceqa-protocol.workspace = true
 traceqa-recorder = { version = "0.1.0", path = "../traceqa-recorder" }
 unicode-normalization = "0.1.25"
+url = "2"
 
 [dev-dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
