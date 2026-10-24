@@ -147,6 +147,25 @@ jobs:
         shell: bash
         run: rm -rf target .venv node_modules sdks/typescript/node_modules
 
+  # The oldest compiler the workspace promises to build with (`rust-version` in Cargo.toml). It fails
+  # when code, or a dependency in Cargo.lock, starts needing something newer. Only the libraries and
+  # binaries are built, because that is what the promise is about. It runs on a GitHub-hosted machine
+  # and not the pool: it installs one more toolchain and needs nothing from the pool.
+  msrv:
+    name: Oldest Rust
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.88"
+      - run: cargo check --workspace --locked
+
   # Everything that runs: the Rust crates, the binary, both drivers, both SDKs, the MCP server,
   # the installer and the bench. Built once, in debug, which keeps Rust's overflow and sanity
   # checks on. Release binaries are built by the release workflow when a version is tagged.
@@ -276,7 +295,7 @@ jobs:
   # skipped because only documentation changed, and fails when any of them failed.
   ci:
     name: CI
-    needs: [changes, lint, test]
+    needs: [changes, lint, msrv, test]
     if: always()
     runs-on: ${{ fromJSON(needs.changes.outputs.runner || '"ubuntu-latest"') }}
     timeout-minutes: 5
@@ -284,9 +303,9 @@ jobs:
       - name: Result
         shell: bash
         run: |
-          echo "changes: ${{ needs.changes.result }}, lint: ${{ needs.lint.result }}, test: ${{ needs.test.result }}"
+          echo "changes: ${{ needs.changes.result }}, lint: ${{ needs.lint.result }}, msrv: ${{ needs.msrv.result }}, test: ${{ needs.test.result }}"
           if [ "${{ needs.changes.result }}" != "success" ]; then exit 1; fi
-          for result in "${{ needs.lint.result }}" "${{ needs.test.result }}"; do
+          for result in "${{ needs.lint.result }}" "${{ needs.msrv.result }}" "${{ needs.test.result }}"; do
             case "$result" in
               success|skipped) ;;
               *) exit 1 ;;

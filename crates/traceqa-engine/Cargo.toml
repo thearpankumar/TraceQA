@@ -3,6 +3,7 @@ name = "traceqa-engine"
 description = "The TraceQA engine: all logic lives here. A library, so the CLI, the server and the MCP server can share it."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 

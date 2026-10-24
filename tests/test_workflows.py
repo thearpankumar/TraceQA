@@ -236,3 +236,38 @@ def test_dtolnay_toolchain_steps_name_their_toolchain() -> None:
                 seen += 1
                 assert step.get("with", {}).get("toolchain"), (name, job)
     assert seen >= 3
+
+
+def declared_rust_version() -> str:
+    """`rust-version` under [workspace.package] in the root Cargo.toml."""
+    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    section = re.search(r"^\[workspace\.package\]\n(.*?)(?=^\[|\Z)", text, re.DOTALL | re.MULTILINE)
+    assert section, "no [workspace.package] section"
+    found = re.search(r'^rust-version\s*=\s*"(\d+\.\d+(?:\.\d+)?)"\s*$', section.group(1), re.MULTILINE)
+    assert found, "[workspace.package] does not declare rust-version"
+    return found.group(1)
+
+
+def test_msrv_job_uses_the_declared_rust_version() -> None:
+    ci = load("ci.yml")
+    job = ci["jobs"]["msrv"]
+    assert job["runs-on"] == "ubuntu-latest"
+    toolchains = [s for s in job["steps"] if s.get("uses", "").startswith("dtolnay/rust-toolchain@")]
+    assert [s["with"]["toolchain"] for s in toolchains] == [declared_rust_version()]
+    runs = [s["run"] for s in job["steps"] if "run" in s]
+    assert "cargo check --workspace --locked" in runs
+    # The CI job waits for it and fails when it fails.
+    assert "msrv" in ci["jobs"]["ci"]["needs"]
+    assert "needs.msrv.result" in str(ci["jobs"]["ci"]["steps"])
+    assert ci["jobs"]["msrv"]["if"] == ci["jobs"]["lint"]["if"]
+
+
+def test_every_crate_inherits_rust_version() -> None:
+    manifests = sorted((ROOT / "crates").glob("*/Cargo.toml"))
+    assert len(manifests) >= 6
+    for path in manifests:
+        text = path.read_text(encoding="utf-8")
+        assert re.search(r"^rust-version\.workspace\s*=\s*true\s*$", text, re.MULTILINE), path.parent.name
+        assert not re.search(r"^rust-version\s*=", text, re.MULTILINE), path.parent.name
+    members = re.search(r"^members\s*=\s*\[(.*?)\]", (ROOT / "Cargo.toml").read_text(encoding="utf-8"), re.MULTILINE)
+    assert members and '"crates/*"' in members.group(1)
