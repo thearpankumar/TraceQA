@@ -611,7 +611,7 @@ class RpcErrorData(BaseModel):
     )
     kind: str = Field(
         ...,
-        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, internal.",
+        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal.",
     )
     retryable: bool
 

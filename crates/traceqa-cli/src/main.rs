@@ -32,7 +32,7 @@ enum Command {
     /// List every interactive component on a page.
     Extract(ExtractArgs),
     /// Speak the client protocol on stdin and stdout. This is what SDKs start.
-    Serve(DriverArgs),
+    Serve(ServeArgs),
     /// Let AI tools such as Claude Code run TraceQA (an MCP server).
     ///
     /// Speaks the Model Context Protocol on stdin and stdout. Add it to Claude Code with:
@@ -70,6 +70,20 @@ struct McpArgs {
     /// Never lifts the ban on metadata and link-local addresses.
     #[arg(long = "allow-host", value_name = "HOST")]
     allow_hosts: Vec<String>,
+    /// How many extractions may run at once. More are answered "busy" at once, so a host that
+    /// fires many calls cannot start many browsers. Reading tools have a higher limit of their own.
+    #[arg(long, value_name = "N", default_value_t = traceqa_mcp::DEFAULT_MAX_CONCURRENT_EXTRACTS)]
+    max_concurrent_extracts: usize,
+    #[command(flatten)]
+    drivers: DriverArgs,
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    /// How many runs may be going at once. A run.start beyond this is refused with a "busy"
+    /// error (retryable) instead of starting more browsers.
+    #[arg(long, value_name = "N", default_value_t = serve::DEFAULT_MAX_RUNS)]
+    max_runs: usize,
     #[command(flatten)]
     drivers: DriverArgs,
 }
@@ -146,7 +160,15 @@ fn main() -> ExitCode {
         Command::Extract(args) => extract(args),
         Command::Serve(args) => {
             let stdin = BufReader::new(io::stdin());
-            match serve::serve(stdin, Box::new(io::stdout()), driver_commands(&args.drivers)) {
+            let options = serve::ServeOptions {
+                max_runs: args.max_runs,
+            };
+            match serve::serve_with(
+                stdin,
+                Box::new(io::stdout()),
+                driver_commands(&args.drivers.drivers),
+                &options,
+            ) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     eprintln!("traceqa: {error}");
@@ -185,6 +207,7 @@ fn mcp(args: McpArgs) -> ExitCode {
         state_dir,
         allow_remote_browsers: args.allow_remote_browsers,
         policy: traceqa_mcp::UrlPolicy::new(args.block_private, &args.allow_hosts),
+        max_concurrent_extracts: args.max_concurrent_extracts,
     };
     // Stdout belongs to the protocol. Everything for people goes to stderr, which hosts log.
     match traceqa_mcp::serve(BufReader::new(io::stdin()), Box::new(io::stdout()), config) {

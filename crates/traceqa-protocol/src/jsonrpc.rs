@@ -33,6 +33,8 @@ pub struct RpcError {
 /// Standard JSON-RPC error codes.
 pub mod code {
     pub const PARSE_ERROR: i64 = -32700;
+    /// The request cannot be a valid request, here because it is too large to read.
+    pub const INVALID_REQUEST: i64 = -32600;
     pub const METHOD_NOT_FOUND: i64 = -32601;
     pub const INVALID_PARAMS: i64 = -32602;
     /// Any failure reported by a driver or the engine. Details are in `data`.
@@ -150,6 +152,12 @@ pub fn decode(line: &str) -> Result<Message, DecodeError> {
         (None, None) => Err(DecodeError::Invalid("needs a method or an id")),
     }
 }
+
+/// The longest request line a server reads from its client: an engine reading SDK requests and
+/// the MCP server reading a host's. A request is a few kilobytes in practice (a storage state
+/// is the largest thing in one), so the limit exists to stop a peer that never sends a newline
+/// from using all the memory.
+pub const MAX_REQUEST_LINE: usize = 8 * 1024 * 1024;
 
 /// What [`read_line_bounded`] found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

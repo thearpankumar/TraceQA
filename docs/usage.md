@@ -110,17 +110,24 @@ traceqa extract https://example.com --json > run.json
 ## `traceqa serve`
 
 ```
-traceqa serve [--driver COMMAND]...
+traceqa serve [--max-runs N] [--driver COMMAND]...
 ```
 
 Speaks the client protocol on standard input and output. SDKs start the engine
 this way. See [architecture.md](architecture.md#client-protocol).
 
+Limits: a request line longer than 8 MiB is skipped and answered with a
+JSON-RPC error (code `-32600`, id `null`); the next line is read as usual. At
+most `--max-runs` runs (default 4) go at once; a `run.start` beyond that gets an
+error with kind `busy` and `retryable: true`, and can be sent again when a run
+has ended (as soon as its `run.done` arrives).
+
 ## `traceqa mcp`
 
 ```
 traceqa mcp [--out DIR] [--state-dir DIR] [--allow-remote-browsers]
-            [--block-private] [--allow-host HOST]... [--driver COMMAND]...
+            [--block-private] [--allow-host HOST]... [--max-concurrent-extracts N]
+            [--driver COMMAND]...
 ```
 
 An MCP server: it lets AI tools such as Claude Code, Claude Desktop and Cursor
@@ -187,7 +194,17 @@ and Google metadata service), `100.100.100.200`, `168.63.129.16`,
 `metadata.google.internal` and `metadata.goog`. A refused address is answered at
 once, before anything is requested.
 
-What this does not cover, so you can judge the risk:
+**Limits on load.** A request line longer than 8 MiB is skipped and answered
+with an error (code `-32600`, id `null`); the server then reads the next line.
+At most `--max-concurrent-extracts` extractions run at once (default 2). A call
+beyond that is answered at once, without starting a browser, with a tool error:
+`busy: N extractions are already running. Wait for one to finish, then try
+again.` The reading tools (`list_runs`, `get_components`, `get_crop`) have a
+separate limit of 16 calls at once, so reading earlier results is never held up
+by a long extraction. A slot is free again before the answer to the call that
+used it is sent. Cancelling a call works at any time.
+
+What the address rules do not cover, so you can judge the risk:
 
 - **Redirects are checked after the fact (Playwright browsers).** A browser
   shows its hops only once it has followed them, so the request to a refused

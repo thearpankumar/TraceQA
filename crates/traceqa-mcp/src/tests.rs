@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, process};
 
 use serde_json::{json, Value};
-use traceqa_engine::driver::DriverCommand;
+use traceqa_engine::driver::{DriverCommand, Drivers};
 
 use super::*;
 use crate::tools::base64;
@@ -29,18 +29,23 @@ impl Host {
     }
 
     fn start_with(runs_dir: PathBuf, state_dir: Option<PathBuf>) -> Self {
-        let (server_input, input) = io::pipe().unwrap();
-        let (output, server_output) = io::pipe().unwrap();
         // No such driver exists, so a run fails its targets without opening a browser.
         let drivers = vec![DriverCommand::parse("traceqa-no-such-driver").unwrap()];
+        Self::start_config(Config {
+            runs_dir,
+            drivers,
+            state_dir,
+            allow_remote_browsers: false,
+            policy: UrlPolicy::default(),
+            max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+            scripted: None,
+        })
+    }
+
+    fn start_config(config: Config) -> Self {
+        let (server_input, input) = io::pipe().unwrap();
+        let (output, server_output) = io::pipe().unwrap();
         let server = thread::spawn(move || {
-            let config = Config {
-                runs_dir,
-                drivers,
-                state_dir,
-                allow_remote_browsers: false,
-                policy: UrlPolicy::default(),
-            };
             serve(BufReader::new(server_input), Box::new(server_output), config).unwrap();
         });
         Self {
@@ -64,6 +69,35 @@ impl Host {
             let mut line = String::new();
             assert!(self.output.read_line(&mut line).unwrap() > 0, "the server stopped");
             let message: Value = serde_json::from_str(&line).unwrap();
+            if message["id"] == id {
+                return message;
+            }
+            self.notes.push(message);
+        }
+    }
+
+    /// Sends a request without waiting for its answer.
+    fn send_request(&mut self, method: &str, params: Value) -> u64 {
+        self.next_id += 1;
+        let id = self.next_id;
+        self.write(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
+        id
+    }
+
+    /// The next message from the server, whatever it is.
+    fn next_message(&mut self) -> Value {
+        let mut line = String::new();
+        assert!(self.output.read_line(&mut line).unwrap() > 0, "the server stopped");
+        serde_json::from_str(&line).unwrap()
+    }
+
+    /// The answer to a request sent with `send_request`.
+    fn answer_to(&mut self, id: u64) -> Value {
+        if let Some(at) = self.notes.iter().position(|note| note["id"] == id) {
+            return self.notes.remove(at);
+        }
+        loop {
+            let message = self.next_message();
             if message["id"] == id {
                 return message;
             }
@@ -387,6 +421,8 @@ fn extract_asks_the_engine_for_visible_elements_only_unless_include_hidden_is_se
         state_dir: None,
         allow_remote_browsers: false,
         policy: UrlPolicy::default(),
+        max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+        scripted: None,
     };
     let hidden = |arguments: Value| {
         let request = extract_request(&config, arguments).unwrap();
@@ -550,6 +586,8 @@ fn config_with(state_dir: Option<PathBuf>) -> Config {
         state_dir: state_dir.map(|dir| fs::canonicalize(dir).unwrap()),
         allow_remote_browsers: false,
         policy: UrlPolicy::default(),
+        max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+        scripted: None,
     }
 }
 
@@ -1004,4 +1042,104 @@ fn metadata_addresses_are_refused_before_any_run_is_made() {
     assert_eq!(made, 1, "only the example run should be there");
     host.stop();
     fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn an_over_long_line_gets_an_error_and_the_server_keeps_serving() {
+    let mut host = Host::start(runs_folder("long-line"));
+    assert_eq!(host.request("ping", json!({}))["result"], json!({}));
+    // 9 MiB with no newline until the end: more than the server will hold.
+    let input = host.input.as_mut().unwrap();
+    let chunk = vec![b'a'; 1024 * 1024];
+    for _ in 0..9 {
+        input.write_all(&chunk).unwrap();
+    }
+    input.write_all(b"\n").unwrap();
+    let refused = host.next_message();
+    assert!(refused["id"].is_null());
+    assert_eq!(refused["error"]["code"], code::INVALID_REQUEST);
+    assert!(refused["error"]["message"].as_str().unwrap().contains("8 MiB"));
+    // The next line is read as usual.
+    assert_eq!(host.request("ping", json!({}))["result"], json!({}));
+    host.stop();
+}
+
+/// A driver start that waits until `release` is dropped, then fails. While it waits, the
+/// extraction that asked for it is running.
+fn blocked_until_dropped() -> (std::sync::mpsc::Sender<()>, Arc<dyn Fn() -> Drivers + Send + Sync>) {
+    use traceqa_engine::driver::{DriverError, Starter};
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let wait = Arc::new(Mutex::new(wait));
+    let make: Arc<dyn Fn() -> Drivers + Send + Sync> = Arc::new(move || {
+        let wait = Arc::clone(&wait);
+        let start: Starter = Box::new(move || {
+            // Returns an error once the sender is gone.
+            let _ = wait.lock().unwrap().recv();
+            Err(DriverError {
+                kind: "unsupported".into(),
+                message: "scripted: no browser".into(),
+            })
+        });
+        Drivers::starting_with(vec![start])
+    });
+    (release, make)
+}
+
+#[test]
+fn extra_extract_calls_beyond_the_cap_are_answered_busy_at_once_and_reads_still_work() {
+    let runs = runs_folder("busy");
+    let (release, scripted) = blocked_until_dropped();
+    let mut host = Host::start_config(Config {
+        runs_dir: runs.clone(),
+        drivers: Vec::new(),
+        state_dir: None,
+        allow_remote_browsers: false,
+        policy: UrlPolicy::default(),
+        max_concurrent_extracts: 1,
+        scripted: Some(scripted),
+    });
+    let extract = json!({ "name": "extract", "arguments": { "url": "https://example.test/" } });
+    let first = host.send_request("tools/call", extract.clone());
+    let second = host.send_request("tools/call", extract.clone());
+
+    // The second is refused while the first is still running.
+    let busy = host.answer_to(second);
+    assert_eq!(busy["result"]["isError"], true);
+    let text = busy["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("busy: 1 extractions are already running"), "{text}");
+
+    // Reading is not held up by the extraction.
+    let list = host.call("list_runs", json!({}));
+    assert_eq!(list["isError"], false);
+    assert!(!text_of(&list)["runs"].as_array().unwrap().is_empty());
+    // A cancel is still understood when the cap is full.
+    host.write(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 99 } }));
+    assert_eq!(host.request("ping", json!({}))["result"], json!({}));
+
+    // When the first ends, its slot is free before its answer is out.
+    drop(release);
+    let finished = host.answer_to(first);
+    assert_eq!(finished["result"]["isError"], false);
+    let third = host.send_request("tools/call", extract);
+    let finished = host.answer_to(third);
+    assert_eq!(finished["result"]["isError"], false, "{finished}");
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn a_panicking_call_frees_its_slot() {
+    let running: Running = Arc::default();
+    let slots: Arc<Slots> = Arc::default();
+    let id = Id::Number(1);
+    let slot = slots.take(true, 1, &running, &id).ok().unwrap();
+    assert_eq!(slots.take(true, 1, &running, &Id::Number(2)).err(), Some(1));
+    // The reading tools have a counter of their own.
+    assert!(slots.take(false, 1, &running, &Id::Number(3)).is_ok());
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _slot = slot;
+        panic!("a tool failed");
+    }));
+    assert!(outcome.is_err());
+    assert!(slots.take(true, 1, &running, &Id::Number(4)).is_ok());
 }
