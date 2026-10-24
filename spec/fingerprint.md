@@ -20,8 +20,36 @@ id = "c_" + first 12 hex characters of SHA-256(
 | Part | How it is built |
 |---|---|
 | `role` | The element's role as collected. |
-| `pathKey` | The element's `path` steps joined with ` > `. Each step is its role (its tag when the role is `generic`), plus its name in quotes when it has one. The name is treated exactly like a component name: Unicode NFC, trimmed, inner whitespace collapsed, lower-cased, and then `\` is written as `\\` and `"` as `\"`, so a quote or a ` > ` inside a name can never end the step early or pass for a new step. A step with `repeatCount` of 3 or more loses its name, because the name of one card among many is data. Landmarks keep theirs (`banner`, `main`, `navigation`, `contentinfo`, `complementary`, `region`, `form`, `search`): a page with five named sections has five different paths. `repeatIndex` is always left out, so every card in a grid has the same path. Elements inside a frame get a first step `frame "<frame name, or URL path>"`, with the label normalised and escaped like a step name. |
+| `pathKey` | The element's `path` steps joined with ` > `, starting at the innermost *named* step (see below). Each step is its role (its tag when the role is `generic`), plus its name in quotes when it has one. The name is treated exactly like a component name: Unicode NFC, trimmed, inner whitespace collapsed, lower-cased, and then `\` is written as `\\` and `"` as `\"`, so a quote or a ` > ` inside a name can never end the step early or pass for a new step. A step with `repeatCount` of 3 or more loses its name, because the name of one card among many is data. Landmarks keep theirs (`banner`, `main`, `navigation`, `contentinfo`, `complementary`, `region`, `form`, `search`): a page with five named sections has five different paths. `repeatIndex` is always left out, so every card in a grid has the same path. Elements inside a frame get a first step `frame "<frame name, or URL path>"`, with the label normalised and escaped like a step name. |
 | `nameKey` | The accessible name, normalised: Unicode NFC, trimmed, inner whitespace collapsed, lower-cased. See the two special cases below. |
+
+### The path starts at the innermost named step
+
+A step is *named* when it contributes a name to the key: the page gave it one and
+the repeat rule above did not drop it. The path key keeps the frame step (when
+there is one), then every step from the **last named step** down to the element.
+Everything above that step is left out. Plain wrappers and unnamed landmarks
+change with the layout: on Wikipedia the table of contents sits in
+`div > div > div > navigation "Contents"` in a wide window and in
+`div > div > main > navigation "Contents"` in a narrow one, and with the whole
+path in the id, 48 of 1069 components got a different id between 1280x800 and
+390x844. With the rule they get the same id. An element with no named ancestor
+keeps its full path.
+
+Measured before the rule was adopted (old and new engine, same pages, Chromium):
+the Buggy Shop (37 components), every page in `fixtures/patterns` and
+`fixtures/collector-cases`, and the responsive fixture all keep the same
+component and instance counts. Wikipedia "Web browser": 1069 components became
+1068 (one merge, 0.1%) and the ids that differed between the two viewports fell
+from 48 to 0. MDN: 274 components both before and after, and the ids that
+differed between the two viewports stay at 2.
+
+The card and template logic is not affected: it looks at the full path.
+
+Trade-off: two elements whose paths differ only above their innermost named step
+now share an id, for example the same unnamed section in two different unnamed
+`div`s, if each also holds a named landmark of the same name. Pages that label
+their landmarks lose nothing; unlabelled pages keep the whole path.
 
 ### Special case 1: no name
 
@@ -99,7 +127,9 @@ one, is not seen to change.
   like component names, so `Cart  Preview` and `cart preview` give one id and a
   quote in a name cannot alias another path. Every id changes, because the version is part of the hash.
   Unnamed elements with a generated `id` (see special case 1) also
-  stopped using it. `spec/fingerprint-vectors.json` holds the test vectors.
+  stopped using it. The path now starts at the innermost named step (above), so
+  ids survive a responsive layout that re-parents a named landmark.
+  `spec/fingerprint-vectors.json` holds the test vectors.
 
 A change that alters any id raises `fingerprintVersion` (`fingerprint::VERSION`)
 and regenerates `fixtures/buggy-shop/golden-ids.json`.
@@ -129,6 +159,10 @@ a list is reordered.
 - **Generated ids that look stable.** The rule for a stable `id` is a
   heuristic. A framework id such as `react-select-a` passes it, and a chosen id
   such as `item-2024` does not.
+- **Re-parenting under a name.** A layout that moves a component into or out of
+  a differently named landmark, or that changes the name itself, still changes
+  its id. Only unnamed wrappers and landmarks above the innermost named step
+  are ignored.
 - **Renames.** Changing a button's label changes its id. The old and new ids are
   not linked.
 - **Translated pages.** The same page in another language gets different ids,

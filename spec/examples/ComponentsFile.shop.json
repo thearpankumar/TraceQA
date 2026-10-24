@@ -24,7 +24,7 @@
       "signals": [
         "native"
       ],
-      "path": "main > list \"products\" > listitem",
+      "path": "list \"products\" > listitem",
       "crop": "crops/c_9f2a41c07b3e.png",
       "instances": [
         {

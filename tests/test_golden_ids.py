@@ -14,9 +14,13 @@ A change of ids also needs `fingerprintVersion` raised; see spec/fingerprint.md.
 
 from __future__ import annotations
 
+import functools
+import http.server
 import json
 import os
 import subprocess
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +28,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "fixtures" / "buggy-shop" / "golden-ids.json"
+RESPONSIVE = ROOT / "fixtures" / "responsive"
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
 )
@@ -72,3 +77,48 @@ def test_the_shop_keeps_its_ids(shop_url: str, tmp_path: Path) -> None:
         f"New: {[found['components'][c] for c in new]}. Changed: {changed}. "
         "If this is meant, regenerate the golden file (see this file's docstring)."
     )
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture(scope="module")
+def responsive_url() -> Iterator[str]:
+    """fixtures/responsive/, served on a free port."""
+    handler = functools.partial(_QuietHandler, directory=str(RESPONSIVE))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/index.html"
+    server.shutdown()
+
+
+def test_ids_survive_a_responsive_reparent(responsive_url: str, tmp_path: Path) -> None:
+    """The page moves its "Contents" navigation into <main> below 720px. Ids must not notice.
+
+    The path of a component starts at its innermost named step (see spec/fingerprint.md), so the
+    plain wrappers and the unnamed <main> above the navigation, which come and go with the
+    layout, are not part of the id.
+    """
+    result = subprocess.run(
+        [str(BINARY), "extract", responsive_url, "--out", str(tmp_path), "--viewport", "1280x800,390x844"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    (folder,) = tmp_path.iterdir()
+    wide, narrow = (
+        ids_of(json.loads((folder / f"chromium-{size}" / "components.json").read_text(encoding="utf-8")))
+        for size in ("1280x800", "390x844")
+    )
+    assert wide["components"] == narrow["components"]
+    components = list(wide["components"].values())
+    # The page really has the parts the test is about: the contents links, the unnamed icon
+    # button beside them, and a grid of cards that is still one templated component.
+    contents = [c for c in components if c["path"].startswith('navigation "contents"')]
+    assert sorted(c["name"] for c in contents if c["role"] == "link") == ["Climate", "Geography", "History"]
+    assert any(c["role"] == "button" and c["name"] == "" for c in contents)
+    assert [(c["name"], c["instances"]) for c in components if c["name"] == "*"] == [("*", 4)]

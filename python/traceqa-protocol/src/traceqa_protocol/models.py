@@ -822,7 +822,7 @@ class Component(BaseModel):
     signals: list[str]
     path: str = Field(
         ...,
-        description="Readable structural path, for example 'main > list \"products\" > listitem'.",
+        description="Readable structural path, for example 'list \"products\" > listitem'.",
     )
     crop: str | None = Field(
         None,

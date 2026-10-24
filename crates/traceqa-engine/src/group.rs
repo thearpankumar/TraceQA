@@ -91,12 +91,7 @@ fn analyse(elements: &[Located]) -> Vec<Analysed> {
         .iter()
         .zip(&placements)
         .map(|(located, placed)| {
-            let steps = located
-                .frame_step
-                .iter()
-                .cloned()
-                .chain(located.element.path.iter().map(fingerprint::step_key));
-            let path_key = steps.collect::<Vec<_>>().join(" > ");
+            let path_key = fingerprint::path_key(located.frame_step.as_deref(), &located.element.path);
             let slot = placed.as_ref().and_then(|placed| {
                 let shape = &controls[&(placed.container.as_str(), placed.item)];
                 let is_card = shape.len() >= 2
@@ -506,6 +501,65 @@ mod tests {
             .collect();
         let components = group(cards);
         assert_eq!(summary(&components), [("button".into(), "".into(), 4)]);
+    }
+
+    fn named(role: &str, tag: &str, name: &str) -> PathStep {
+        PathStep {
+            name: Some(name.into()),
+            ..step(role, tag, None)
+        }
+    }
+
+    /// A contents list in a sidebar, as a wide window has it (`wrapper` is a plain `div`) or as a
+    /// narrow one has it (the same navigation moved into `<main>`), followed by a grid of cards.
+    fn page_with_contents(wrapper: PathStep) -> Vec<Located> {
+        let toc = vec![
+            step("generic", "div", None),
+            wrapper,
+            named("navigation", "nav", "Contents"),
+        ];
+        let mut elements = vec![
+            element("link", "History", toc.clone()),
+            element("link", "Geography", toc.clone()),
+            element("button", "", toc),
+        ];
+        let grid = |i| {
+            vec![
+                step("generic", "div", None),
+                step("main", "main", None),
+                step("list", "ul", None),
+                step("listitem", "li", Some((i, 4))),
+            ]
+        };
+        for i in 0..4 {
+            elements.push(element("link", &format!("Product {i}"), grid(i)));
+            elements.push(element("button", "Add", grid(i)));
+        }
+        elements
+    }
+
+    #[test]
+    fn reparenting_a_named_landmark_keeps_ids() {
+        let wide = group(page_with_contents(step("generic", "div", None)));
+        let narrow = group(page_with_contents(step("main", "main", None)));
+        let ids = |components: &[Component]| components.iter().map(|c| c.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&wide), ids(&narrow));
+        let history = wide.iter().find(|c| c.name == "History").unwrap();
+        assert_eq!(history.path, "navigation \"contents\"");
+        // The unnamed icon button in the contents list is keyed the same way in both.
+        assert!(wide
+            .iter()
+            .any(|c| c.name.is_empty() && c.path == "navigation \"contents\""));
+    }
+
+    #[test]
+    fn cards_still_template_after_the_change() {
+        let components = group(page_with_contents(step("generic", "div", None)));
+        let product = components.iter().find(|c| c.name_is_template).unwrap();
+        assert_eq!(product.instances.len(), 4);
+        // The cards have no named ancestor, so their paths are whole.
+        assert_eq!(product.path, "div > main > list > listitem");
+        assert_eq!(components.iter().filter(|c| c.name == "Add").count(), 1);
     }
 
     #[test]
