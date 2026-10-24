@@ -40,6 +40,8 @@ struct Scripted {
     opened: Arc<Mutex<Vec<String>>>,
     /// The redirect chain the pretend page reports, as JSON, when it reports one.
     chain: Option<&'static str>,
+    /// What a failing method says.
+    fail_text: &'static str,
 }
 
 #[derive(Default)]
@@ -93,7 +95,7 @@ impl Transport for Scripted {
         if let Some((_, kind)) = self.fail.filter(|(failing, _)| *failing == method) {
             return Err(DriverError {
                 kind: kind.to_string(),
-                message: "connection refused".into(),
+                message: self.fail_text.into(),
             });
         }
         Ok(match method {
@@ -221,6 +223,7 @@ struct Case {
     storage_state: Option<StorageState>,
     chain: Option<&'static str>,
     policy: Option<UrlPolicy>,
+    fail_text: &'static str,
 }
 
 impl Default for Case {
@@ -237,6 +240,7 @@ impl Default for Case {
             storage_state: None,
             chain: None,
             policy: None,
+            fail_text: "connection refused",
         }
     }
 }
@@ -284,6 +288,7 @@ fn run_case(case: Case) -> Outcome {
                 frame_url: case.frame_url.into(),
                 opened: Arc::clone(&opened),
                 chain: case.chain,
+                fail_text: case.fail_text,
             };
             Driver::connect(Box::new(transport))
         };
@@ -502,6 +507,7 @@ fn run_six_targets_with(
                 frame_url: "https://pay.example.com/widget".into(),
                 opened: Arc::default(),
                 chain: None,
+                fail_text: "connection refused",
             };
             Driver::connect(Box::new(transport))
         };
@@ -951,4 +957,25 @@ fn a_clean_chain_or_no_policy_leaves_the_run_alone() {
         ..Case::default()
     });
     assert_eq!(without.manifest.status, RunStatus::Completed);
+}
+
+#[test]
+fn a_failing_goto_with_a_token_in_its_error_leaves_no_token_in_the_run_folder() {
+    let outcome = run_case(Case {
+        fail: Some(("page.goto", "navigation_failed")),
+        fail_text: "Page.goto: net::ERR_CONNECTION_REFUSED at https://shop.test/cb?token=SEKRET&page=2",
+        crops: false,
+        ..Case::default()
+    });
+    assert_eq!(outcome.manifest.status, RunStatus::Failed);
+    let error = outcome.manifest.targets[0].error.as_deref().unwrap();
+    assert!(error.contains("https://shop.test/cb?token=REDACTED&page=2"), "{error}");
+    let files = all_text_files(&outcome.folder);
+    assert!(files.iter().any(|(path, _)| path.ends_with("events.jsonl")));
+    for (path, text) in &files {
+        assert!(!text.contains("SEKRET"), "{} holds the secret", path.display());
+    }
+    for event in &outcome.events {
+        assert!(!serde_json::to_string(event).unwrap().contains("SEKRET"), "{event:?}");
+    }
 }

@@ -65,6 +65,15 @@ An address without any of them is stored byte for byte as given. An address with
 user name or password (`https://user:pass@host/`) is refused before a run folder is
 created. The list is `SECRET_KEYS` in `crates/traceqa-engine/src/url_safety.rs`.
 
+Text that comes from a driver gets the same treatment, because a browser's error
+text quotes the address it failed to open (`Page.goto: net::ERR_X at https://h/p?token=...`).
+The engine passes every `http://` or `https://` address found in a driver's error
+message, in a `driver.log` line it echoes to stderr, and in its own report of a
+broken driver, through the same redaction. This is done in the engine, so a driver
+written by someone else is covered too, and the key list exists once. The values
+of `run.json` target errors, `events.jsonl` and the MCP `error` fields therefore
+never hold a secret query value that a driver quoted.
+
 ## Redirects and operator address rules
 
 `PageGotoResult.redirectChain` lists every request that led to the page, oldest

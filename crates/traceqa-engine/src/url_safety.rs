@@ -91,6 +91,32 @@ pub fn redact(address: &str) -> String {
     out
 }
 
+/// `text` with every `http://` or `https://` address in it passed through [`redact`]. For text
+/// that comes from a driver (error messages, log lines): Playwright quotes the address it failed
+/// to open, and a query can carry a token. An address ends at white space or one of `"'<>)`. Text
+/// without an address comes back unchanged.
+pub fn redact_text(text: &str) -> String {
+    // ASCII lower case keeps every byte position, so positions found here fit `text`.
+    let lower = text.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut from = 0;
+    while let Some(found) = ["http://", "https://"]
+        .iter()
+        .filter_map(|scheme| lower[from..].find(scheme))
+        .min()
+    {
+        let start = from + found;
+        let end = text[start..]
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')'))
+            .map_or(text.len(), |at| start + at);
+        out.push_str(&text[from..start]);
+        out.push_str(&redact(&text[start..end]));
+        from = end;
+    }
+    out.push_str(&text[from..]);
+    out
+}
+
 fn strip_userinfo(base: &str) -> String {
     let Some((scheme, rest)) = base.split_once("://") else {
         return base.to_string();
@@ -227,6 +253,37 @@ mod tests {
             redact("https://h/?%74oken=a&to%6Ben=b&sig=c&sig=d&ok=1"),
             "https://h/?%74oken=REDACTED&to%6Ben=REDACTED&sig=REDACTED&sig=REDACTED&ok=1"
         );
+    }
+
+    #[test]
+    fn redact_text_finds_urls_inside_error_sentences() {
+        let cases = [
+            (
+                "Page.goto: net::ERR_X at https://h/p?token=abc&x=1",
+                "Page.goto: net::ERR_X at https://h/p?token=REDACTED&x=1",
+            ),
+            (
+                "could not open \"https://h/cb?api_key=abc\" in time",
+                "could not open \"https://h/cb?api_key=REDACTED\" in time",
+            ),
+            (
+                "failed (see http://h/?sig=abc#access_token=def) twice",
+                "failed (see http://h/?sig=REDACTED#access_token=REDACTED) twice",
+            ),
+            (
+                "HTTPS://H/p?Token=abc then http://u:pw@h2/x?password=q and https://h3/?ok=1",
+                "HTTPS://H/p?Token=REDACTED then http://h2/x?password=REDACTED and https://h3/?ok=1",
+            ),
+            ("no address here, token=abc stays", "no address here, token=abc stays"),
+            ("ends with a scheme http://", "ends with a scheme http://"),
+            (
+                "ünïcode before https://h/?token=a\u{e9} after",
+                "ünïcode before https://h/?token=REDACTED after",
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(redact_text(input), expected, "{input}");
+        }
     }
 
     #[test]

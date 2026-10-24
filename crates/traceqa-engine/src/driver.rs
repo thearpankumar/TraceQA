@@ -15,12 +15,14 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use traceqa_protocol::contracts::driver_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
-use traceqa_protocol::jsonrpc::{self, Id, Line, Message};
+use traceqa_protocol::jsonrpc::{self, Id, Line, Message, RpcError};
 use traceqa_protocol::types::{
     DriverHelloParams, DriverHelloResult, DriverLogParams, Empty, PageEvalParams, PageEvalResult, PageGotoParams,
     PageGotoResult, PageScreenshotParams, PageScreenshotResult, PageScrollParams, PageScrollResult, RpcErrorData,
     SessionCloseParams, SessionOpenParams, SessionOpenResult, SessionStorageParams, StorageState,
 };
+
+use crate::url_safety::redact_text;
 
 /// Time a page load or a script gets when the caller names none.
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
@@ -43,8 +45,15 @@ impl DriverError {
     fn transport(message: impl Into<String>) -> Self {
         Self {
             kind: "transport".into(),
-            message: message.into(),
+            message: redact_text(&message.into()),
         }
+    }
+
+    /// The same error with the secret values in any address in its message hidden. Text from a
+    /// driver can quote the address it was sent to, and a query can carry a token.
+    fn redacted(mut self) -> Self {
+        self.message = redact_text(&self.message);
+        self
     }
 
     /// True when the driver itself can no longer be trusted: it did not answer in time, or
@@ -258,19 +267,11 @@ impl ProcessTransport {
             let remaining = deadline.saturating_duration_since(Instant::now());
             match self.incoming.recv_timeout(remaining) {
                 Ok(Ok(Message::Response { id: answered, result })) if answered == id => {
-                    return result.map_err(|error| {
-                        let data = error
-                            .data
-                            .and_then(|data| serde_json::from_value::<RpcErrorData>(data).ok());
-                        DriverError {
-                            kind: data.map_or_else(|| "internal".to_string(), |d| d.kind),
-                            message: error.message,
-                        }
-                    });
+                    return result.map_err(driver_error);
                 }
                 Ok(Ok(Message::Notification { method, params })) if method == notification::DRIVER_LOG => {
                     if let Ok(log) = serde_json::from_value::<DriverLogParams>(params) {
-                        eprintln!("[driver {}] {}", log.level, log.message);
+                        eprintln!("{}", log_line(&log));
                     }
                 }
                 // An answer to a request we gave up on, or a notification we do not know.
@@ -288,6 +289,24 @@ impl ProcessTransport {
             }
         }
     }
+}
+
+/// What the driver's error response means for the engine. The message is the driver's own text,
+/// so any secret in an address it quotes is hidden before it goes anywhere else.
+fn driver_error(error: RpcError) -> DriverError {
+    let data = error
+        .data
+        .and_then(|data| serde_json::from_value::<RpcErrorData>(data).ok());
+    DriverError {
+        kind: data.map_or_else(|| "internal".to_string(), |d| d.kind),
+        message: error.message,
+    }
+    .redacted()
+}
+
+/// The line the engine prints for a `driver.log` notification, with addresses redacted.
+fn log_line(log: &DriverLogParams) -> String {
+    redact_text(&format!("[driver {}] {}", log.level, log.message))
 }
 
 impl Drop for ProcessTransport {
@@ -408,10 +427,15 @@ fn request<P: Serialize, R: DeserializeOwned>(
     timeout: Duration,
 ) -> Result<R, DriverError> {
     let params = serde_json::to_value(params).expect("spec types always serialise");
-    let result = transport.call(method, params, timeout)?;
-    serde_json::from_value(result).map_err(|e| DriverError {
-        kind: "internal".into(),
-        message: format!("driver answered {method} with something the spec does not allow: {e}"),
+    // A transport is trusted with nothing: a scripted or third-party one can hand back an error
+    // that quotes an address, so what comes out of it is redacted here as well.
+    let result = transport.call(method, params, timeout).map_err(DriverError::redacted)?;
+    serde_json::from_value(result).map_err(|e| {
+        DriverError {
+            kind: "internal".into(),
+            message: format!("driver answered {method} with something the spec does not allow: {e}"),
+        }
+        .redacted()
     })
 }
 
@@ -510,6 +534,50 @@ mod tests {
         assert_eq!(
             DriverCommand::parse(r"C:\Users\O'Brien\driver.exe -v").unwrap().args,
             ["-v"]
+        );
+    }
+
+    #[test]
+    fn a_driver_error_message_never_carries_secret_query_values() {
+        let error = RpcError {
+            code: -32000,
+            message: "Page.goto: net::ERR_CONNECTION_REFUSED at https://h/cb?token=abc&page=2".into(),
+            data: Some(json!({ "kind": "navigation_failed", "retryable": true })),
+        };
+        let error = driver_error(error);
+        assert_eq!(error.kind, "navigation_failed");
+        assert_eq!(
+            error.message,
+            "Page.goto: net::ERR_CONNECTION_REFUSED at https://h/cb?token=REDACTED&page=2"
+        );
+        assert!(!error.to_string().contains("abc"));
+
+        // A transport that is not ours is trusted no more than the driver process.
+        struct Quoting;
+        impl Transport for Quoting {
+            fn call(&mut self, _: &str, _: Value, _: Duration) -> Result<Value, DriverError> {
+                Err(DriverError {
+                    kind: "navigation_failed".into(),
+                    message: "failed at http://h/?api_key=abc".into(),
+                })
+            }
+        }
+        let failed = request::<_, Empty>(&mut Quoting, "page.goto", &json!({}), SHORT).unwrap_err();
+        assert_eq!(failed.message, "failed at http://h/?api_key=REDACTED");
+        // And so is what the engine itself reports about a driver line that was not valid.
+        let garbage = DriverError::transport("driver sent a bad line: {\"u\":\"https://h/?sig=abc\"");
+        assert!(!garbage.message.contains("abc"), "{}", garbage.message);
+    }
+
+    #[test]
+    fn driver_log_lines_are_redacted_before_they_reach_stderr() {
+        let log = DriverLogParams {
+            level: traceqa_protocol::types::LogLevel::Warn,
+            message: "retrying https://h/oauth?code=1&access_token=abc after a reset".into(),
+        };
+        assert_eq!(
+            log_line(&log),
+            "[driver warn] retrying https://h/oauth?code=1&access_token=REDACTED after a reset"
         );
     }
 
