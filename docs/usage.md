@@ -191,36 +191,55 @@ three are read-only.
 ## `traceqa install`
 
 ```
-traceqa install [BROWSERS]... [--from FOLDER] [--ref REF] [--with-deps]
+traceqa install [BROWSERS]... [--from FOLDER] [--ref REF] [--with-deps] [--dry-run]
 ```
 
 Installs the browser drivers and browsers, so the binary is all a user needs
 to download. Needs [uv](https://docs.astral.sh/uv/); without it, the command
-says how to install it.
+says how to install it (with `winget`, `brew` or `pipx`, never a script piped
+into a shell; uv's installation page also has a versioned installer with a
+published checksum).
 
 | Step | What happens |
 |---|---|
 | 1 | Creates a Python environment in `~/.traceqa/env` (or `$TRACEQA_HOME/env`), away from the user's other Python projects. |
-| 2 | Installs the two drivers into it: from GitHub, or from a checkout with `--from`. From a checkout, the versions come from its `uv.lock`. |
-| 3 | Downloads the browsers asked for. Default `chromium`. Known values: `chromium`, `chrome`, `msedge`, `firefox`, `webkit`, `safari` (nothing to download). |
+| 2 | Installs the drivers' third-party dependencies from `~/.traceqa/driver-requirements.txt`, which is built into the binary and pins every package to the version and sha256 hash in `uv.lock` (`uv pip install --require-hashes --no-deps`). |
+| 3 | Installs TraceQA's own three packages from GitHub without dependencies, at the commit the binary was built from, or from a checkout with `--from`. From a checkout the versions come from its `uv.lock` and step 2 does not apply. |
+| 4 | Downloads the browsers asked for. Default `chromium`. Known values: `chromium`, `chrome`, `msedge`, `firefox`, `webkit`, `safari` (nothing to download). |
 
 | Option | Meaning |
 |---|---|
 | `--from FOLDER` | Install the drivers from a TraceQA checkout instead of GitHub. |
-| `--ref REF` | Branch, tag or commit on GitHub. Default: the binary's own release tag, such as `v0.1.0`, so the binary and its drivers match. |
+| `--ref REF` | Branch, tag or commit on GitHub. Default: the commit the binary was released from (shown by `traceqa doctor`), so the binary and its drivers match and cannot be changed afterwards. Only a full 40-digit commit id is pinned: any other value is used but reported as not pinned. |
 | `--with-deps` | Also install the system libraries the browsers need. Linux only, may ask for `sudo`. |
+| `--dry-run` | Print the commands that would run, and write nothing. |
+
+A binary that was not built from a release commit (a debug build, a tree with
+uncommitted changes, a build without git) has no commit to install from. It
+uses its release tag, such as `v0.1.0`, and warns that tags can be moved.
+Release builds get the commit from `TRACEQA_RELEASE_COMMIT`, or from `git` when
+the tree is clean.
+
+What the pinning does not cover: the build tool of the three TraceQA packages
+(`hatchling`) is fetched without a hash when they are built, and Playwright
+downloads the browsers from its own servers; neither is pinned by TraceQA.
 
 Running it again updates the drivers. The engine finds the installed drivers
 by itself; see [Drivers](#drivers).
 
+The requirements file is made from `uv.lock` by
+`scripts/gen_driver_requirements.py`; a test fails when they differ.
+
 ## `traceqa doctor`
 
-Checks the setup and says what is missing: TraceQA's folder, uv, and for each
+Checks the setup and says what is missing: the commit the binary was built from
+(or `not a release build`), TraceQA's folder, uv, and for each
 driver where it was found, whether it starts, and which browsers it opens.
 Exits with 1 when no driver works.
 
 ```
 TraceQA 0.1.0
+Commit:  not a release build
 Home:    /Users/me/.traceqa (drivers installed here)
 uv:      /opt/homebrew/bin/uv
 

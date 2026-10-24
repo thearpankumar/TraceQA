@@ -62,6 +62,48 @@ def test_install_then_doctor_then_extract(shop_url: str, tmp_path: Path, run_fol
     run_folder_checker(folder)
 
 
+SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_dry_run_prints_a_hashed_two_step_plan_pinned_to_the_ref(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    env = without_workspace_drivers(home)
+    plan = traceqa("install", "--dry-run", "--ref", SHA, env=env)
+    assert plan.returncode == 0, plan.stderr
+    out = plan.stdout
+    # Third-party dependencies first, from hashes and without resolving anything else ...
+    hashed = out.index("--require-hashes")
+    assert "--no-deps" in out[hashed:] and "driver-requirements.txt" in out[hashed:]
+    # ... then our own three packages at exactly that commit, also without dependencies.
+    drivers = out.index("git+", hashed)
+    assert out.index("--no-deps", out.index("Installing the drivers\n")) < drivers
+    assert out.count(f"@{SHA}#subdirectory=") == 3
+    assert "curl" not in out + plan.stderr and "iex" not in out + plan.stderr
+    # A pinned ref raises no warning, and a dry run writes nothing.
+    assert "not pinned" not in plan.stderr
+    assert not home.exists()
+
+
+def test_a_ref_that_is_not_a_commit_is_called_unpinned(tmp_path: Path) -> None:
+    env = without_workspace_drivers(tmp_path / "home")
+    plan = traceqa("install", "--dry-run", "--ref", "master", env=env)
+    assert plan.returncode == 0, plan.stderr
+    assert "not pinned to a commit" in plan.stderr and "full commit SHA" in plan.stderr
+    assert "@master#subdirectory=" in plan.stdout
+
+
+def test_a_binary_built_outside_a_release_uses_the_tag_and_says_so(tmp_path: Path) -> None:
+    env = without_workspace_drivers(tmp_path / "home")
+    doctor = traceqa("doctor", env=env)
+    plan = traceqa("install", "--dry-run", env=env)
+    assert plan.returncode == 0, plan.stderr
+    if "not a release build" in doctor.stdout:
+        assert "tags can be moved" in plan.stderr
+        assert "@v0." in plan.stdout
+    else:
+        assert "release commit" in plan.stderr
+
+
 def test_install_refuses_what_it_cannot_do(tmp_path: Path) -> None:
     env = without_workspace_drivers(tmp_path / "home")
     unknown = traceqa("install", "netscape", env=env)
