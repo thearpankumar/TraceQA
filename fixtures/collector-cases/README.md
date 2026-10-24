@@ -72,4 +72,5 @@ marked.
 | `states.html` | Disabled, checked, expanded, pressed, selected, read-only, required |
 | `controls.html` | The role of each kind of form control |
 | `structure.html` | Open, nested and closed shadow roots, and slotted content |
+| `hostile.html` | A page whose first script replaces `Array.prototype.map`, `getBoundingClientRect`, `getComputedStyle`, `Set.prototype.has` and `String.prototype.trim`. Every element must still be read correctly where the driver can run a script before the page's (the Playwright driver), and the result must carry a `collector_tampered` warning. Not run in Safari, where the WebDriver driver has no such hook. |
 | `covered.html` | Covered by a banner, a backdrop or an overlay, and the cases that are not covering: clicks passing through, partial overlap, own content, own label |

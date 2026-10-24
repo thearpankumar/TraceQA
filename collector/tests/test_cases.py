@@ -37,6 +37,7 @@ BROWSERS = ["chromium", "firefox", "webkit"] + (["safari"] if os.environ.get("TR
 DRIVER_OF = {"safari": "traceqa_driver_webdriver"}
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 VIEWPORT = {"width": 1280, "height": 800}
+HOSTILE = "hostile.html"
 
 
 def optional_state(field: str) -> Callable[[dict[str, Any]], str]:
@@ -101,7 +102,7 @@ class Readings:
         self.site = site
         self.drivers: dict[str, DriverClient] = {}
         self.sessions: dict[str, tuple[DriverClient, str]] = {}
-        self.pages: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self.pages: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _session(self, browser: str) -> tuple[DriverClient, str]:
         if browser not in self.sessions:
@@ -114,13 +115,16 @@ class Readings:
             self.sessions[browser] = (driver, opened["sessionId"])
         return self.sessions[browser]
 
-    def elements(self, browser: str, page: str) -> list[dict[str, Any]]:
+    def result(self, browser: str, page: str) -> dict[str, Any]:
         if (browser, page) not in self.pages:
             driver, session = self._session(browser)
             driver.call("page.goto", {"sessionId": session, "url": self.site + page, "waitUntil": "settled"})
             raw = driver.call("page.eval", {"sessionId": session, "script": COLLECTOR, "arg": {}})
-            self.pages[(browser, page)] = raw["results"][0]["value"]["elements"]
+            self.pages[(browser, page)] = raw["results"][0]["value"]
         return self.pages[(browser, page)]
+
+    def elements(self, browser: str, page: str) -> list[dict[str, Any]]:
+        return self.result(browser, page)["elements"]
 
     def close(self) -> None:
         for driver, session in self.sessions.values():
@@ -143,6 +147,7 @@ def test_the_case_pages_are_found() -> None:
 @pytest.mark.parametrize("browser", BROWSERS)
 @pytest.mark.parametrize("case", ALL_CASES, ids=lambda case: f"{case.page.removesuffix('.html')}:{case.id}")
 def test_case(readings: Readings, browser: str, case: Case) -> None:
+    skip_if_no_init_script(browser, case.page)
     found = [e for e in readings.elements(browser, case.page) if e["attrs"].get("id") == case.id]
     problem = mismatch(case, found)
     if case.gap:
@@ -166,6 +171,7 @@ def mismatch(case: Case, found: list[dict[str, Any]]) -> str | None:
 @pytest.mark.parametrize("browser", BROWSERS)
 @pytest.mark.parametrize("page", PAGES)
 def test_nothing_unexpected_is_listed(readings: Readings, browser: str, page: str) -> None:
+    skip_if_no_init_script(browser, page)
     expected = {case.id for case in ALL_CASES if case.page == page and case.expect}
     extra = [
         f"{e['tag']}#{e['attrs'].get('id', '?')} {e['role']} {e['name']!r}"
@@ -173,3 +179,37 @@ def test_nothing_unexpected_is_listed(readings: Readings, browser: str, page: st
         if e["attrs"].get("id") not in expected
     ]
     assert not extra, f"listed without an expectation on {page} in {browser}: {extra}"
+
+
+def skip_if_no_init_script(browser: str, page: str) -> None:
+    """The hostile page is only read correctly where a driver can capture the originals first."""
+    if page == HOSTILE and browser in DRIVER_OF:
+        pytest.skip("the WebDriver driver has no hook to run a script before the page's")
+
+
+def warning_codes(result: dict[str, Any]) -> list[str]:
+    return [warning["code"] for warning in result["warnings"]]
+
+
+@pytest.mark.parametrize("browser", [b for b in BROWSERS if b not in DRIVER_OF])
+def test_a_hostile_page_is_reported_as_tampered_and_still_read_correctly(readings: Readings, browser: str) -> None:
+    # The elements are checked by test_case. Here: the page's replacements are named.
+    warnings = [w for w in readings.result(browser, HOSTILE)["warnings"] if w["code"] == "collector_tampered"]
+    assert len(warnings) == 1, warning_codes(readings.result(browser, HOSTILE))
+    message = warnings[0]["message"]
+    for replaced in [
+        "Array.prototype.map",
+        "Element.prototype.getBoundingClientRect",
+        "window.getComputedStyle",
+        "Set.prototype.has",
+        "String.prototype.trim",
+    ]:
+        assert replaced in message, message
+    assert "Function.prototype.toString" not in message
+    assert "original functions" in message
+
+
+@pytest.mark.parametrize("browser", BROWSERS)
+@pytest.mark.parametrize("page", [page for page in PAGES if page != HOSTILE])
+def test_a_normal_page_is_not_reported_as_tampered(readings: Readings, browser: str, page: str) -> None:
+    assert "collector_tampered" not in warning_codes(readings.result(browser, page))
