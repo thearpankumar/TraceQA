@@ -22,5 +22,27 @@
     { "id": "   ", "stable": false, "domTestable": false },
     { "id": "  submit  ", "stable": true, "domTestable": false },
     { "id": "  :r1:  ", "stable": false, "domTestable": false }
+  ],
+  "stepKey": [
+    { "step": { "role": "list", "tag": "ul", "name": "Products" }, "key": "list \"products\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Cart  Preview" }, "key": "region \"cart preview\"" },
+    { "step": { "role": "region", "tag": "section", "name": "cart preview" }, "key": "region \"cart preview\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Café" }, "key": "region \"café\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Café" }, "key": "region \"café\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Line\tOne\nLINE   two" }, "key": "region \"line one line two\"" },
+    { "step": { "role": "group", "tag": "fieldset", "name": "Say \"Hi\"" }, "key": "group \"say \\\"hi\\\"\"" },
+    { "step": { "role": "group", "tag": "fieldset", "name": "a\\b" }, "key": "group \"a\\\\b\"" },
+    { "step": { "role": "list", "tag": "ul", "name": "a\" > list \"b" }, "key": "list \"a\\\" > list \\\"b\"" },
+    { "step": { "role": "list", "tag": "ul", "name": "a > b" }, "key": "list \"a > b\"" },
+    { "step": { "role": "generic", "tag": "div" }, "key": "div" },
+    { "step": { "role": "generic", "tag": "label", "repeatIndex": 1, "repeatCount": 3 }, "key": "label" },
+    { "step": { "role": "article", "tag": "article", "name": "Blue Shirt", "repeatIndex": 4, "repeatCount": 12 }, "key": "article" },
+    { "step": { "role": "region", "tag": "section", "name": "Founders", "repeatIndex": 2, "repeatCount": 5 }, "key": "region \"founders\"" }
+  ],
+  "frameStep": [
+    { "label": "pay", "key": "frame \"pay\"" },
+    { "label": "Pay  Frame", "key": "frame \"pay frame\"" },
+    { "label": "x\" > main \"y", "key": "frame \"x\\\" > main \\\"y\"" },
+    { "label": "/widget/v2", "key": "frame \"/widget/v2\"" }
   ]
 }

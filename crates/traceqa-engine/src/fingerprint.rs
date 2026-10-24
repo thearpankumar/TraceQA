@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use traceqa_protocol::types::PathStep;
 use unicode_normalization::UnicodeNormalization;
 
-pub const VERSION: u64 = 1;
+pub const VERSION: u64 = 2;
 
 /// A repeated ancestor with this many siblings is treated as data, not structure.
 pub const REPEAT_THRESHOLD: u64 = 3;
@@ -69,6 +69,18 @@ const LANDMARKS: [&str; 8] = [
     "search",
 ];
 
+/// A step name as it appears between the quotes of a path key: normalised like a name, then
+/// with `\` and `"` escaped, so a name can never end its quotes early and a name holding
+/// ` > ` can never be read as two steps.
+fn escape_step_name(name: &str) -> String {
+    normalize_name(name).replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// The first step of the path of an element inside a frame, from the frame's name or URL path.
+pub fn frame_step_key(label: &str) -> String {
+    format!("frame \"{}\"", escape_step_name(label))
+}
+
 /// One step of a path key: the role (the tag when there is no role), plus the name in quotes.
 /// A repeated step that is not a landmark loses its name, because the name of one card among
 /// many is data. Indexes are always left out, so every card in a grid has the same path.
@@ -76,7 +88,7 @@ pub fn step_key(step: &PathStep) -> String {
     let base = if step.role == "generic" { &step.tag } else { &step.role };
     let is_data = step.repeat_count.unwrap_or(0) >= REPEAT_THRESHOLD && !LANDMARKS.contains(&step.role.as_str());
     match &step.name {
-        Some(name) if !is_data => format!("{base} \"{name}\""),
+        Some(name) if !is_data => format!("{base} \"{}\"", escape_step_name(name)),
         _ => base.clone(),
     }
 }
@@ -134,10 +146,69 @@ mod tests {
     }
 
     #[test]
+    fn step_names_are_normalised_like_names() {
+        let region = |name: &str| step("region", "section", Some(name), None);
+        assert_eq!(step_key(&region("Cart  Preview")), step_key(&region("cart preview")));
+        assert_eq!(step_key(&region("Caf\u{e9}")), step_key(&region("Cafe\u{301}")));
+        assert_eq!(step_key(&region("  Cart\tPreview\n")), "region \"cart preview\"");
+    }
+
+    #[test]
+    fn a_quote_or_delimiter_in_a_step_name_cannot_alias_another_path() {
+        let join = |steps: &[PathStep]| steps.iter().map(step_key).collect::<Vec<_>>().join(" > ");
+        let one = join(&[step("list", "ul", Some("a\" > list \"b"), None)]);
+        let two = join(&[step("list", "ul", Some("a"), None), step("list", "ul", Some("b"), None)]);
+        assert_ne!(one, two);
+        assert_ne!(component_id("link", "x", &one), component_id("link", "x", &two));
+        // A backslash cannot undo the escape of the quote after it.
+        let slash = step_key(&step("list", "ul", Some("a\\"), None));
+        let quote = step_key(&step("list", "ul", Some("a\""), None));
+        assert_ne!(slash, quote);
+    }
+
+    #[test]
+    fn stepkey_vectors() {
+        let vectors = vectors();
+        let cases = vectors["stepKey"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for case in cases {
+            let step: PathStep = serde_json::from_value(case["step"].clone()).unwrap();
+            assert_eq!(
+                step_key(&step),
+                case["key"].as_str().unwrap(),
+                "step {:?}",
+                case["step"]
+            );
+        }
+    }
+
+    #[test]
+    fn frame_labels_are_escaped() {
+        let vectors = vectors();
+        let cases = vectors["frameStep"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            assert_eq!(
+                frame_step_key(case["label"].as_str().unwrap()),
+                case["key"].as_str().unwrap()
+            );
+        }
+        // A frame named like two steps cannot be mistaken for them.
+        assert_ne!(
+            frame_step_key("a\" > main \"b"),
+            format!(
+                "{} > {}",
+                frame_step_key("a"),
+                step_key(&step("main", "main", Some("b"), None))
+            )
+        );
+    }
+
+    #[test]
     fn repeated_steps_drop_what_varies() {
         assert_eq!(
             step_key(&step("list", "ul", Some("Products"), Some((0, 2)))),
-            "list \"Products\""
+            "list \"products\""
         );
         assert_eq!(
             step_key(&step("article", "article", Some("Blue Shirt"), Some((4, 12)))),
@@ -147,7 +218,7 @@ mod tests {
         // A page with five named sections: the names are structure, not data.
         assert_eq!(
             step_key(&step("region", "section", Some("Founders"), Some((2, 5)))),
-            "region \"Founders\""
+            "region \"founders\""
         );
     }
 }

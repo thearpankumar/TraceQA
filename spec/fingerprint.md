@@ -1,4 +1,4 @@
-# Component fingerprint, version 1
+# Component fingerprint, version 2
 
 **Status: measured on the Buggy Shop and on four real sites.** `bench/run.py`
 gets the same ids in Chromium, Firefox and WebKit, at two viewports, across
@@ -14,13 +14,13 @@ and bug deduping will all key on it.
 
 ```
 id = "c_" + first 12 hex characters of SHA-256(
-       "v1" + "\n" + role + "\n" + nameKey + "\n" + pathKey )
+       "v2" + "\n" + role + "\n" + nameKey + "\n" + pathKey )
 ```
 
 | Part | How it is built |
 |---|---|
 | `role` | The element's role as collected. |
-| `pathKey` | The element's `path` steps joined with ` > `. Each step is its role (its tag when the role is `generic`), plus its name in quotes when it has one. A step with `repeatCount` of 3 or more loses its name, because the name of one card among many is data. Landmarks keep theirs (`banner`, `main`, `navigation`, `contentinfo`, `complementary`, `region`, `form`, `search`): a page with five named sections has five different paths. `repeatIndex` is always left out, so every card in a grid has the same path. Elements inside a frame get a first step `frame "<frame name, or URL path>"`. |
+| `pathKey` | The element's `path` steps joined with ` > `. Each step is its role (its tag when the role is `generic`), plus its name in quotes when it has one. The name is treated exactly like a component name: Unicode NFC, trimmed, inner whitespace collapsed, lower-cased, and then `\` is written as `\\` and `"` as `\"`, so a quote or a ` > ` inside a name can never end the step early or pass for a new step. A step with `repeatCount` of 3 or more loses its name, because the name of one card among many is data. Landmarks keep theirs (`banner`, `main`, `navigation`, `contentinfo`, `complementary`, `region`, `form`, `search`): a page with five named sections has five different paths. `repeatIndex` is always left out, so every card in a grid has the same path. Elements inside a frame get a first step `frame "<frame name, or URL path>"`, with the label normalised and escaped like a step name. |
 | `nameKey` | The accessible name, normalised: Unicode NFC, trimmed, inner whitespace collapsed, lower-cased. See the two special cases below. |
 
 ### Special case 1: no name
@@ -88,9 +88,21 @@ gets the `nameKey` `~`, and its component has `nameChanges: true`. Its name is
 the one read last.
 
 Elements whose names stay put are not affected, so their ids are the same as
-before this rule existed and `fingerprintVersion` stays 1. A name that changes
+before this rule existed and `fingerprintVersion` does not change for it. A name that changes
 more slowly than the time between the two readings, a clock showing minutes for
 one, is not seen to change.
+
+## Version history
+
+- **1**: first recipe.
+- **2**: step names (and frame labels) in the path are normalised and escaped
+  like component names, so `Cart  Preview` and `cart preview` give one id and a
+  quote in a name cannot alias another path. Every id changes, because the version is part of the hash.
+  Unnamed elements with a generated `id` (see special case 1) also
+  stopped using it. `spec/fingerprint-vectors.json` holds the test vectors.
+
+A change that alters any id raises `fingerprintVersion` (`fingerprint::VERSION`)
+and regenerates `fixtures/buggy-shop/golden-ids.json`.
 
 ## What is left out on purpose
 

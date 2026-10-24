@@ -222,7 +222,7 @@ fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job: &Job) -> R
         match collected {
             Ok(collected) => {
                 warnings.extend(collected.warnings);
-                let frame_step = (!is_main).then(|| format!("frame \"{}\"", frame_label(&frame)));
+                let frame_step = (!is_main).then(|| fingerprint::frame_step_key(frame_label(&frame)));
                 for element in collected.elements {
                     let page_box = if is_main {
                         Some(element.box_.clone())
