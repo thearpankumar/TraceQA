@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 use traceqa_engine::driver::{Driver, DriverError, Drivers, Transport};
 use traceqa_engine::{Execution, Run};
 use traceqa_protocol::types::{
-    BrowserTarget, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, Viewport,
+    BrowserTarget, ComponentsFile, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState,
+    Viewport,
 };
 
 const COLLECTED: &str = include_str!("../../../spec/examples/CollectorResult.shop.json");
@@ -32,6 +33,11 @@ struct Scripted {
     slow_loads: Arc<AtomicUsize>,
     /// The viewport the pretend browser really gives, when it cannot give the one asked for.
     reaches: Option<(u64, u64)>,
+    /// What the pretend page reports as its final address, and as the address of a frame it cannot read.
+    final_url: String,
+    frame_url: String,
+    /// Every address the engine asked the driver to open.
+    opened: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Default)]
@@ -70,6 +76,12 @@ impl Transport for Scripted {
             method
         };
         self.calls.lock().unwrap().push(label.to_string());
+        if method == "page.goto" {
+            self.opened
+                .lock()
+                .unwrap()
+                .push(params["url"].as_str().unwrap().to_string());
+        }
         if method == "page.goto" && take_one(&self.slow_loads) {
             return Err(DriverError {
                 kind: "timeout".into(),
@@ -106,7 +118,7 @@ impl Transport for Scripted {
                 }
                 opened
             }
-            "page.goto" => json!({ "finalUrl": "https://shop.test/", "status": 200, "title": "Buggy Shop" }),
+            "page.goto" => json!({ "finalUrl": self.final_url, "status": 200, "title": "Buggy Shop" }),
             "page.scroll" => {
                 self.y = match params["byY"].as_f64() {
                     Some(by) => (self.y + by).min(PAGE_HEIGHT - VIEW_HEIGHT),
@@ -119,7 +131,7 @@ impl Transport for Scripted {
                 collected["scroll"] = json!({ "y": self.y, "height": PAGE_HEIGHT, "viewportHeight": VIEW_HEIGHT });
                 json!({ "results": [
                     { "frame": { "id": "main", "url": "https://shop.test/", "crossOrigin": false }, "value": collected },
-                    { "frame": { "id": "f1", "url": "https://pay.example.com/widget", "crossOrigin": true },
+                    { "frame": { "id": "f1", "url": self.frame_url, "crossOrigin": true },
                       "error": "blocked" }
                 ]})
             }
@@ -157,6 +169,8 @@ struct Outcome {
     folder: PathBuf,
     events: Vec<Event>,
     calls: Vec<String>,
+    /// Addresses the driver was asked to open.
+    opened: Vec<String>,
 }
 
 fn run(full_page: bool, fail: Option<(&'static str, &'static str)>, cancelled: bool) -> Outcome {
@@ -176,10 +190,50 @@ fn run_reaching(
     crops: bool,
     reaches: Option<(u64, u64)>,
 ) -> Outcome {
+    run_case(Case {
+        full_page,
+        fail,
+        cancelled,
+        crops,
+        reaches,
+        ..Case::default()
+    })
+}
+
+/// Everything a single-target run can vary.
+struct Case {
+    full_page: bool,
+    fail: Option<(&'static str, &'static str)>,
+    cancelled: bool,
+    crops: bool,
+    reaches: Option<(u64, u64)>,
+    url: &'static str,
+    final_url: &'static str,
+    frame_url: &'static str,
+    storage_state: Option<StorageState>,
+}
+
+impl Default for Case {
+    fn default() -> Self {
+        Self {
+            full_page: true,
+            fail: None,
+            cancelled: false,
+            crops: true,
+            reaches: None,
+            url: "https://shop.test",
+            final_url: "https://shop.test/",
+            frame_url: "https://pay.example.com/widget",
+            storage_state: None,
+        }
+    }
+}
+
+fn run_case(case: Case) -> Outcome {
     let out = std::env::temp_dir().join("traceqa-engine-tests");
     let request = RunStartParams {
         feature: "extract".into(),
-        url: "https://shop.test".into(),
+        url: case.url.into(),
         targets: vec![BrowserTarget::named("firefox")],
         viewports: vec![Viewport {
             width: 1280,
@@ -188,36 +242,41 @@ fn run_reaching(
         out_dir: Some(out.to_string_lossy().into_owned()),
         parallel: None,
         options: Some(ExtractOptions {
-            crops: Some(crops),
+            crops: Some(case.crops),
             include_hidden: None,
             max_scroll_steps: None,
             settle_ms: None,
             timeout_ms: None,
         }),
-        storage_state: None,
+        storage_state: case.storage_state.clone(),
     };
     let run = Run::prepare(request).unwrap();
     let folder = run.folder().to_path_buf();
 
     let calls = Arc::new(Mutex::new(Vec::new()));
+    let opened = Arc::new(Mutex::new(Vec::new()));
     let scripted = || {
         let calls = Arc::clone(&calls);
+        let opened = Arc::clone(&opened);
         let start = move || {
             let transport = Scripted {
                 y: 0.0,
                 calls: Arc::clone(&calls),
-                full_page,
-                fail,
+                full_page: case.full_page,
+                fail: case.fail,
                 sessions: Arc::default(),
                 exclusive: false,
                 slow_loads: Arc::default(),
-                reaches,
+                reaches: case.reaches,
+                final_url: case.final_url.into(),
+                frame_url: case.frame_url.into(),
+                opened: Arc::clone(&opened),
             };
             Driver::connect(Box::new(transport))
         };
         Drivers::starting_with(vec![Box::new(start)])
     };
-    let cancel = AtomicBool::new(cancelled);
+    let cancel = AtomicBool::new(case.cancelled);
     let mut events = Vec::new();
     let manifest = run.execute(
         &Execution {
@@ -227,11 +286,13 @@ fn run_reaching(
         &mut |event| events.push(event.clone()),
     );
     let calls = calls.lock().unwrap().clone();
+    let opened = opened.lock().unwrap().clone();
     Outcome {
         manifest,
         folder,
         events,
         calls,
+        opened,
     }
 }
 
@@ -423,6 +484,9 @@ fn run_six_targets_with(
                 exclusive,
                 slow_loads: Arc::clone(&slow_loads),
                 reaches: None,
+                final_url: "https://shop.test/".into(),
+                frame_url: "https://pay.example.com/widget".into(),
+                opened: Arc::default(),
             };
             Driver::connect(Box::new(transport))
         };
@@ -603,4 +667,129 @@ fn a_viewport_that_is_reached_raises_no_warning() {
         .iter()
         .all(|warning| warning.code != "viewport_not_reached"));
     fs::remove_dir_all(outcome.folder).unwrap();
+}
+
+/// Every file under `dir`, read as text where it is text.
+fn all_text_files(dir: &std::path::Path) -> Vec<(PathBuf, String)> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            found.extend(all_text_files(&path));
+        } else if let Ok(text) = fs::read_to_string(&path) {
+            found.push((path, text));
+        }
+    }
+    found
+}
+
+#[test]
+fn the_driver_receives_the_real_url_while_run_json_events_and_components_json_hold_the_redacted_one() {
+    let outcome = run_case(Case {
+        url: "https://shop.test/cb?token=abc&page=2",
+        final_url: "https://shop.test/cb?token=abc&page=2#access_token=abc&x=1",
+        crops: false,
+        ..Case::default()
+    });
+    assert_eq!(outcome.manifest.status, RunStatus::Completed);
+    // The browser still gets the real address.
+    assert_eq!(outcome.opened, ["https://shop.test/cb?token=abc&page=2"]);
+
+    assert_eq!(outcome.manifest.url, "https://shop.test/cb?token=REDACTED&page=2");
+    let file = components(&outcome);
+    assert_eq!(file.url, "https://shop.test/cb?token=REDACTED&page=2");
+    assert_eq!(
+        file.final_url,
+        "https://shop.test/cb?token=REDACTED&page=2#access_token=REDACTED&x=1"
+    );
+
+    let files = all_text_files(&outcome.folder);
+    assert!(files.iter().any(|(path, _)| path.ends_with("events.jsonl")));
+    for (path, text) in &files {
+        assert!(!text.contains("abc"), "{} holds the secret", path.display());
+    }
+    for event in &outcome.events {
+        assert!(!serde_json::to_string(event).unwrap().contains("abc"), "{event:?}");
+    }
+}
+
+#[test]
+fn addresses_without_secrets_are_stored_exactly_as_given() {
+    let outcome = run_case(Case {
+        url: "https://Shop.test/a b?x=1&y=2#frag",
+        final_url: "https://Shop.test/a%20b?x=1&y=2#frag",
+        crops: false,
+        ..Case::default()
+    });
+    assert_eq!(outcome.manifest.url, "https://Shop.test/a b?x=1&y=2#frag");
+    let file = components(&outcome);
+    assert_eq!(file.url, "https://Shop.test/a b?x=1&y=2#frag");
+    assert_eq!(file.final_url, "https://Shop.test/a%20b?x=1&y=2#frag");
+}
+
+#[test]
+fn a_final_url_and_frame_urls_are_redacted_too() {
+    let outcome = run_case(Case {
+        final_url: "https://shop.test/landing?api_key=SEKRET",
+        frame_url: "https://pay.example.com/widget?sig=SEKRET",
+        crops: false,
+        ..Case::default()
+    });
+    let file = components(&outcome);
+    assert_eq!(file.final_url, "https://shop.test/landing?api_key=REDACTED");
+    let frame_warning = file
+        .warnings
+        .iter()
+        .find(|warning| warning.code == "cross_origin_frame_skipped")
+        .expect("the frame could not be read");
+    assert!(
+        frame_warning.message.contains("sig=REDACTED"),
+        "{}",
+        frame_warning.message
+    );
+    for (path, text) in all_text_files(&outcome.folder) {
+        assert!(!text.contains("SEKRET"), "{} holds the secret", path.display());
+    }
+}
+
+#[test]
+fn a_sign_in_page_is_still_noticed_from_the_real_final_url() {
+    let state: StorageState = serde_json::from_value(json!({ "cookies": [], "origins": [] })).unwrap();
+    let outcome = run_case(Case {
+        final_url: "https://shop.test/login?token=abc",
+        storage_state: Some(state),
+        crops: false,
+        ..Case::default()
+    });
+    let file = components(&outcome);
+    assert!(file.warnings.iter().any(|w| w.code == "session_not_accepted"));
+}
+
+#[test]
+fn an_address_with_a_user_name_or_password_is_refused_before_a_run_folder_exists() {
+    let out = std::env::temp_dir().join(format!("traceqa-engine-userinfo-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&out);
+    for url in [
+        "https://user:pw@example.com",
+        "https://user@example.com/",
+        "https://u:p\t@h/",
+    ] {
+        let request = RunStartParams {
+            feature: "extract".into(),
+            url: url.into(),
+            targets: vec![BrowserTarget::named("firefox")],
+            viewports: vec![Viewport {
+                width: 1280,
+                height: 400,
+            }],
+            out_dir: Some(out.to_string_lossy().into_owned()),
+            parallel: None,
+            options: None,
+            storage_state: None,
+        };
+        let error = Run::prepare(request).err().expect("must be refused");
+        assert!(error.to_string().contains("--storage-state"), "{error}");
+        assert!(!error.to_string().contains("pw"), "{error}");
+    }
+    assert!(!out.exists(), "no run folder may be created");
 }
