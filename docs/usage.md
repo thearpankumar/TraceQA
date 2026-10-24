@@ -129,7 +129,15 @@ Ctrl-C stops the run within about a second, even while a page is loading or a
 target waits for a browser that only one target may use at a time. It closes the
 browsers and writes a run
 folder that says `cancelled`. Targets that had already finished keep their
-results. A second Ctrl-C quits at once.
+results. Every target that was in the middle of a page is `cancelled`, also when
+the Ctrl-C ended its browser or driver first: none is reported as `failed`. On
+Windows, Ctrl-Break does the same as Ctrl-C.
+
+A second Ctrl-C quits at once, without waiting for the browsers: `run.json` is
+written first (status `cancelled`, `finishedAt` set, targets that had not
+finished `cancelled`), `events.jsonl` ends with `run.finished`, and the exit
+code is 130, within about two seconds. The run folder is valid, as after a
+single Ctrl-C.
 
 ### Examples
 
@@ -638,6 +646,7 @@ live to an SDK's `on_event` callback.
 | `run.started`, `run.finished` | Start and end of the run. |
 | `target.started`, `target.finished` | Start and end of one browser at one viewport. `target.finished` carries its timings. |
 | `target.retried` | A browser timed out while others were running and is being tried again on its own. |
+| `target.cancelled` | A target was stopped by a cancel while its browser or driver was already going away. The message holds what the driver said; the target's status is `cancelled` and has no `error`. |
 | `page.opened` | The page has loaded. |
 | `page.scrolled` | The page has been scrolled through. |
 | `elements.collected` | The collector has returned. |

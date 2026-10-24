@@ -237,7 +237,7 @@ seq: number
 ts: string
 runId: string
 /**
- * Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.finished, run.finished, error.
+ * Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error.
  */
 type: string
 /**

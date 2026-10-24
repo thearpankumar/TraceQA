@@ -8,10 +8,11 @@ use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use traceqa_engine::driver::Drivers;
-use traceqa_engine::{driver_commands, serve, Execution, Run};
+use traceqa_engine::{driver_commands, serve, Abort, Execution, Run};
 use traceqa_protocol::types::{
     BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState, Viewport,
 };
@@ -269,7 +270,7 @@ fn extract(args: ExtractArgs) -> ExitCode {
         Some(target) => eprintln!("[{target}] {}", event.message),
         None => eprintln!("{}", event.message),
     };
-    let manifest = run.execute(&execution, &mut show_progress);
+    let manifest = run.execute_abortable(&execution, &ABORT, &mut show_progress);
 
     if args.json {
         println!(
@@ -308,16 +309,38 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 /// Exit code of a run stopped with Ctrl-C, as shells report an interrupted command.
 const INTERRUPTED: u8 = 130;
 
+/// Set by the second Ctrl-C. The engine then writes the final run folder at once, without
+/// waiting for the browsers, and the watchdog below ends the process.
+static ABORT: Abort = Abort::new();
+
+/// How long the process waits for the run folder to be closed after a second Ctrl-C.
+const ABORT_WAIT: Duration = Duration::from_secs(2);
+
 fn cancel_on_ctrl_c() {
+    // The handler only sets flags. The folder is written by the engine and the process is ended
+    // by the watchdog, so no file work happens inside the handler.
     let handler = || {
         if CANCEL.swap(true, Ordering::SeqCst) {
-            // A second Ctrl-C: the person does not want to wait for the browsers to close.
-            std::process::exit(i32::from(INTERRUPTED));
+            ABORT.request();
+            return;
         }
         eprintln!("\nCancelling: closing the browsers. Press Ctrl-C again to quit at once.");
     };
     if let Err(error) = ctrlc::set_handler(handler) {
         eprintln!("traceqa: Ctrl-C will stop the run without closing it cleanly: {error}");
+        return;
+    }
+    let watchdog = std::thread::Builder::new().name("abort-watchdog".into()).spawn(|| {
+        while !ABORT.is_requested() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // A second Ctrl-C: the person does not want to wait for the browsers to close.
+        eprintln!("\nQuitting at once.");
+        ABORT.wait_closed(ABORT_WAIT);
+        std::process::exit(i32::from(INTERRUPTED));
+    });
+    if let Err(error) = watchdog {
+        eprintln!("traceqa: a second Ctrl-C will not quit at once: {error}");
     }
 }
 

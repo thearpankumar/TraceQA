@@ -113,6 +113,14 @@ runs/<runId>/
     crops/<componentId>.png one crop per component    (only with pictures)
 ```
 
+Status of a stopped run: a cancel (Ctrl-C, `run.cancel`) turns every target that
+was in flight, and every target not yet started, into `cancelled`, also when the
+cancel took the target's browser or driver down first. A cancelled target has no
+`error`; the driver's words, when there are any, are in a `target.cancelled`
+event. The run is `cancelled` if any target is, else `failed` if any failed. A
+run that is forced to quit (a second Ctrl-C) is still closed: `run.json` says
+`cancelled` with `finishedAt`, and `events.jsonl` ends with `run.finished`.
+
 ## Rules for changing a contract
 
 1. **Adding an optional field is compatible.** No version change. Readers must

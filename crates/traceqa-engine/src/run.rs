@@ -3,16 +3,16 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Condvar, Mutex, MutexGuard, TryLockError};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 use thiserror::Error;
 use traceqa_protocol::supervise::guard;
 use traceqa_protocol::sync::{CondvarExt, LockExt};
 use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, TargetSummary, Viewport};
-use traceqa_recorder::{new_run_id, now_rfc3339, RunWriter};
+use traceqa_recorder::{new_run_id, now_rfc3339, write_manifest_in, RunWriter};
 
 use crate::driver::{DriverCommand, DriverError, Drivers, ErrorKind};
 use crate::extract::{extract_target, Job, Progress, Sink};
@@ -149,6 +149,20 @@ impl Run {
     /// target that fails does not stop the others. Events from all of them reach `listener`
     /// one at a time, in the order they are written to `events.jsonl`.
     pub fn execute(self, execution: &Execution, listener: &mut (dyn FnMut(&Event) + Send)) -> RunManifest {
+        self.execute_abortable(execution, &Abort::new(), listener)
+    }
+
+    /// As [`execute`](Self::execute), and `abort` can end the run at once. When it is requested,
+    /// a watcher writes the final `run.json` (status `cancelled`, targets that had not finished
+    /// cancelled) and the closing `run.finished` event within about a second, without waiting
+    /// for the drivers, and then closes `abort`. The caller then exits. Use it where the person
+    /// can insist on quitting while a driver does not answer.
+    pub fn execute_abortable(
+        self,
+        execution: &Execution,
+        abort: &Abort,
+        listener: &mut (dyn FnMut(&Event) + Send),
+    ) -> RunManifest {
         let Self { params, writer } = self;
         let run_id = writer.run_id().to_string();
         let mut manifest = RunManifest {
@@ -166,37 +180,60 @@ impl Run {
 
         let (jobs, workers) = plan(&params);
 
-        let sink = Mutex::new(Sink { writer, listener });
+        let folder = writer.dir().to_path_buf();
+        let sink = Mutex::new(Sink {
+            writer,
+            listener,
+            sealed: false,
+        });
         let progress = Progress { sink: &sink };
         // Filled in as targets end, so what finished is not lost if something panics.
         let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
 
-        // A panic anywhere in the run (a worker, a driver) must still leave a finished run folder
-        // and an answer for the caller, so the work is supervised.
-        let supervised = guard(|| {
-            progress.emit(
-                "run.started",
-                None,
-                format!(
-                    "Extracting {} in {} browser and viewport combinations, {workers} at a time",
-                    manifest.url,
-                    jobs.len()
-                ),
-                json!({ "targets": jobs.len(), "parallel": workers }),
-            );
+        let done = AtomicBool::new(false);
+        let supervised = thread::scope(|scope| {
+            scope.spawn(|| {
+                let watched = Watched {
+                    abort,
+                    done: &done,
+                    sink: &sink,
+                    finished: &finished,
+                    jobs: &jobs,
+                    base: &manifest,
+                    folder: &folder,
+                };
+                // The watcher is a safety net: it must not take the run down with it.
+                let _ = guard(|| watch_for_abort(&watched));
+            });
+            // A panic anywhere in the run (a worker, a driver) must still leave a finished run folder
+            // and an answer for the caller, so the work is supervised.
+            let supervised = guard(|| {
+                progress.emit(
+                    "run.started",
+                    None,
+                    format!(
+                        "Extracting {} in {} browser and viewport combinations, {workers} at a time",
+                        manifest.url,
+                        jobs.len()
+                    ),
+                    json!({ "targets": jobs.len(), "parallel": workers }),
+                );
 
-            let exclusive = Exclusive::default();
-            let shared = Shared {
-                params: &params,
-                run_id: &run_id,
-                progress,
-                exclusive: &exclusive,
-                cancel: execution.cancel,
-                policy: execution.policy,
-            };
-            let worker_panic = run_workers(&jobs, workers, &shared, execution, &finished);
-            retry_timed_out(&jobs, &finished, workers, &shared, execution);
-            worker_panic
+                let exclusive = Exclusive::default();
+                let shared = Shared {
+                    params: &params,
+                    run_id: &run_id,
+                    progress,
+                    exclusive: &exclusive,
+                    cancel: execution.cancel,
+                    policy: execution.policy,
+                };
+                let worker_panic = run_workers(&jobs, workers, &shared, execution, &finished);
+                retry_timed_out(&jobs, &finished, workers, &shared, execution);
+                worker_panic
+            });
+            done.store(true, Ordering::SeqCst);
+            supervised
         });
 
         let finished = finished.into_inner_ok();
@@ -235,10 +272,155 @@ impl Run {
             format!("Run {}", manifest.status),
             json!({ "status": manifest.status }),
         );
-        let writer = sink.into_inner_ok().writer;
-        save(&writer, &manifest);
+        let sink = sink.into_inner_ok();
+        // After an abort the watcher has written the final run.json; a late write must not undo it.
+        if !sink.sealed {
+            save(&sink.writer, &manifest);
+        }
         manifest
     }
+}
+
+/// A request to end a run at once, for the person who presses Ctrl-C a second time. It is a
+/// flag and a signal that the run folder has been closed, so it is safe to set from a signal
+/// handler thread: the handler only calls [`request`](Self::request), and whoever wants to
+/// exit waits for [`wait_closed`](Self::wait_closed) first.
+pub struct Abort {
+    requested: AtomicBool,
+    closed: Mutex<bool>,
+    closed_signal: Condvar,
+}
+
+impl Abort {
+    pub const fn new() -> Self {
+        Self {
+            requested: AtomicBool::new(false),
+            closed: Mutex::new(false),
+            closed_signal: Condvar::new(),
+        }
+    }
+
+    /// Asks the run to write its final state and stop waiting for the drivers.
+    pub fn request(&self) {
+        self.requested.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::SeqCst)
+    }
+
+    /// Waits until the run folder has been closed after a request, for at most `timeout`.
+    /// Returns whether it was closed.
+    pub fn wait_closed(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut closed = self.closed.lock_ok();
+        while !*closed {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            closed = self.closed_signal.wait_timeout_ok(closed, left);
+        }
+        true
+    }
+
+    fn close(&self) {
+        *self.closed.lock_ok() = true;
+        self.closed_signal.notify_all();
+    }
+}
+
+impl Default for Abort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// How often the watcher looks for an abort request.
+const ABORT_POLL: Duration = Duration::from_millis(20);
+
+/// How long the watcher waits for the run's locks before it writes without them.
+const ABORT_LOCK_WAIT: Duration = Duration::from_secs(1);
+
+/// What the abort watcher needs to see of the run.
+struct Watched<'a, 'b> {
+    abort: &'a Abort,
+    done: &'a AtomicBool,
+    sink: &'a Mutex<Sink<'b>>,
+    finished: &'a Mutex<Vec<Option<Finished>>>,
+    jobs: &'a [Planned<'a>],
+    base: &'a RunManifest,
+    folder: &'a Path,
+}
+
+/// Takes the lock if it is free before `deadline`, polling. A thread that is stuck inside a
+/// driver call may hold a lock for long, and the watcher must never wait for it.
+fn lock_before<T>(mutex: &Mutex<T>, deadline: Instant) -> Option<MutexGuard<'_, T>> {
+    loop {
+        match mutex.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+}
+
+/// Waits for an abort request while the run goes on. On a request it writes the final state
+/// itself, from what has finished so far, because the targets that are stuck will not.
+fn watch_for_abort(watched: &Watched) {
+    while !watched.abort.is_requested() {
+        if watched.done.load(Ordering::SeqCst) {
+            return;
+        }
+        thread::sleep(ABORT_POLL);
+    }
+    let deadline = Instant::now() + ABORT_LOCK_WAIT;
+    let mut manifest = watched.base.clone();
+    {
+        let finished = lock_before(watched.finished, deadline);
+        manifest.targets = watched
+            .jobs
+            .iter()
+            .enumerate()
+            .map(|(index, job)| {
+                finished
+                    .as_ref()
+                    .and_then(|done| done[index].as_ref())
+                    .map_or_else(|| cancelled_summary(job), |outcome| outcome.summary.clone())
+            })
+            .collect();
+    }
+    manifest.status = RunStatus::Cancelled;
+    manifest.finished_at = Some(now_rfc3339());
+    match lock_before(watched.sink, deadline) {
+        Some(mut guard) => {
+            let sink = &mut *guard;
+            if !sink.sealed {
+                let message = format!("Run {}", manifest.status);
+                match sink
+                    .writer
+                    .event("run.finished", None, message, json!({ "status": manifest.status }))
+                {
+                    Ok(event) => (sink.listener)(&event),
+                    Err(error) => eprintln!("traceqa: could not write events.jsonl: {error}"),
+                }
+                sink.sealed = true;
+                save(&sink.writer, &manifest);
+            }
+        }
+        // The recorder is held by a stuck thread: run.json still must not stay `running`.
+        None => {
+            if let Err(error) = write_manifest_in(watched.folder, &manifest) {
+                eprintln!("traceqa: could not write run.json: {error}");
+            }
+        }
+    }
+    watched.abort.close();
 }
 
 /// What a failed run says when it panicked. The text is bounded, and is the only place the
@@ -274,16 +456,19 @@ pub(crate) fn failed_after_panic(folder: &Path, run_id: &str, message: &str) -> 
         target.status = RunStatus::Failed;
         target.error = Some(internal_error_text(message));
     }
-    if let Ok(text) = serde_json::to_string_pretty(&manifest) {
-        let temporary = folder.join("run.json.tmp");
-        if std::fs::write(&temporary, text)
-            .and_then(|()| std::fs::rename(&temporary, &path))
-            .is_err()
-        {
-            eprintln!("traceqa: could not write run.json after a panic");
-        }
+    if write_manifest_in(folder, &manifest).is_err() {
+        eprintln!("traceqa: could not write run.json after a panic");
     }
     manifest
+}
+
+/// A target the run was stopped before it finished.
+fn cancelled_summary(job: &Planned) -> TargetSummary {
+    TargetSummary {
+        status: RunStatus::Cancelled,
+        error: None,
+        ..unfinished_summary(job, None)
+    }
 }
 
 /// A target that never reached an end: the run was stopped by a panic, or never got to it.
@@ -545,7 +730,19 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
             );
             summary.timings = Some(timings);
         }
-        Err(error) if error.is_cancelled() => {}
+        Err(error) if error.is_cancelled() || stopped_by_cancel(&error, shared.cancel, CANCEL_GRACE) => {
+            // A cancel that also took the browser or driver down (Ctrl-C reaches all of them)
+            // makes them report an error of their own. The target was stopped, not broken: its
+            // words stay in the event, not in the summary.
+            if !error.is_cancelled() {
+                progress.emit(
+                    "target.cancelled",
+                    Some(name),
+                    format!("{name} cancelled: {error}"),
+                    json!({}),
+                );
+            }
+        }
         Err(error) => {
             summary.status = RunStatus::Failed;
             summary.error = Some(error.to_string());
@@ -562,8 +759,44 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
     }
 }
 
+/// How long a target whose browser or driver reported a failure waits for the cancel flag.
+/// A console Ctrl-C reaches the driver and the process at the same moment, so the driver's
+/// error can arrive just before the handler has set the flag.
+const CANCEL_GRACE: Duration = Duration::from_millis(300);
+
+/// True when `error` is the aftermath of a cancel: the flag is set, or it is set within `grace`
+/// and the error is the kind a dying browser or driver reports. Errors about the page itself
+/// (a timeout, a failed navigation, a blocked address) are real failures and do not wait.
+fn stopped_by_cancel(error: &EngineError, cancel: &AtomicBool, grace: Duration) -> bool {
+    if cancel.load(Ordering::SeqCst) {
+        return true;
+    }
+    let EngineError::Driver(driver) = error else {
+        return false;
+    };
+    let dying = matches!(
+        driver.kind(),
+        ErrorKind::Transport
+            | ErrorKind::Internal
+            | ErrorKind::EvalFailed
+            | ErrorKind::SessionNotFound
+            | ErrorKind::Other(_)
+    );
+    if !dying {
+        return false;
+    }
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        if cancel.load(Ordering::SeqCst) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    cancel.load(Ordering::SeqCst)
+}
+
 /// How often a target that waits for a browser looks at the cancel flag.
-const CANCEL_SLICE: std::time::Duration = std::time::Duration::from_millis(250);
+const CANCEL_SLICE: Duration = Duration::from_millis(250);
 
 /// Browsers of which only one session may exist on the machine. A target that needs one
 /// waits here until the target that has it is done.
@@ -890,5 +1123,75 @@ mod tests {
         assert_eq!(unique_name(&mut used, &target("webkit"), &viewport), "webkit-390x844");
         assert_eq!(unique_name(&mut used, &target("webkit"), &viewport), "webkit-390x844-2");
         assert_eq!(unique_name(&mut used, &target("../evil"), &viewport), "___evil-390x844");
+    }
+
+    #[test]
+    fn internal_error_text_is_bounded_to_200_chars_plus_prefix() {
+        let text = internal_error_text(&"é".repeat(5000));
+        assert_eq!(text.chars().count(), "internal error: ".len() + 200);
+    }
+
+    #[test]
+    fn a_cancel_that_is_already_set_explains_any_error() {
+        let cancel = AtomicBool::new(true);
+        let died = EngineError::from(DriverError::new(
+            ErrorKind::Transport,
+            "driver exited while handling page.scroll",
+        ));
+        assert!(stopped_by_cancel(&died, &cancel, Duration::ZERO));
+        let page = EngineError::from(DriverError::new(ErrorKind::NavigationFailed, "net::ERR_FAILED"));
+        assert!(stopped_by_cancel(&page, &cancel, Duration::ZERO));
+    }
+
+    #[test]
+    fn a_cancel_that_arrives_just_after_the_driver_died_still_counts() {
+        let cancel = AtomicBool::new(false);
+        let died = EngineError::from(DriverError::new(ErrorKind::Transport, "driver exited"));
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(80));
+                cancel.store(true, Ordering::SeqCst);
+            });
+            assert!(stopped_by_cancel(&died, &cancel, Duration::from_millis(1500)));
+        });
+    }
+
+    #[test]
+    fn a_real_failure_without_cancel_stays_failed() {
+        let cancel = AtomicBool::new(false);
+        let died = EngineError::from(DriverError::new(ErrorKind::Transport, "driver exited"));
+        assert!(!stopped_by_cancel(&died, &cancel, Duration::from_millis(30)));
+        // Errors about the page are not waited for at all.
+        let page = EngineError::from(DriverError::new(ErrorKind::NavigationFailed, "net::ERR_FAILED"));
+        let started = Instant::now();
+        assert!(!stopped_by_cancel(&page, &cancel, Duration::from_secs(5)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!stopped_by_cancel(
+            &EngineError::invalid("bad"),
+            &cancel,
+            Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn a_stopped_run_whose_targets_all_completed_is_completed() {
+        let targets = [summary_with(RunStatus::Completed), summary_with(RunStatus::Completed)];
+        assert_eq!(roll_up_status(&targets), RunStatus::Completed);
+    }
+
+    #[test]
+    fn abort_is_closed_only_once_the_run_folder_is() {
+        let abort = Abort::new();
+        assert!(!abort.is_requested());
+        abort.request();
+        assert!(abort.is_requested());
+        assert!(!abort.wait_closed(Duration::from_millis(30)));
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(30));
+                abort.close();
+            });
+            assert!(abort.wait_closed(Duration::from_secs(5)));
+        });
     }
 }

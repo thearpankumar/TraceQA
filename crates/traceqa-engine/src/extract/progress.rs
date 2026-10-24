@@ -12,6 +12,8 @@ use traceqa_recorder::RunWriter;
 pub(crate) struct Sink<'a> {
     pub writer: RunWriter,
     pub listener: &'a mut (dyn FnMut(&Event) + Send),
+    /// Set once an abort has written the final state: nothing may be added after `run.finished`.
+    pub sealed: bool,
 }
 
 /// Records events in the run folder and passes them to whoever is listening live. Targets
@@ -26,6 +28,9 @@ impl Progress<'_, '_> {
     pub fn emit(&self, kind: &str, target: Option<&str>, message: String, data: Value) {
         let mut guard = self.sink.lock_ok();
         let sink = &mut *guard;
+        if sink.sealed {
+            return;
+        }
         match sink.writer.event(kind, target, message, data) {
             Ok(event) => (sink.listener)(&event),
             Err(error) => eprintln!("traceqa: could not write events.jsonl: {error}"),
