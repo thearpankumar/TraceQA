@@ -789,6 +789,113 @@ fn get_crop_still_serves_a_normal_crop() {
     fs::remove_dir_all(runs).unwrap();
 }
 
+/// Both spellings of a path: as written, and as it appears inside JSON text.
+fn spellings(path: &Path) -> [String; 2] {
+    let plain = path.to_str().unwrap().to_string();
+    let json = serde_json::to_string(&plain).unwrap();
+    [plain, json[1..json.len() - 1].to_string()]
+}
+
+fn assert_no_path(label: &str, text: &str, paths: &[&Path]) {
+    for path in paths {
+        for spelling in spellings(path) {
+            assert!(!text.contains(&spelling), "{label} shows {spelling}: {text}");
+        }
+    }
+}
+
+#[test]
+fn list_runs_has_no_runs_dir_key() {
+    let runs = runs_folder("no-runs-dir");
+    let mut host = Host::start(runs.clone());
+    let listed = text_of(&host.call("list_runs", json!({})));
+    assert!(listed.get("runs_dir").is_none(), "{listed}");
+    let run = &listed["runs"][0];
+    for key in ["run_id", "url", "status", "started_at", "targets"] {
+        assert!(run.get(key).is_some(), "{key} is missing: {run}");
+    }
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn no_tool_reply_contains_the_runs_folder_path() {
+    let runs = runs_folder("no-paths");
+    // A second run with a damaged run.json, and a third that has no picture file.
+    fs::create_dir_all(runs.join("r_damaged")).unwrap();
+    fs::write(runs.join("r_damaged").join("run.json"), "{ not json").unwrap();
+    let mut host = Host::start(runs.clone());
+    let temp = std::env::temp_dir();
+    let paths: [&Path; 2] = [&runs, &temp];
+    let calls = [
+        ("list_runs", json!({})),
+        ("get_components", json!({ "run_id": RUN_ID })),
+        ("get_components", json!({ "run_id": "r_missing" })),
+        ("get_components", json!({ "run_id": "r_damaged" })),
+        ("get_components", json!({ "run_id": RUN_ID, "target": "webkit-1x1" })),
+        ("get_components", json!({ "run_id": RUN_ID, "component_id": "c_nope" })),
+        ("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT })),
+        ("get_crop", json!({ "run_id": "r_missing", "component_id": COMPONENT })),
+        (
+            "extract",
+            json!({ "url": "https://x.test/", "storage_state": "a.json" }),
+        ),
+        ("extract", json!({ "url": "https://x.test/" })),
+    ];
+    for (tool, arguments) in calls {
+        let answer = host.call(tool, arguments.clone());
+        assert_no_path(&format!("{tool} {arguments}"), &answer.to_string(), &paths);
+    }
+    // The picture file is gone, and the target's components file cannot be read.
+    fs::remove_file(crop_path(&runs)).unwrap();
+    let gone = host.call("get_crop", json!({ "run_id": RUN_ID, "component_id": COMPONENT }));
+    assert_eq!(gone["isError"], true);
+    assert_no_path("get_crop gone", &gone.to_string(), &paths);
+    change_components(&runs, |file| *file = json!("not a components file"));
+    let unreadable = host.call("get_components", json!({ "run_id": RUN_ID }));
+    assert_eq!(unreadable["isError"], true);
+    assert_no_path("get_components unreadable", &unreadable.to_string(), &paths);
+    let notes = Value::Array(host.notes.clone()).to_string();
+    assert_no_path("progress notifications", &notes, &paths);
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn an_engine_error_that_names_a_folder_is_cleaned_before_the_ai_sees_it() {
+    // The runs folder cannot be made, because a file stands where its parent should be.
+    let base = std::env::temp_dir().join(format!("traceqa-mcp-blocked-{}", process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+    fs::write(base.join("file"), "x").unwrap();
+    let runs = base.join("file").join("runs");
+    let mut host = Host::start(runs.clone());
+    let answer = host.call("extract", json!({ "url": "https://x.test/" }));
+    assert_eq!(answer["isError"], true, "{answer}");
+    assert_no_path("extract", &answer.to_string(), &[&runs, &base]);
+    host.stop();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn public_message_hides_absolute_paths() {
+    use crate::tools::public_message;
+    let runs = Path::new("C:\\Users\\Some One\\runs");
+    let text = public_message(
+        "cannot create C:\\Users\\Some One\\runs\\r_1: denied; also /home/x/y.json and D:/z",
+        runs,
+    );
+    assert!(
+        !text.contains("Some One") && !text.contains("/home") && !text.contains("D:/z"),
+        "{text}"
+    );
+    assert!(text.contains("denied"));
+    assert_eq!(
+        public_message("no run r_1. list_runs shows the runs.", runs),
+        "no run r_1. list_runs shows the runs."
+    );
+}
+
 #[test]
 fn get_crop_refuses_non_png_names() {
     let runs = runs_folder("crop-ext");
