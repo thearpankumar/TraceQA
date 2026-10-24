@@ -393,6 +393,10 @@ Safari, only the cookies and stored values of the site the window ends on are
 saved. `--headless` saves as soon as the page has loaded, for scripts and tests
 where the page signs in by itself.
 
+Ctrl-C (Ctrl-Break on Windows) while the command waits stops it with exit code
+130 and removes the hidden temporary file, so nothing is saved; an existing FILE
+is left as it was.
+
 How FILE is written:
 
 - `--save` is checked before the browser opens. If FILE is a directory, or its
