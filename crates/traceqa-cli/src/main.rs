@@ -103,7 +103,8 @@ struct ExtractArgs {
     /// Page to read.
     url: String,
     /// Browsers to run in, comma separated. Use cdp=ENDPOINT to attach to a running browser,
-    /// or webdriver=URL for a WebDriver server or cloud grid.
+    /// or webdriver=URL for a WebDriver server or cloud grid. Naming a browser twice runs it
+    /// twice; the second folder ends in -2. Names the default drivers do not open are refused.
     #[arg(long, value_delimiter = ',', default_value = "chromium", value_parser = parse_browser)]
     browser: Vec<BrowserTarget>,
     /// Viewport sizes as WIDTHxHEIGHT, comma separated.
@@ -125,20 +126,21 @@ struct ExtractArgs {
     /// How many screens to scroll through on a long page. 0 reads the page without scrolling.
     #[arg(long, value_name = "N")]
     max_scroll_steps: Option<u64>,
-    /// Time allowed for a page to load, in milliseconds.
-    #[arg(long, value_name = "MS")]
+    /// Time allowed for a page to load, in milliseconds (at least 1).
+    #[arg(long, value_name = "MS", value_parser = clap::value_parser!(u64).range(1..))]
     timeout_ms: Option<u64>,
     /// Extra time to wait after the page has loaded, for pages with a timed intro or splash screen.
     #[arg(long, value_name = "MS")]
     settle_ms: Option<u64>,
     /// How many browsers to run at the same time. 1 runs them one after another.
     /// Default: chosen from the machine's cores, at most 4.
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(1..))]
     parallel: Option<u64>,
     /// Also print where each browser's time went.
     #[arg(long)]
     timings: bool,
-    /// Print the run manifest as JSON instead of a table.
+    /// Print the run manifest as JSON instead of a table. Standard output then holds that one
+    /// document and nothing else; progress and the run folder go to standard error.
     #[arg(long)]
     json: bool,
     /// Start every browser with the cookies and stored values in FILE, for pages behind a
@@ -233,6 +235,16 @@ fn extract(args: ExtractArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // With the default drivers the browser names are known, so a typo fails here, before a run
+    // folder exists. A driver the person configures may open other names.
+    let custom_drivers = !args.drivers.drivers.is_empty()
+        || std::env::var(traceqa_engine::run::DRIVERS_ENV).is_ok_and(|value| !value.trim().is_empty());
+    if !custom_drivers {
+        if let Some(error) = targets.iter().find_map(|target| target.check_known().err()) {
+            eprintln!("traceqa: {error}");
+            return ExitCode::from(2);
+        }
+    }
     let request = RunStartParams {
         feature: "extract".to_string(),
         url: args.url,
@@ -277,6 +289,7 @@ fn extract(args: ExtractArgs) -> ExitCode {
             "{}",
             serde_json::to_string_pretty(&manifest).expect("spec types always serialise")
         );
+        eprintln!("Run folder: {}", folder.display());
     } else {
         print_summary(&manifest);
         if args.timings {

@@ -23,6 +23,23 @@ pub mod contracts {
     include!(concat!(env!("OUT_DIR"), "/spec_meta.rs"));
 }
 
+/// The browser names the default drivers open (Playwright: the first five; the WebDriver
+/// driver: `safari` and `webdriver`). A driver the person configures may open others.
+pub const KNOWN_BROWSERS: [&str; 8] = [
+    "chromium",
+    "chrome",
+    "msedge",
+    "firefox",
+    "webkit",
+    "safari",
+    "cdp",
+    "webdriver",
+];
+
+/// The largest width or height a viewport may have. Larger pages are not a viewport any
+/// browser can usefully show, and a huge one only makes a run wait for its timeout.
+pub const MAX_VIEWPORT_SIDE: u64 = 10_000;
+
 impl types::BrowserTarget {
     /// A target that only names its browser.
     pub fn named(browser: impl Into<String>) -> Self {
@@ -53,6 +70,16 @@ impl types::BrowserTarget {
         }
         Ok(target)
     }
+
+    /// Fails when the browser is not one the default drivers open. Only for front ends that
+    /// know no custom driver is in use.
+    pub fn check_known(&self) -> Result<(), ParseError> {
+        if KNOWN_BROWSERS.contains(&self.browser.as_str()) {
+            Ok(())
+        } else {
+            Err(ParseError::UnknownBrowser(self.browser.clone()))
+        }
+    }
 }
 
 impl types::Viewport {
@@ -62,6 +89,9 @@ impl types::Viewport {
             .split_once('x')
             .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
         match size {
+            Some((width, height)) if width > MAX_VIEWPORT_SIDE || height > MAX_VIEWPORT_SIDE => {
+                Err(ParseError::ViewportSize(text.to_string()))
+            }
             Some((width, height)) if width > 0 && height > 0 => Ok(Self { height, width }),
             _ => Err(ParseError::Viewport(text.to_string())),
         }
@@ -84,6 +114,31 @@ mod tests {
         for bad in ["1280", "0x800", "ax b", "1280x", ""] {
             assert!(Viewport::parse(bad).is_err(), "{bad:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn viewport_rejects_zero_and_huge_sides() {
+        assert!(Viewport::parse("10000x10000").is_ok());
+        for bad in ["0x0", "99999x99999", "10001x800", "800x10001"] {
+            assert!(Viewport::parse(bad).is_err(), "{bad:?} should be rejected");
+        }
+        let message = Viewport::parse("99999x99999").unwrap_err().to_string();
+        assert!(
+            message.starts_with("viewport sides must be between 1 and 10000"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn browser_known_list() {
+        for name in super::KNOWN_BROWSERS {
+            assert!(BrowserTarget::named(name).check_known().is_ok(), "{name}");
+        }
+        let error = BrowserTarget::named("netscape").check_known().unwrap_err().to_string();
+        assert!(
+            error.starts_with("unknown browser \"netscape\". Known: chromium,"),
+            "{error}"
+        );
     }
 
     #[test]

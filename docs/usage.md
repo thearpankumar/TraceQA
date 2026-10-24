@@ -89,23 +89,32 @@ traceqa extract [OPTIONS] <URL>
 | Option | Default | Meaning |
 |---|---|---|
 | `--browser LIST` | `chromium` | Browsers to run in, comma separated. See [Browser values](#browser-values). |
-| `--viewport LIST` | `1280x800` | Viewport sizes as `WIDTHxHEIGHT`, comma separated. |
+| `--viewport LIST` | `1280x800` | Viewport sizes as `WIDTHxHEIGHT`, comma separated. Each side is 1 to 10000. |
 | `--out DIR` | `runs` | Where the run folder is created. |
 | `--headed` | off | Show the browser windows. |
 | `--crops` | off | Also save pictures: a screenshot of the page and one crop per component. Slower on long pages: see [Speed](#speed). |
 | `--visible-only` | off | Leave out elements that are not visible. |
 | `--max-scroll-steps N` | `50` | How many screens to scroll through on a long page. `0` reads the page without scrolling. |
-| `--timeout-ms MS` | `30000` | Time allowed for a page to load. |
+| `--timeout-ms MS` | `30000` | Time allowed for a page to load. At least 1. |
 | `--settle-ms MS` | `0` | Extra time to wait after the page has loaded, before reading it. For pages with a timed intro or splash screen. |
-| `--parallel N` | chosen from the machine | How many browsers run at the same time. `1` runs them one after another. The default is half the machine's cores, at most 4. |
+| `--parallel N` | chosen from the machine | How many browsers run at the same time. `1` runs them one after another. The default is half the machine's cores, at most 4. At least 1. |
 | `--timings` | off | Also print where each browser's time went. |
-| `--json` | off | Print the run manifest as JSON instead of a table. |
+| `--json` | off | Print the run manifest as JSON instead of a table. Standard output holds that one document and nothing else; progress and the `Run folder:` line go to standard error. |
 | `--storage-state FILE` | none | Start every browser with the cookies and stored values in FILE, for pages behind a sign-in. See [Pages behind a sign-in](#pages-behind-a-sign-in). |
 | `--driver COMMAND` | see above | Command that starts a browser driver. |
 
 Every browser is run at every viewport, several at a time. Progress is written
 to standard error, each line marked with the browser it is about, and the
 result to standard output.
+
+Options are checked before anything runs: a zero `--timeout-ms` or
+`--parallel`, a viewport side outside 1 to 10000, or a browser name that the
+default drivers do not open (see below) exits with code 2 and leaves no run
+folder. When you configure your own driver (`--driver` or `TRACEQA_DRIVERS`),
+browser names are not checked up front, because that driver may open others..
+
+Naming a browser twice (`--browser chromium,chromium`) runs it twice. The
+second target's folder ends in `-2` (`chromium-1280x800-2`).
 
 ### Browser values
 
