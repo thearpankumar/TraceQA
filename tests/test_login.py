@@ -8,10 +8,12 @@ signs in just to lose the result. Usage mistakes exit with 2, as `extract` does.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,17 @@ BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
 )
 NO_DRIVER = "traceqa-no-such-driver"
+
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "tests" / "support" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # a dataclass in the module looks itself up here
+    spec.loader.exec_module(module)
+    return module
+
+
+interrupt = _load("interrupt")
 
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
 
@@ -94,3 +107,17 @@ def test_headless_login_writes_a_parseable_state_only_the_owner_can_read(shop_ur
     if os.name != "nt":
         assert stat.S_IMODE(path.stat().st_mode) == 0o600, "an existing file must end up owner-only too"
     assert [p.name for p in tmp_path.iterdir()] == ["state.json"], "no temporary file is left"
+
+
+def test_ctrl_c_during_login_removes_the_temporary_file(trouble: str, tmp_path: Path) -> None:
+    # The page never finishes loading, so the login waits for it: the temporary file exists the
+    # whole time, and an interrupt must not leave it behind (nor create the destination).
+    folder = tmp_path / "saved"
+    folder.mkdir()
+    command = [str(BINARY), "login", trouble + "hang", "--save", str(folder / "s.json"), "--headless"]
+    result = interrupt.run_interrupted(command, ready={"glob": str(folder / ".s.json.tmp-*")}, delay=0.5)
+    assert result.ready, f"the temporary file never appeared:\n{result.stderr}"
+    assert result.returncode == 130, result.stderr
+    assert "nothing was saved" in result.stderr
+    assert list(folder.iterdir()) == [], "neither the destination nor a temporary file may remain"
+    assert result.left == [], f"left processes running: {result.left}"

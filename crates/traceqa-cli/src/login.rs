@@ -17,10 +17,14 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use clap::Args;
 use traceqa_engine::driver::Drivers;
 use traceqa_engine::driver_commands;
+use traceqa_protocol::sync::LockExt;
 use traceqa_protocol::types::{BrowserTarget, PageGotoParams, SessionOpenParams, StorageState, Viewport, WaitUntil};
 
 #[derive(Args)]
@@ -67,6 +71,9 @@ pub fn login(args: &LoginArgs) -> ExitCode {
             ExitCode::from(2)
         }
         Err(LoginError::Failed(why)) => {
+            if interrupt_may_be_arriving() {
+                return ExitCode::from(INTERRUPT_EXIT);
+            }
             eprintln!("traceqa login: {why}");
             ExitCode::FAILURE
         }
@@ -77,6 +84,7 @@ fn try_login(args: &LoginArgs) -> Result<String, LoginError> {
     check_address(&args.url)?;
     // Before a browser opens: a file that cannot be written is found now, not after signing in.
     let pending = Pending::prepare(&args.save)?;
+    remove_pending_on_interrupt();
 
     let mut drivers = Drivers::new(driver_commands(&args.drivers));
     let driver = drivers.for_browser(&args.browser.browser).map_err(|e| e.to_string())?;
@@ -184,6 +192,7 @@ impl Pending {
         }
         let temp = folder.join(format!(".{}.tmp-{}", name.to_string_lossy(), std::process::id()));
         let file = create_private(&temp)?;
+        PENDING.lock_ok().push(temp.clone());
         Ok(Pending {
             temp,
             destination: destination.to_path_buf(),
@@ -197,6 +206,8 @@ impl Pending {
         let text = serde_json::to_string_pretty(state).expect("spec types always serialise");
         let mut file = self.file.take().expect("a pending file is committed once");
         let shown = self.destination.display();
+        // Held from the first write to the move, so an interrupt cannot delete the file in between.
+        let mut pending = PENDING.lock_ok();
         file.write_all(text.as_bytes())
             .and_then(|()| file.write_all(b"\n"))
             .and_then(|()| file.flush())
@@ -205,7 +216,8 @@ impl Pending {
         // Closed before the move: Windows will not move an open file in every case.
         drop(file);
         fs::rename(&self.temp, &self.destination).map_err(|e| format!("could not write {shown}: {e}"))?;
-        // Nothing left to remove: Drop only cleans up a file that was not moved.
+        // Nothing left to remove: Drop and the interrupt handler only clean up a file that was not moved.
+        pending.retain(|path| *path != self.temp);
         self.temp = PathBuf::new();
         Ok(())
     }
@@ -215,9 +227,65 @@ impl Drop for Pending {
     fn drop(&mut self) {
         self.file.take();
         if !self.temp.as_os_str().is_empty() {
+            let mut pending = PENDING.lock_ok();
             let _ = fs::remove_file(&self.temp);
+            pending.retain(|path| *path != self.temp);
         }
     }
+}
+
+/// The temporary files that exist right now, so an interrupt can remove them: Ctrl-C ends the
+/// process without running `Drop`, and the file is owner-only but still a stray secret holder.
+/// More than one only in tests; a login has a single one.
+static PENDING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Set when Ctrl-C arrives, so a login that fails because the driver died with it reports the
+/// interrupt (exit 130) and not the driver's error.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Exit code of a login stopped with Ctrl-C, as shells report an interrupted command.
+const INTERRUPT_EXIT: u8 = 130;
+
+/// Removes the temporary files that were not moved into place. Returns how many it removed.
+fn remove_pending() -> usize {
+    let mut pending = PENDING.lock_ok();
+    let removed = pending.len();
+    for path in pending.drain(..) {
+        let _ = fs::remove_file(path);
+    }
+    removed
+}
+
+/// On Ctrl-C (or Ctrl-Break) removes the temporary file and exits with 130. The handler runs on
+/// a thread of its own, so removing a file there is safe.
+fn remove_pending_on_interrupt() {
+    let handler = || {
+        INTERRUPTED.store(true, Ordering::SeqCst);
+        if remove_pending() > 0 {
+            eprintln!("\ntraceqa login: interrupted; nothing was saved");
+        } else {
+            eprintln!("\ntraceqa login: interrupted");
+        }
+        std::process::exit(i32::from(INTERRUPT_EXIT));
+    };
+    if let Err(error) = ctrlc::set_handler(handler) {
+        eprintln!("traceqa login: Ctrl-C will not clean up the temporary file: {error}");
+    }
+}
+
+/// A browser window shares the console with this command, so Ctrl-C can end the driver a moment
+/// before it reaches the handler. Gives the handler that moment before an error is reported.
+fn interrupt_may_be_arriving() -> bool {
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < deadline {
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            // The handler is ending the process.
+            std::thread::sleep(Duration::from_secs(5));
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    INTERRUPTED.load(Ordering::SeqCst)
 }
 
 /// Makes a new file that only its owner can open, before any secret is written to it.
@@ -394,6 +462,24 @@ mod tests {
         fs::create_dir(&path).unwrap();
         assert!(pending.commit(&state()).is_err());
         assert_eq!(dir.names(), ["state.json"], "only the directory is left");
+    }
+
+    fn is_pending(path: &Path) -> bool {
+        PENDING
+            .lock_ok()
+            .iter()
+            .any(|pending| pending.starts_with(path.parent().unwrap()))
+    }
+
+    #[test]
+    fn a_committed_file_is_no_longer_pending_so_the_handler_cannot_remove_it() {
+        let dir = Scratch::new();
+        let path = dir.path("state.json");
+        let pending = Pending::prepare(&path).unwrap();
+        assert!(is_pending(&path), "an interrupt now would remove the temporary file");
+        pending.commit(&state()).unwrap();
+        assert!(!is_pending(&path), "nothing left for the handler to remove");
+        assert_eq!(dir.names(), ["state.json"]);
     }
 
     #[test]
