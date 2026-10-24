@@ -10,11 +10,14 @@ Developer settings, and runs only when TRACEQA_TEST_SAFARI=1.
 
 from __future__ import annotations
 
+import functools
+import http.server
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from collections.abc import Iterator
@@ -180,3 +183,41 @@ def test_refuses_what_it_cannot_do(driver: DriverClient) -> None:
             driver.call(method, params)
         assert failure.value.kind == kind, method
     assert driver.call("driver.hello", HELLO)["driverName"] == "traceqa-driver-webdriver"
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.fixture(scope="module")
+def case_pages() -> Iterator[str]:
+    """fixtures/collector-cases/ on a free port."""
+    handler = functools.partial(_QuietHandler, directory=str(ROOT / "fixtures" / "collector-cases"))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/"
+    server.shutdown()
+
+
+def test_a_hostile_page_makes_the_collector_report_tampering(
+    driver: DriverClient, chrome_target: dict[str, Any], case_pages: str
+) -> None:
+    # WebDriver cannot run a script before the page's, so the collector cannot get the originals.
+    # The call must still return, with a warning, and not fail the frame.
+    driver.call("driver.hello", HELLO)
+    session = driver.call("session.open", {"target": chrome_target, "viewport": VIEWPORT})
+    session_id = session["sessionId"]
+    driver.call("page.goto", {"sessionId": session_id, "url": case_pages + "hostile.html", "waitUntil": "settled"})
+
+    main = models.CollectorResult.model_validate(collect(driver, session_id)["main"].value)
+    tampered = [warning for warning in main.warnings if warning.code == "collector_tampered"]
+    assert len(tampered) == 1
+    assert "String.prototype.trim" in tampered[0].message
+    assert "could not supply the originals" in tampered[0].message
+
+    # A normal page in the same browser raises no such warning.
+    driver.call("page.goto", {"sessionId": session_id, "url": case_pages + "names.html", "waitUntil": "settled"})
+    clean = models.CollectorResult.model_validate(collect(driver, session_id)["main"].value)
+    assert [warning.code for warning in clean.warnings if warning.code == "collector_tampered"] == []
+    driver.call("session.close", {"sessionId": session_id})

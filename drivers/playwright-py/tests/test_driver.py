@@ -149,3 +149,56 @@ def test_refuses_what_it_cannot_do(driver: DriverClient) -> None:
         assert failure.value.kind == kind, method
     # The driver is still alive and answering after six failures.
     assert driver.call("driver.hello", HELLO)["driverName"] == "traceqa-driver-playwright"
+
+
+# What a page's script does to try to take the original built-ins away from the collector. Runs in
+# the page's world after the driver's init script, as any page script would.
+ATTACK = """() => {
+  const outcome = {};
+  try { Object.defineProperty(window, "__traceqa_pristine__", { value: () => ({}) }); outcome.define = "allowed"; }
+  catch (e) { outcome.define = "refused"; }
+  outcome.delete = delete window.__traceqa_pristine__ ? "allowed" : "refused";
+  try { window.__traceqa_pristine__ = () => ({}); } catch (e) { /* strict mode would throw */ }
+  outcome.kept = typeof window.__traceqa_pristine__ === "function" && typeof window.__traceqa_pristine__().getAttribute === "function";
+  outcome.enumerable = Object.keys(window).includes("__traceqa_pristine__");
+  return outcome;
+}"""
+
+# Then it replaces functions the collector would otherwise call, with ones that count their use.
+# (Ones that throw would break Playwright's own evaluate as well.)
+SPY = """() => {
+  window.__hits = { call: 0, push: 0, trim: 0 };
+  const call = Function.prototype.call, push = Array.prototype.push, trim = String.prototype.trim;
+  Function.prototype.call = function (...args) { window.__hits.call++; return call.apply(this, args); };
+  Array.prototype.push = function (...args) { window.__hits.push++; return push.apply(this, args); };
+  String.prototype.trim = function () { window.__hits.trim++; return trim.call(this); };
+  return true;
+}"""
+
+
+@pytest.mark.parametrize("browser", ["chromium", "firefox", "webkit"])
+def test_the_pristine_table_cannot_be_replaced_or_deleted_by_the_page(
+    driver: DriverClient, shop_url: str, browser: str
+) -> None:
+    driver.call("driver.hello", HELLO)
+    session = driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
+    session_id = session["sessionId"]
+    driver.call("page.goto", {"sessionId": session_id, "url": shop_url, "waitUntil": "settled"})
+
+    result = driver.call("page.eval", {"sessionId": session_id, "script": ATTACK, "arg": {}})["results"][0]
+    outcome = result.get("value", result)
+    assert outcome == {"define": "refused", "delete": "refused", "kept": True, "enumerable": False}
+    driver.call("page.eval", {"sessionId": session_id, "script": SPY, "arg": {}})
+
+    # The collector still reads the page, and says the page replaced built-ins.
+    frames = collect(driver, session_id)
+    main = models.CollectorResult.model_validate(frames["main"].value)
+    assert names(main, "button").count("Add to cart") == 12
+    codes = [warning.code for warning in main.warnings]
+    assert codes.count("collector_tampered") == 1
+    # ... and it read the page without calling the replaced String.prototype.trim, which the shop's own
+    # scripts and Playwright never call but the collector used to. (call and push are counted for the
+    # record only: the page's scripts and Playwright's evaluate use them too.)
+    hits = driver.call("page.eval", {"sessionId": session_id, "script": "() => window.__hits", "arg": {}})
+    assert hits["results"][0]["value"]["trim"] == 0
+    driver.call("session.close", {"sessionId": session_id})
