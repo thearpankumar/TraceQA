@@ -77,7 +77,22 @@ mod tests {
         let env = env_dir(Path::new("home"));
         let expected = if cfg!(windows) { "Scripts" } else { "bin" };
         assert_eq!(bin_dir(&env), Path::new("home").join("env").join(expected));
-        assert_eq!(program("traceqa-driver-playwright").ends_with(".exe"), cfg!(windows));
+        assert_eq!(has_exe_extension(&program("traceqa-driver-playwright")), cfg!(windows));
+    }
+
+    fn has_exe_extension(file: &str) -> bool {
+        Path::new(file)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+    }
+
+    #[test]
+    fn exe_extension_check_is_case_insensitive() {
+        assert!(has_exe_extension("traceqa.exe"));
+        assert!(has_exe_extension("TRACEQA.EXE"));
+        assert!(has_exe_extension("tool.Exe"));
+        assert!(!has_exe_extension("traceqa.exe.txt"));
+        assert!(!has_exe_extension("exe"));
     }
 
     #[test]

@@ -30,6 +30,7 @@ pub mod run;
 pub mod serve;
 pub mod url_policy;
 mod url_safety;
+mod util;
 
 pub use run::{driver_commands, EngineError, Execution, Run};
 pub use url_policy::UrlPolicy;

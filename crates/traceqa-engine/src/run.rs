@@ -517,7 +517,7 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
             progress.with_writer(|writer| writer.write_components(name, &file))?;
             Ok((file, browser, timings))
         });
-    summary.duration_ms = started.elapsed().as_millis() as u64;
+    summary.duration_ms = crate::util::ms(started.elapsed());
 
     match outcome {
         Ok((file, browser, timings)) => {
