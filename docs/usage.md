@@ -1351,7 +1351,7 @@ Leaving a `with` block calls it.
 
 ## TypeScript SDK
 
-Node 22 or later. The package is ESM only and has no runtime dependencies. See
+Node 24 or later. The package is ESM only and has no runtime dependencies. See
 [its README](../sdks/typescript/README.md#esm-only) for loading it from CommonJS.
 
 ```ts

@@ -27,8 +27,8 @@ def _package() -> dict:
     return json.loads((TS / "package.json").read_text(encoding="utf-8"))
 
 
-def test_engines_node_is_at_least_22() -> None:
-    assert _package()["engines"]["node"] == ">=22"
+def test_engines_node_is_at_least_24() -> None:
+    assert _package()["engines"]["node"] == ">=24"
 
 
 def test_package_is_an_es_module() -> None:

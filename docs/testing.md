@@ -60,7 +60,7 @@ uv run pytest tests/test_codegen.py
 `uv.lock`, so both languages use the browsers `uv run playwright install chromium firefox webkit`
 put in the cache; a test fails when the two versions differ, so update them together (change the
 version in `package.json`, run `npm install --package-lock-only` there, and `uv lock`). The test
-runs `npm ci` in that folder when `node_modules` is missing; CI does it in its own step. Node 22.13
+runs `npm ci` in that folder when `node_modules` is missing; CI does it in its own step. Node 24
 or newer is needed (`module.stripTypeScriptTypes`, used by `record.mjs`, which loads a generated
 page object with a stand-in `page` to prove that hostile page text stays inside string literals).
 

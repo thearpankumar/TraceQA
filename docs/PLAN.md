@@ -23,7 +23,7 @@ See [architecture.md](architecture.md) for how the parts fit together and
 |---|---|
 | Command line | Built: `traceqa extract`. |
 | Python SDK | Built: `traceqa.extract`. |
-| TypeScript SDK | Built: `extract` and `Engine`, Node 18 or later, no runtime dependencies. |
+| TypeScript SDK | Built: `extract` and `Engine`, Node 24 or later, no runtime dependencies. |
 | Any other language | The protocol is built (`traceqa serve`). [clients.md](clients.md) says how to write a client, and the recorded transcripts test it. |
 | Releases | Built: pushing a tag such as `v0.1.0` publishes binaries for macOS, Windows and Linux. See [releasing.md](releasing.md). |
 | CI action | Not started. The command line already works in CI through its exit code and `--json`. |
