@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CARGO = ROOT / "Cargo.toml"
 PYPROJECTS = [
     ROOT / "python" / "traceqa-protocol" / "pyproject.toml",
-    ROOT / "drivers" / "playwright-py" / "pyproject.toml",
-    ROOT / "drivers" / "webdriver-py" / "pyproject.toml",
+    ROOT / "web-drivers" / "playwright-py" / "pyproject.toml",
+    ROOT / "web-drivers" / "webdriver-py" / "pyproject.toml",
     ROOT / "sdks" / "python" / "pyproject.toml",
 ]
 PACKAGE_JSON = ROOT / "sdks" / "typescript" / "package.json"
@@ -78,7 +78,7 @@ def driver_version_problems(root: Path) -> list[str]:
     """A driver reports the version of its installed package, so none writes one down."""
     literal = re.compile(r"""^\s*VERSION\s*(?::[^=]+)?=\s*["']""", re.M)
     errors = []
-    for path in sorted(root.glob("drivers/*/src/**/driver.py")):
+    for path in sorted(root.glob("web-drivers/*/src/**/driver.py")):
         if literal.search(path.read_text(encoding="utf-8")):
             name = path.relative_to(root).as_posix()
             errors.append(f"{name} writes its VERSION down: read it with importlib.metadata.version instead")

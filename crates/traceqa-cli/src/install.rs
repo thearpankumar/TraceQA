@@ -19,8 +19,8 @@ use traceqa_protocol::types::{BrowserTarget, SessionOpenParams, Viewport};
 /// The Python packages that make up the drivers, and where they sit in the repository.
 const PACKAGES: [(&str, &str); 3] = [
     ("traceqa-protocol", "python/traceqa-protocol"),
-    ("traceqa-driver-playwright", "drivers/playwright-py"),
-    ("traceqa-driver-webdriver", "drivers/webdriver-py"),
+    ("traceqa-driver-playwright", "web-drivers/playwright-py"),
+    ("traceqa-driver-webdriver", "web-drivers/webdriver-py"),
 ];
 
 /// Browsers Playwright downloads. Safari comes with macOS and needs nothing.
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(
             local[1],
             Path::new("/src/traceqa")
-                .join("drivers/playwright-py")
+                .join("web-drivers/playwright-py")
                 .display()
                 .to_string()
         );

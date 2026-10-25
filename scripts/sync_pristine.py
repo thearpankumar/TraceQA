@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PRISTINE = ROOT / "collector" / "pristine.js"
 COLLECTOR = ROOT / "collector" / "collector.js"
-PLAYWRIGHT_DRIVER = ROOT / "drivers" / "playwright-py" / "src" / "traceqa_driver_playwright" / "driver.py"
+PLAYWRIGHT_DRIVER = ROOT / "web-drivers" / "playwright-py" / "src" / "traceqa_driver_playwright" / "driver.py"
 
 IN_COLLECTOR = re.compile(r"(  // BEGIN pristine\.js\n  var capture = )(.*?)(;\n  // END pristine\.js)", re.DOTALL)
 IN_DRIVER = re.compile(r'(# BEGIN pristine\.js\nPRISTINE_JS = r"""\n)(.*?)(\n"""\n# END pristine\.js)', re.DOTALL)

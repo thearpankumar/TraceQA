@@ -35,7 +35,7 @@ def repository_copy(tmp_path: Path) -> Path:
         "sdks/typescript/package.json",
         *(str(path.relative_to(ROOT)) for path in check_version.PYPROJECTS),
         *(str(path.relative_to(ROOT)) for path in ROOT.glob("crates/*/Cargo.toml")),
-        *(str(path.relative_to(ROOT)) for path in ROOT.glob("drivers/*/src/*/driver.py")),
+        *(str(path.relative_to(ROOT)) for path in ROOT.glob("web-drivers/*/src/*/driver.py")),
     ]
     for name in wanted:
         target = tmp_path / name
@@ -58,10 +58,10 @@ def test_the_copy_is_clean(tmp_path: Path) -> None:
 def test_a_drifted_protocol_pin_is_reported(tmp_path: Path) -> None:
     root = repository_copy(tmp_path)
     (version,) = set(check_version.versions().values())
-    edit(root, "drivers/webdriver-py/pyproject.toml", f"traceqa-protocol=={version}", "traceqa-protocol==0.0.9")
+    edit(root, "web-drivers/webdriver-py/pyproject.toml", f"traceqa-protocol=={version}", "traceqa-protocol==0.0.9")
     (error,) = check_version.problems(root=root)
     assert "traceqa-protocol==0.0.9" in error
-    assert "drivers/webdriver-py/pyproject.toml" in error
+    assert "web-drivers/webdriver-py/pyproject.toml" in error
 
 
 def test_an_unpinned_protocol_dependency_is_reported(tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ def test_an_unpinned_protocol_dependency_is_reported(tmp_path: Path) -> None:
 
 def test_a_literal_driver_version_is_reported(tmp_path: Path) -> None:
     root = repository_copy(tmp_path)
-    path = root / "drivers" / "playwright-py" / "src" / "traceqa_driver_playwright" / "driver.py"
+    path = root / "web-drivers" / "playwright-py" / "src" / "traceqa_driver_playwright" / "driver.py"
     path.write_text(path.read_text(encoding="utf-8") + '\nVERSION = "0.1.0"\n', encoding="utf-8")
     (error,) = check_version.problems(root=root)
     assert "driver.py" in error
