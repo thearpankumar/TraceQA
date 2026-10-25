@@ -77,7 +77,7 @@ def first_component(value: dict[str, Any]) -> dict[str, Any]:
     return value["components"][0]
 
 
-BREAKS: dict[str, tuple[Callable[[Path], None], str]] = {
+BREAKS: dict[str, tuple[Callable[[Path], object], str]] = {
     "a missing required field": (
         lambda f: edit(f / "run.json", lambda v: v.pop("engineVersion")),
         "not a valid RunManifest",

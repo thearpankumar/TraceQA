@@ -42,6 +42,7 @@ BROWSERS = ["chromium", "firefox", "webkit"] + (["safari"] if os.environ.get("TR
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
 
 spec = importlib.util.spec_from_file_location("expectations", ROOT / "tests" / "support" / "expectations.py")
+assert spec is not None and spec.loader is not None
 expectations = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = expectations
 spec.loader.exec_module(expectations)

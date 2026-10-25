@@ -208,7 +208,8 @@ def _send(process: subprocess.Popen, name: str = "SIGINT", target: str = "group"
             if target == "process":
                 os.kill(process.pid, number)
             else:
-                os.killpg(process.pid, number)
+                # os.killpg exists only off Windows, and the Windows case returned above; pyright checks for Windows.
+                os.killpg(process.pid, number)  # pyright: ignore[reportAttributeAccessIssue]
         except (ProcessLookupError, PermissionError):
             # The command has already exited; macOS answers EPERM when only zombies are left in
             # the group, Linux ESRCH when nothing is.
@@ -243,6 +244,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     )
     root_created = _creation_time(process.pid) if WINDOWS else None  # before the pid can be reused
     if lines:
+        assert process.stdin is not None  # stdin=PIPE above
         for line in lines:
             process.stdin.write(line + "\n")
         process.stdin.flush()
@@ -291,6 +293,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         process.wait()
     if lines:
         with contextlib.suppress(OSError):  # the command is gone, and so is the pipe
+            assert process.stdin is not None
             process.stdin.close()
     for thread in threads:
         thread.join(timeout=10)

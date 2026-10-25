@@ -73,7 +73,8 @@ ignore = [
 [tool.pyright]
 # include = ["python", "web-drivers", "sdks/python"]  # python/ moved into web-drivers/
 # include = ["web-drivers", "sdks/python"]  # the Python SDK was removed
-include = ["web-drivers"]
+# include = ["web-drivers"]  # only web-drivers was checked
+include = ["web-drivers", "page-script", "tests", "scripts", "testbed", "conftest.py"]
 exclude = [
     "**/node_modules",
     "**/.venv",

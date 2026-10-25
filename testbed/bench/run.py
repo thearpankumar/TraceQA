@@ -48,6 +48,8 @@ def find_binary() -> Path:
 
 def start_shop() -> str:
     spec = importlib.util.spec_from_file_location("buggy_shop_serve", SHOP / "serve.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load a module from its path")
     shop = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shop)
     port, _servers = shop.start_on_free_ports()
@@ -130,7 +132,7 @@ def score_target(manifest: dict[str, Any], components_file: dict[str, Any], view
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--browsers", default="chromium,firefox,webkit")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--json", type=Path, help="also write the scores to this file")

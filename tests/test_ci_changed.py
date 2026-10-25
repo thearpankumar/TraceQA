@@ -10,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("ci_changed", ROOT / "scripts" / "ci_changed.py")
+assert _spec is not None and _spec.loader is not None
 ci_changed = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_changed)
 

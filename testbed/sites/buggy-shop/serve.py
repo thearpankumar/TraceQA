@@ -60,7 +60,7 @@ def start_on_free_ports() -> tuple[int, list[FixtureServer]]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--port", type=int, default=4173)
     port = parser.parse_args().port
     if port == 0:

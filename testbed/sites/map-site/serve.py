@@ -28,6 +28,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import cast
 
 HERE = Path(__file__).resolve().parent
 # This file runs as a script and is also loaded by path, so the shared module is found by path too.
@@ -90,14 +91,17 @@ def render(title: str, body: str) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server: Recording
+    @property
+    def fixture(self) -> Recording:
+        # socketserver types `server` as a plain BaseServer; this handler is only ever served by Recording.
+        return cast(Recording, self.server)
 
     def log_message(self, format: str, *args: object) -> None:
         pass
 
     def _record(self) -> str:
-        with self.server.lock:
-            self.server.requests.append((self.command, self.path, time.monotonic()))
+        with self.fixture.lock:
+            self.fixture.requests.append((self.command, self.path, time.monotonic()))
         return self.path.split("?", 1)[0]
 
     def _send(self, status: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
@@ -111,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self._record()
         if path == "/robots.txt":
-            answer = ROBOTS[self.server.robots]
+            answer = ROBOTS[self.fixture.robots]
             if answer is None:
                 self._send(404, b"no robots")
             else:
@@ -154,7 +158,7 @@ def start(port: int = 0, robots: str = "none") -> Recording:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--port", type=int, default=4177)
     parser.add_argument("--robots", choices=sorted(ROBOTS), default="none")
     args = parser.parse_args()

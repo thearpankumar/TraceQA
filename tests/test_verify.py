@@ -56,6 +56,7 @@ def shop_manifest() -> dict[str, Any]:
 
 def bench():
     spec = importlib.util.spec_from_file_location("bench_run", ROOT / "testbed" / "bench" / "run.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

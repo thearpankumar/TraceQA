@@ -51,10 +51,11 @@ class _Reader(HTMLParser):
         found = dict(attrs)
         if "data-expect" not in found:
             return
-        if not found.get("id"):
+        case_id = found.get("id")
+        if not case_id:
             raise ValueError(f"{self.page}: a <{tag}> with data-expect has no id")
         expect = parse_expectation(found["data-expect"] or "", self.keys)
-        self.cases.append(Case(self.page, found["id"], expect, found.get("data-known-gap")))
+        self.cases.append(Case(self.page, case_id, expect, found.get("data-known-gap")))
 
 
 def read_cases(folder: Path, keys: Iterable[str]) -> list[Case]:

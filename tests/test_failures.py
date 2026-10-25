@@ -33,6 +33,7 @@ DEAF_DRIVER = SUPPORT / "deaf_driver.py"
 
 def _load(name: str):
     spec = importlib.util.spec_from_file_location(name, SUPPORT / f"{name}.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module  # a dataclass in the module looks itself up here
     spec.loader.exec_module(module)

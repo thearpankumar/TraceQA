@@ -46,6 +46,7 @@ def traceqa(*args: str | Path, env: dict[str, str] | None = None) -> subprocess.
 @pytest.fixture(scope="module")
 def site() -> Iterator[str]:
     spec = importlib.util.spec_from_file_location("heal_serve", ROOT / "testbed" / "sites" / "heal" / "serve.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     server = module.start()
