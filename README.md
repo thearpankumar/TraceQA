@@ -179,6 +179,14 @@ Each run writes a self-contained run folder under `./runs`, holding a summary,
 an event log, and the components found for each browser and screen size. The
 formats are described in [docs/usage.md](docs/usage.md#output-files).
 
+Then run automated checks over the run: controls with no name, buttons that are
+not buttons, targets too small to hit. They are automated checks, not a
+conformance claim (see [docs/usage.md](docs/usage.md#traceqa-findings)):
+
+```sh
+traceqa findings runs/<runId>
+```
+
 For pages behind a sign-in, sign in once and reuse the saved state:
 
 ```sh

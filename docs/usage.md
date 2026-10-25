@@ -494,6 +494,107 @@ Ready. Browsers that work: chrome, chromium, firefox, webkit
 Not installed: msedge. Run: traceqa install msedge
 ```
 
+## `traceqa findings`
+
+```
+traceqa findings [OPTIONS] <RUN>
+```
+
+Automated checks over a finished run: controls with no name, buttons that are not
+buttons, targets too small to hit, and a few more. It reads each target's
+`components.json`, prints the findings, and writes `findings.json` next to it.
+`extract` does not write `findings.json`, so a run folder is the same with or
+without this command.
+
+**These are automated checks, not a conformance claim.** Automated tools find
+only part of the accessibility problems a page has (Deque puts it at about 57%
+of the issues in an audit). A page with no findings is not accessible, and each
+finding says how sure its rule is.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `<RUN>` | | A run folder made by `traceqa extract`. |
+| `--target NAME` | all | Only this target, for example `firefox-1280x800`. |
+| `--suppressions FILE` | `.traceqa/suppressions.yaml` if it exists | Findings the team has decided to live with. See [Suppressions](#suppressions). |
+| `--min-severity LEVEL` | `info` | Leave out findings below `info`, `warning` or `error`. |
+| `--fail-on LEVEL` | `never` | Exit with 1 when a finding of this severity or worse is left: `error`, `warning`, `info` or `never`. |
+| `--format FORMAT` | `table` | `table`, `json` (an array of `FindingsFile`, one per target) or `markdown`. |
+| `--no-write` | off | Only print. |
+
+Exit codes: 0 when nothing is left at or above `--fail-on`, 1 when something is,
+2 when the command is wrong: not a run folder, an unknown `--target`, a suppression
+file that cannot be used. The findings are computed from `components.json` every
+time. Running the command twice writes byte-identical files (an unchanged file is
+not rewritten); there are no timestamps in them.
+
+A finding's `id` is the rule, a colon and the component id, such as
+`unnamed-control:c_9f2a41c07b3e`. It is the same in every browser and run for as
+long as the component id is. A finding names one component and lists up to 20 of
+its instances. Messages quote page text, with control and bidirectional
+characters removed.
+
+### Rules
+
+| Rule | Severity | Confidence | WCAG | Evidence | How to fix |
+|---|---|---|---|---|---|
+| `unnamed-control` | `error` (`warning` for a component the engine is not sure is interactive) | `high` (`low`) | 4.1.2 | `unnamedInstances`, `tag`, `signals` | Give it text, an `aria-label` or a `<label>`. |
+| `weak-name-source` | `warning` | `medium` | 4.1.2, 3.3.2 | `nameSource` (`placeholder` or `title`), `weakInstances` | Add a visible `<label>`. A placeholder disappears when typing; a title does not show on touch screens. |
+| `fake-button` | `error` when it cannot be reached with the keyboard, `warning` when it can be focused but has no role | `low` | 4.1.2, 2.1.1 | `signals`, `keyboardReachable`, `tabindex` (the attribute, when present) | Use a `<button>`. If you must keep the `<div>`, add `role="button"`, `tabindex="0"` and key handlers. |
+| `small-target` | `warning` | `medium`; `low` for links and native checkboxes and radios | 2.5.8 | `size` (`w`, `h`), `minSize` (24), `spacingOk` (false), `undersizedInstances` | Make the target at least 24x24 CSS pixels, or space it so a 24 px circle on it touches no other target. |
+| `covered-at-load` | `warning` | `medium` | none | `coveredBy` (selector), `coveredInstances` | Check that the cover is meant to be there (a dialog, a banner). If not, fix the stacking. |
+| `ambiguous-names` | `info` | `medium` | 2.4.4 | `name`, `destinationCount`, `destinations` (up to 10), `components` (up to 10) | Make the link text say where it goes, or add an `aria-label` that does. |
+| `missing-autocomplete` | `info` | `low` | 1.3.5 | `inputType`, `instances` | Add `autocomplete` (`current-password`, `email`, `tel`, ...). |
+
+Only visible instances are checked, and only these rules are shipped: a rule that
+is often wrong costs more trust than it earns.
+
+- `unnamed-control` checks components with an interactive role.
+- `weak-name-source` needs `nameSource` on each instance. A `components.json` from
+  an older engine has none; the file then has the warning `name_source_missing`
+  and the rule does not run. A label with the same text as the placeholder is not
+  reported, because the name then comes from the label.
+- `fake-button` looks at elements the engine found only by a pointer cursor or an
+  `onclick` attribute, with no native control and no interactive role. A focusable
+  element with neither (a `tabindex` alone) is not reported. `tabindex="-1"` is
+  not keyboard reachable.
+- `small-target` follows WCAG 2.5.8 for what a page can show. A target under 24 px
+  on a side passes the *spacing* exception when a 24 px circle centred on it
+  touches no other target and no circle of another undersized target. A box that
+  contains the target (its container) is not a neighbour. Disabled controls are
+  skipped. The *inline*, *user-agent control*, *equivalent* and *essential*
+  exceptions cannot be seen in the data, so links and native checkboxes and radios
+  get confidence `low`.
+- `covered-at-load` uses the state the collector recorded: visible, on screen and
+  covered at every point tested.
+- `ambiguous-names` looks at links whose name is not templated. Links with the same
+  name (compared lower-case, with spaces collapsed) and different `href` values are
+  ambiguous. Links without an `href` count by component. The finding is attached to
+  the lowest component id of the group. Two links with the same name and the same
+  destination are fine.
+- `missing-autocomplete` checks `<input>` of type `password`, `email` and `tel`.
+
+### Suppressions
+
+```yaml
+# .traceqa/suppressions.yaml
+suppressions:
+  - id: small-target:c_9f2a41c07b3e        # or: rule + component
+    reason: Inline link inside a sentence (the 2.5.8 inline exception).
+  - rule: fake-button
+    component: c_3b33554f14cd
+    reason: Legacy tile, replaced in Q1.
+    expires: 2027-03-31                     # optional, YYYY-MM-DD, applies through that day
+```
+
+`reason` is required. Unknown keys are refused, and so is a file over 256 KiB.
+A suppressed finding moves from `findings` to `suppressed` in `findings.json`,
+carrying its `reason`, and does not count towards `--fail-on`. An entry past its
+`expires` day is ignored and the finding comes back, with a `suppression_expired`
+warning. An entry that matches no finding in any target gets a
+`suppression_unused` warning but does not fail the run, so the file does not rot.
+When a run has such warnings they are written to a run-level `findings.json` in the
+run folder itself (`scope: "run"`).
+
 ## Pages behind a sign-in
 
 Extraction starts every browser empty, so a page behind a sign-in, an
@@ -750,6 +851,7 @@ runs/<runId>/
   events.jsonl
   <browser>-<width>x<height>/
     components.json
+    findings.json             only after `traceqa findings`
     page.png                  only with --crops
     crops/<componentId>.png   only with --crops
 ```
@@ -820,7 +922,11 @@ live to an SDK's `on_event` callback.
 | `crop` | Path of a crop of the component, relative to `components.json`. Absent without `--crops`, and when the component never appeared on screen. |
 | `instances` | Every element that belongs to the component. |
 
-Each instance has a `key`, its own `name`, `tag`, a subset of `attrs`,
+Each instance has a `key`, its own `name`, `nameSource` (where that name came
+from: `aria-label`, `aria-labelledby`, `label`, `content`, `alt`, `title`,
+`placeholder` or `value`; absent when the name is empty), `tag`, a subset of `attrs`
+(`id`, `data-testid`, `type`, `href`, `name`, `placeholder`, `tabindex`,
+`autocomplete`, `role`; these do not feed the component id),
 `selectors`, a `box` in page coordinates, `state`, the `frameId` it was found in
 and `inShadowDom`.
 

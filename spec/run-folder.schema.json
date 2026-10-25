@@ -140,6 +140,7 @@
       "properties": {
         "key": { "description": "The component id, a colon, and the instance's position in document order.", "type": "string" },
         "name": { "type": "string" },
+        "nameSource": { "description": "Where this instance's name came from. Known values: aria-label, aria-labelledby, label, content, alt, title, placeholder, value. Absent when the name is empty.", "type": "string" },
         "tag": { "type": "string" },
         "attrs": { "type": "object", "additionalProperties": { "type": "string" } },
         "selectors": { "type": "array", "items": { "type": "string" } },

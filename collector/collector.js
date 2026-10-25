@@ -314,7 +314,7 @@
   var SKIPPED_TAGS = setOf(["script", "style", "template", "noscript", "head", "option", "optgroup"]);
   // Their content belongs to the element itself or to another frame.
   var OPAQUE_TAGS = setOf(["select", "textarea", "svg", "iframe", "frame", "object", "embed"]);
-  var COPIED_ATTRS = ["id", "data-testid", "type", "href", "name", "placeholder"];
+  var COPIED_ATTRS = ["id", "data-testid", "type", "href", "name", "placeholder", "tabindex", "autocomplete", "role"];
 
   var roleCache = N.newWeakMap();
   var elements = [];

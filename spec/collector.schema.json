@@ -52,7 +52,7 @@
         },
         "tag": { "description": "Lower-case tag name.", "type": "string" },
         "attrs": {
-          "description": "A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder.",
+          "description": "A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder, tabindex, autocomplete, role.",
           "type": "object",
           "additionalProperties": { "type": "string" }
         },

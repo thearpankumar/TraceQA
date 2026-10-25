@@ -10,6 +10,7 @@ mod args;
 mod diff;
 mod doctor;
 mod extract;
+mod findings;
 mod install;
 mod interrupt;
 mod login;
@@ -39,6 +40,11 @@ enum Command {
     Diff(diff::DiffArgs),
     /// List every interactive component on a page.
     Extract(extract::ExtractArgs),
+    /// Run automated accessibility and quality checks over a finished run.
+    ///
+    /// Prints a table and writes findings.json next to each components.json. These are
+    /// automated checks, not a conformance claim.
+    Findings(findings::FindingsArgs),
     /// Speak the client protocol on stdin and stdout. This is what SDKs start.
     Serve(serve::ServeArgs),
     /// Let AI tools such as Claude Code run TraceQA (an MCP server).
@@ -61,6 +67,7 @@ fn main() -> ExitCode {
         Command::Diff(args) => diff::run(&args),
         Command::Doctor(args) => doctor::run(&args),
         Command::Extract(args) => extract::run(&args),
+        Command::Findings(args) => findings::run(&args),
         Command::Install(args) => install::run(&args),
         Command::Login(args) => login::run(&args),
         Command::Mcp(args) => mcp::run(&args),

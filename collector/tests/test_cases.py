@@ -53,6 +53,10 @@ FIELDS = {
     "tag": lambda e: e["tag"],
     "confidence": lambda e: e["interactive"]["confidence"],
     "signals": lambda e: ",".join(sorted(e["interactive"]["signals"])),
+    # Copied attributes; "-" means the attribute is absent.
+    "attrtabindex": lambda e: e["attrs"].get("tabindex", "-"),
+    "attrautocomplete": lambda e: e["attrs"].get("autocomplete", "-"),
+    "attrrole": lambda e: e["attrs"].get("role", "-"),
     "shadow": lambda e: str(e["inShadowDom"]).lower(),
     "visible": lambda e: str(e["state"]["visible"]).lower(),
     "enabled": lambda e: str(e["state"]["enabled"]).lower(),
