@@ -1,11 +1,11 @@
-"""Keep the copies of collector/pristine.js equal to it.
+"""Keep the copies of page-script/pristine.js equal to it.
 
-    python3 scripts/sync_pristine.py            # rewrite the copies from collector/pristine.js
+    python3 scripts/sync_pristine.py            # rewrite the copies from page-script/pristine.js
     python3 scripts/sync_pristine.py --check    # exit 1 if a copy differs, change nothing
 
-collector/pristine.js is the one place to edit. Its text has to be copied into two other files:
+page-script/pristine.js is the one place to edit. Its text has to be copied into two other files:
 
-- the block between `// BEGIN pristine.js` and `// END pristine.js` in collector/collector.js, which
+- the block between `// BEGIN pristine.js` and `// END pristine.js` in page-script/page-script.js, which
   must stay one self-contained expression with no build step (a WebDriver browser has no way to run
   a script before the page's own, so the collector captures the built-ins itself), and
 - the raw string PRISTINE_JS between `# BEGIN pristine.js` and `# END pristine.js` in the Playwright
@@ -21,15 +21,18 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PRISTINE = ROOT / "collector" / "pristine.js"
-COLLECTOR = ROOT / "collector" / "collector.js"
+PRISTINE = ROOT / "page-script" / "pristine.js"
+COLLECTOR = ROOT / "page-script" / "page-script.js"
 PLAYWRIGHT_DRIVER = ROOT / "web-drivers" / "playwright-py" / "src" / "traceqa_driver_playwright" / "driver.py"
 
 IN_COLLECTOR = re.compile(r"(  // BEGIN pristine\.js\n  var capture = )(.*?)(;\n  // END pristine\.js)", re.DOTALL)
 IN_DRIVER = re.compile(r'(# BEGIN pristine\.js\nPRISTINE_JS = r"""\n)(.*?)(\n"""\n# END pristine\.js)', re.DOTALL)
 
 # Where each copy lives and how to find its block.
-COPIES = (("collector/collector.js", COLLECTOR, IN_COLLECTOR), ("the Playwright driver", PLAYWRIGHT_DRIVER, IN_DRIVER))
+COPIES = (
+    ("page-script/page-script.js", COLLECTOR, IN_COLLECTOR),
+    ("the Playwright driver", PLAYWRIGHT_DRIVER, IN_DRIVER),
+)
 
 
 class SyncError(Exception):
@@ -83,7 +86,7 @@ def main(argv: list[str]) -> int:
             stale = drifted()
             if stale:
                 print(
-                    f"collector/pristine.js and {', '.join(stale)} differ. Run: python3 scripts/sync_pristine.py",
+                    f"page-script/pristine.js and {', '.join(stale)} differ. Run: python3 scripts/sync_pristine.py",
                     file=sys.stderr,
                 )
                 return 1

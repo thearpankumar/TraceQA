@@ -29,7 +29,7 @@ pub fn normalize_name(name: &str) -> String {
 }
 
 /// Whether an `id` attribute is one the page's author chose, as opposed to one a framework
-/// generates. A port of `stableId` in `collector/collector.js`; `spec/fingerprint-vectors.json`
+/// generates. A port of `stableId` in `page-script/page-script.js`; `spec/fingerprint-vectors.json`
 /// keeps the two in step. Generated ids start with a digit, `:` or `_`, or hold four digits in a
 /// row or eight lower-case hex digits in a row (upper case does not count, as in the collector).
 pub fn is_stable_attr_id(id: &str) -> bool {

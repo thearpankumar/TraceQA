@@ -1,9 +1,9 @@
 """The table of the browser's original built-ins, and the three places its text lives.
 
-collector/pristine.js is the source. Its text is copied into collector.js (which has to be one
+page-script/pristine.js is the source. Its text is copied into page-script.js (which has to be one
 self-contained expression) and into the Playwright driver (which runs it before the page's own
 scripts). scripts/sync_pristine.py makes and checks those copies: these tests run its check, and
-keep collector.js from calling a page object's methods directly. After editing pristine.js run
+keep page-script.js from calling a page object's methods directly. After editing pristine.js run
 
     python3 scripts/sync_pristine.py
 
@@ -112,7 +112,7 @@ NATIVE_METHODS = {
 
 
 def collector_body() -> str:
-    """collector.js without comments, strings and the pristine block."""
+    """page-script.js without comments, strings and the pristine block."""
     text = COLLECTOR.read_text(encoding="utf-8")
     text = IN_COLLECTOR.sub(r"\1;\3", text)
     text = re.sub(r"//[^\n]*", "", text)
@@ -131,4 +131,4 @@ def test_every_table_function_the_collector_uses_is_in_the_table() -> None:
     defined = set(re.findall(r'(?:method|getter|staticFn)\("(\w+)"', source())) | set(
         re.findall(r"\bT\.(\w+) =", source())
     )
-    assert used - defined == set(), f"collector.js uses N.{sorted(used - defined)}, which pristine.js does not define"
+    assert used - defined == set(), f"page-script.js uses N.{sorted(used - defined)}, which pristine.js does not define"

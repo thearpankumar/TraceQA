@@ -3,7 +3,7 @@
     <button id="save" data-expect="role=button; name=Save">Save</button>
     <div id="text" data-expect="absent">Plain text</div>
 
-Used by collector/tests/test_cases.py (the collector alone) and tests/test_patterns.py (the
+Used by page-script/tests/test_cases.py (the collector alone) and tests/test_patterns.py (the
 whole engine). Each passes the keys it can check, so a page cannot ask for one it cannot.
 """
 

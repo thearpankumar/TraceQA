@@ -155,7 +155,7 @@ def playwright_state(state: models.StorageState | None) -> dict[str, Any] | None
 
 
 # The browser's own built-in functions, captured before the page's scripts run (the collector
-# then reads the page with them). GENERATED: do not edit between the markers. Edit collector/pristine.js
+# then reads the page with them). GENERATED: do not edit between the markers. Edit page-script/pristine.js
 # and run scripts/sync_pristine.py; a test and CI check that the text is identical.
 # BEGIN pristine.js
 PRISTINE_JS = r"""
@@ -166,7 +166,7 @@ PRISTINE_JS = r"""
   // of "uncurried" functions: table.getAttribute(element, "id") calls the original
   // Element.prototype.getAttribute without looking it up on the page-modifiable prototype.
   //
-  // This text exists in three places: this file, the capture block inside collector.js (used
+  // This text exists in three places: this file, the capture block inside page-script.js (used
   // when the page already ran its scripts), and the Playwright driver (which runs it before the
   // page's scripts, as an init script). THIS FILE IS THE ONLY ONE TO EDIT. Afterwards run
   // `python3 scripts/sync_pristine.py` to rewrite the other two; CI and a test run it with

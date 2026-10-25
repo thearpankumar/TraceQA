@@ -22,7 +22,7 @@ from traceqa_protocol import contracts
 from traceqa_protocol.testing import DriverClient
 
 ROOT = Path(__file__).resolve().parents[2]
-COLLECTOR = (ROOT / "collector" / "collector.js").read_text(encoding="utf-8")
+COLLECTOR = (ROOT / "page-script" / "page-script.js").read_text(encoding="utf-8")
 BROWSERS = ["chromium", "firefox", "webkit"]
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 VIEWPORT = {"width": 1280, "height": 800}

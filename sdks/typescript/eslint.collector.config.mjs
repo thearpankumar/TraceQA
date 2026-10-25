@@ -1,4 +1,4 @@
-// Lint profile for the in-page collector (collector/collector.js and pristine.js). Run with
+// Lint profile for the in-page collector (page-script/page-script.js and pristine.js). Run with
 // `npm run lint:collector`, which starts from the repository root so the files are inside ESLint's base path.
 import js from "@eslint/js";
 
@@ -15,7 +15,7 @@ const es5Syntax = [
 
 export default [
   {
-    files: ["collector/collector.js", "collector/pristine.js"],
+    files: ["page-script/page-script.js", "page-script/pristine.js"],
     languageOptions: {
       ecmaVersion: 5,
       sourceType: "script",

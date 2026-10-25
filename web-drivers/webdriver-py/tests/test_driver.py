@@ -29,7 +29,7 @@ from traceqa_protocol import contracts, models
 from traceqa_protocol.testing import DriverClient, RpcFailure
 
 ROOT = Path(__file__).resolve().parents[3]
-COLLECTOR = (ROOT / "collector" / "collector.js").read_text(encoding="utf-8")
+COLLECTOR = (ROOT / "page-script" / "page-script.js").read_text(encoding="utf-8")
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 VIEWPORT = {"width": 1280, "height": 800}
 CHROMEDRIVER = os.environ.get("TRACEQA_CHROMEDRIVER") or shutil.which("chromedriver")

@@ -4,7 +4,7 @@ Small pages that test the collector one behaviour at a time. Each element states
 what the collector must report about it, so a case is HTML only: adding one
 needs no test code.
 
-`collector/tests/test_cases.py` opens every page in Chromium, Firefox and
+`page-script/tests/test_cases.py` opens every page in Chromium, Firefox and
 WebKit and checks every case. Run them with:
 
 ```sh
@@ -78,4 +78,4 @@ marked.
 | `attributes.html` | The attributes copied into `attrs`, notably `tabindex`, `autocomplete` and `role`, which `traceqa findings` reads |
 | `prototype-keys.html` | Roles, input types and tag names that exist on every object (`constructor`, `__proto__`, `hasOwnProperty`, `toString`): the collector's lookup tables must not answer them with inherited functions |
 
-Performance on a large page is tested separately, in `collector/tests/test_large_dom.py`.
+Performance on a large page is tested separately, in `page-script/tests/test_large_dom.py`.

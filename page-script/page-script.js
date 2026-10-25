@@ -14,13 +14,13 @@
   // A page's scripts can replace methods on the built-in prototypes, and the collector would
   // then read the page through the page's functions. So every built-in the collector uses
   // comes from a table of the browser's own originals, N, and nothing below calls a method on
-  // a page object directly (the test in collector/tests keeps it that way). Where a driver can
+  // a page object directly (the test in page-script/tests keeps it that way). Where a driver can
   // run a script before the page's (the Playwright driver does), the table was made then.
   // Otherwise it is made here, and a replaced function is noticed by not looking like native
   // code. Either way the result carries a collector_tampered warning.
   // This is best effort: Function.prototype.toString can be faked too, and what a page does to
   // properties that are not captured (such as the checked state of an input) is not defended.
-  // The block below is GENERATED from collector/pristine.js by scripts/sync_pristine.py. Never edit it here.
+  // The block below is GENERATED from page-script/pristine.js by scripts/sync_pristine.py. Never edit it here.
   // BEGIN pristine.js
   var capture = (function traceqaPristine() {
   "use strict";
@@ -29,7 +29,7 @@
   // of "uncurried" functions: table.getAttribute(element, "id") calls the original
   // Element.prototype.getAttribute without looking it up on the page-modifiable prototype.
   //
-  // This text exists in three places: this file, the capture block inside collector.js (used
+  // This text exists in three places: this file, the capture block inside page-script.js (used
   // when the page already ran its scripts), and the Playwright driver (which runs it before the
   // page's scripts, as an init script). THIS FILE IS THE ONLY ONE TO EDIT. Afterwards run
   // `python3 scripts/sync_pristine.py` to rewrite the other two; CI and a test run it with

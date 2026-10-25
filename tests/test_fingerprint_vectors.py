@@ -24,7 +24,7 @@ from traceqa_protocol.testing import DriverClient
 
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = json.loads((ROOT / "spec" / "fingerprint-vectors.json").read_text(encoding="utf-8"))
-COLLECTOR = (ROOT / "collector" / "collector.js").read_text(encoding="utf-8")
+COLLECTOR = (ROOT / "page-script" / "page-script.js").read_text(encoding="utf-8")
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 BROWSERS = ["chromium", "firefox", "webkit"]
 STABLE_ID = [v for v in VECTORS["stableId"] if v.get("domTestable", True)]

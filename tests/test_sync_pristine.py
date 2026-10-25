@@ -1,4 +1,4 @@
-"""scripts/sync_pristine.py: collector/pristine.js is the one source of its two generated copies."""
+"""scripts/sync_pristine.py: page-script/pristine.js is the one source of its two generated copies."""
 
 import importlib.util
 import shutil
@@ -18,12 +18,12 @@ _spec.loader.exec_module(sync)
 def tree(tmp_path: Path):
     """Private copies of pristine.js and of the two files that carry its text."""
     pristine = tmp_path / "pristine.js"
-    collector = tmp_path / "collector.js"
+    collector = tmp_path / "page-script.js"
     driver = tmp_path / "driver.py"
     shutil.copyfile(sync.PRISTINE, pristine)
     shutil.copyfile(sync.COLLECTOR, collector)
     shutil.copyfile(sync.PLAYWRIGHT_DRIVER, driver)
-    copies = (("collector.js", collector, sync.IN_COLLECTOR), ("driver", driver, sync.IN_DRIVER))
+    copies = (("page-script.js", collector, sync.IN_COLLECTOR), ("driver", driver, sync.IN_DRIVER))
     return pristine, collector, driver, copies
 
 
@@ -41,7 +41,7 @@ def test_a_drifted_copy_is_detected(tree, capsys: pytest.CaptureFixture[str]) ->
     collector.write_text(
         collector.read_text(encoding="utf-8").replace("Object.freeze(T)", "Object.freeze(T) /* x */"), encoding="utf-8"
     )
-    assert sync.drifted(pristine, copies) == ["collector.js", "driver"]
+    assert sync.drifted(pristine, copies) == ["page-script.js", "driver"]
     # Only the private copies were edited: the real tree still passes.
     assert sync.main(["--check"]) == 0
     assert capsys.readouterr().err == ""
@@ -53,8 +53,8 @@ def test_editing_only_pristine_updates_both_copies(tree) -> None:
         pristine.read_text(encoding="utf-8").replace("Object.freeze(T)", "Object.freeze(T) /* edited */"),
         encoding="utf-8",
     )
-    assert sorted(sync.drifted(pristine, copies)) == ["collector.js", "driver"]
-    assert sorted(sync.write(pristine, copies)) == ["collector.js", "driver"]
+    assert sorted(sync.drifted(pristine, copies)) == ["driver", "page-script.js"]
+    assert sorted(sync.write(pristine, copies)) == ["driver", "page-script.js"]
     assert sync.drifted(pristine, copies) == []
     assert "/* edited */" in collector.read_text(encoding="utf-8")
     assert "/* edited */" in driver.read_text(encoding="utf-8")
