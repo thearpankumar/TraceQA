@@ -565,7 +565,11 @@ the `TRACEQA_BIN` environment variable and then `traceqa` on `PATH`.
 The SDK prints nothing by default, as a library should. The engine and its drivers
 log to standard error (for example `[driver info] opened chromium 128.0`); the SDK
 reads that and drops it. Pass `on_log=` (to `traceqa.extract` or `traceqa.Engine`)
-to receive each line as a string, already redacted by the engine.
+to receive each line as a string, already redacted by the engine; a callback that
+raises is ignored from then on and the reading goes on. When the engine dies,
+`EngineExitedError.stderr_tail` holds its last stderr lines (at most 20 lines of 500
+characters, 4000 in all, the same bounds as the TypeScript SDK) and the message ends
+with them after `engine stderr (last lines):`.
 
 ### Result
 
@@ -588,7 +592,7 @@ one). The engine's own failures are subclasses:
 | Class | When |
 |---|---|
 | `EngineStartError` | The engine was not found, or could not be started. |
-| `EngineExitedError` | The pipe closed or the process died. `exit_code` is set when known. |
+| `EngineExitedError` | The pipe closed or the process died. `exit_code` is set when known; `stderr_tail` (read-only) holds the engine's last stderr lines, or `None`. |
 | `EngineRefusedError` | The engine answered a request with an error. Has `kind` and `code`. |
 | `EngineProtocolError` | The engine sent a line that is not JSON, or a message of the wrong shape. The message quotes at most the first 80 characters of the line. |
 
