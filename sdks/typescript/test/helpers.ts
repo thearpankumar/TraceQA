@@ -66,12 +66,12 @@ export interface Shop {
  * workspace's Python (see pythonCommand). Rejects after 30 seconds instead of waiting forever.
  */
 export function startShop(): Promise<Shop> {
-  return serve(join(ROOT, "fixtures", "buggy-shop", "serve.py"));
+  return serve(join(ROOT, "testbed", "sites", "buggy-shop", "serve.py"));
 }
 
-/** fixtures/trouble/serve.py, the site that fails on purpose and has a members area. */
+/** testbed/sites/trouble/serve.py, the site that fails on purpose and has a members area. */
 export function startTrouble(): Promise<Shop> {
-  return serve(join(ROOT, "fixtures", "trouble", "serve.py"));
+  return serve(join(ROOT, "testbed", "sites", "trouble", "serve.py"));
 }
 
 const SERVE_TIMEOUT_MS = 30_000;

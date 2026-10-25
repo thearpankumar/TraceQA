@@ -1,7 +1,7 @@
 """`traceqa verify --manifest`: check a run against a manifest.
 
 Most tests build a run folder by hand from spec/examples (no browser). The tests on the real Buggy
-Shop run it once in Chromium at both viewports of fixtures/buggy-shop/manifest.yaml and check that
+Shop run it once in Chromium at both viewports of testbed/sites/buggy-shop/manifest.yaml and check that
 `verify` and the bench (bench/run.py) agree on it, on the good manifest and on broken copies.
 """
 
@@ -22,7 +22,7 @@ from jsonschema import Draft4Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "spec" / "examples"
-SHOP = ROOT / "fixtures" / "buggy-shop"
+SHOP = ROOT / "testbed" / "sites" / "buggy-shop"
 SARIF_SCHEMA = ROOT / "tests" / "data" / "sarif-schema-2.1.0.json"
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")

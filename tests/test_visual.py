@@ -1,6 +1,6 @@
 """`traceqa visual`: component crops of two runs compared pixel by pixel.
 
-The page is fixtures/visual/index.html (still, fixed-size controls). ?theme=b changes the colour of
+The page is testbed/sites/visual/index.html (still, fixed-size controls). ?theme=b changes the colour of
 "Alpha" and the padding of "Gamma", and nothing else. What is pinned here:
 
 - an unchanged rerun reports no different component, three times in a row;
@@ -53,7 +53,7 @@ def load_by_path(name: str, path: Path) -> Any:
 
 @pytest.fixture(scope="module")
 def fixture_url() -> Iterator[str]:
-    site = load_by_path("visual_serve", ROOT / "fixtures" / "visual" / "serve.py")
+    site = load_by_path("visual_serve", ROOT / "testbed" / "sites" / "visual" / "serve.py")
     server = site.start(0)
     yield f"http://127.0.0.1:{server.server_address[1]}/"
     server.shutdown()

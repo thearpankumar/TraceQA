@@ -1,6 +1,6 @@
 """`traceqa map`: read a page, follow its same-origin links, and say which components are where.
 
-The site is fixtures/map-site (see its serve.py for the link graph). What is pinned:
+The site is testbed/sites/map-site (see its serve.py for the link graph). What is pinned:
 
 - the page sets at depth 0, 1, 2 and 3, exactly; every page is an ordinary run folder that passes the
   run-folder checker, next to a `g_` group folder whose group.json (kind site) and site.json validate;
@@ -51,7 +51,7 @@ def load_by_path(name: str, path: Path) -> Any:
 
 
 interrupt = load_by_path("interrupt", SUPPORT / "interrupt.py")
-fixture = load_by_path("map_site_serve", ROOT / "fixtures" / "map-site" / "serve.py")
+fixture = load_by_path("map_site_serve", ROOT / "testbed" / "sites" / "map-site" / "serve.py")
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:

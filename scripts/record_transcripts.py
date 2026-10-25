@@ -100,7 +100,9 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 
 
 def start_shop() -> tuple[int, list[Any]]:
-    spec = importlib.util.spec_from_file_location("buggy_shop_serve", ROOT / "fixtures" / "buggy-shop" / "serve.py")
+    spec = importlib.util.spec_from_file_location(
+        "buggy_shop_serve", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py"
+    )
     shop = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shop)
     return shop.start_on_free_ports()

@@ -1,6 +1,6 @@
 """`traceqa extract --repeat N`: N ordinary runs and a group folder that says which components moved.
 
-The page is fixtures/stability: a "Steady" button on every response and a "Flaky" one on every
+The page is testbed/sites/stability: a "Steady" button on every response and a "Flaky" one on every
 other request (a server-side counter), so over four runs Flaky is found twice. What is pinned:
 
 - the runs are ordinary run folders that pass the run-folder checker, next to a `g_` group folder
@@ -57,7 +57,7 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def site() -> Iterator[str]:
     """A fresh fixture server per test, because its request counter decides which runs see Flaky."""
-    module = load_by_path("stability_serve", ROOT / "fixtures" / "stability" / "serve.py")
+    module = load_by_path("stability_serve", ROOT / "testbed" / "sites" / "stability" / "serve.py")
     server = module.start(0)
     yield f"http://127.0.0.1:{server.server_address[1]}/"
     server.shutdown()

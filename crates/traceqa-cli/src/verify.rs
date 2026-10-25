@@ -1,5 +1,5 @@
 //! `traceqa verify --manifest FILE RUN`: check a finished run against a manifest, the list of
-//! components a page should have (`spec/manifest.schema.json`, `fixtures/buggy-shop/manifest.yaml`).
+//! components a page should have (`spec/manifest.schema.json`, `testbed/sites/buggy-shop/manifest.yaml`).
 //!
 //! The manifest is a constraint set, not a snapshot: it lists what must be there, what must not be,
 //! and which warnings are allowed. Components found that it does not list are extras, which warn

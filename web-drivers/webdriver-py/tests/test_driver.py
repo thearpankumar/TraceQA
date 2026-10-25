@@ -195,8 +195,8 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def case_pages() -> Iterator[str]:
-    """fixtures/collector-cases/ on a free port."""
-    handler = functools.partial(_QuietHandler, directory=str(ROOT / "fixtures" / "collector-cases"))
+    """testbed/sites/collector-cases/ on a free port."""
+    handler = functools.partial(_QuietHandler, directory=str(ROOT / "testbed" / "sites" / "collector-cases"))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}/"

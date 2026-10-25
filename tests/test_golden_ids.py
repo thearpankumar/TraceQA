@@ -2,7 +2,7 @@
 
 People compare runs over time by component id ("this button is gone since last week"), so
 an id that silently changes breaks every comparison. The ids the shop gets are saved in
-fixtures/buggy-shop/golden-ids.json, and every run must reproduce them exactly.
+testbed/sites/buggy-shop/golden-ids.json, and every run must reproduce them exactly.
 
 When a change to the recipe or the collector is meant to change ids, regenerate the file
 and let the review show the difference:
@@ -27,8 +27,8 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN = ROOT / "fixtures" / "buggy-shop" / "golden-ids.json"
-RESPONSIVE = ROOT / "fixtures" / "responsive"
+GOLDEN = ROOT / "testbed" / "sites" / "buggy-shop" / "golden-ids.json"
+RESPONSIVE = ROOT / "testbed" / "sites" / "responsive"
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
 )
@@ -87,7 +87,7 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def responsive_url() -> Iterator[str]:
-    """fixtures/responsive/, served on a free port."""
+    """testbed/sites/responsive/, served on a free port."""
     handler = functools.partial(_QuietHandler, directory=str(RESPONSIVE))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()

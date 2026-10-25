@@ -1,6 +1,6 @@
 """`traceqa findings`: automated checks over a finished run, in every browser.
 
-The page is fixtures/findings/index.html, which has a positive and a negative case for each rule
+The page is testbed/sites/findings/index.html, which has a positive and a negative case for each rule
 (its header comment lists them). What is pinned here:
 
 - the exact set of findings, and the same finding ids in Chromium, Firefox and WebKit;
@@ -71,7 +71,7 @@ def load_by_path(name: str, path: Path) -> Any:
 
 @pytest.fixture(scope="module")
 def fixture_url() -> Iterator[str]:
-    site = load_by_path("findings_serve", ROOT / "fixtures" / "findings" / "serve.py")
+    site = load_by_path("findings_serve", ROOT / "testbed" / "sites" / "findings" / "serve.py")
     server = site.start(0)
     yield f"http://127.0.0.1:{server.server_address[1]}/"
     server.shutdown()

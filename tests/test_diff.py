@@ -23,7 +23,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = ROOT / "tests" / "golden"
-SHOP = ROOT / "fixtures" / "buggy-shop"
+SHOP = ROOT / "testbed" / "sites" / "buggy-shop"
 EXAMPLE = ROOT / "spec" / "examples" / "ComponentsFile.shop.json"
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")

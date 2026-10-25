@@ -1,6 +1,6 @@
 """A small site for tests/test_heal.py: one page in five versions.
 
-    python fixtures/heal/serve.py [--port 0]
+    python testbed/sites/heal/serve.py [--port 0]
 
 | Address | What it is |
 |---------|------------|

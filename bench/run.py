@@ -3,7 +3,7 @@
     uv run bench/run.py [--browsers chromium,firefox,webkit] [--repeats 3] [--json scores.json]
 
 Starts the shop, runs extraction in every browser at every viewport in
-fixtures/buggy-shop/manifest.yaml, and compares what was found with what the
+testbed/sites/buggy-shop/manifest.yaml, and compares what was found with what the
 manifest says is there. Exits 1 when anything is missing, extra or wrong, or when
 ids differ between runs.
 
@@ -34,7 +34,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-SHOP = ROOT / "fixtures" / "buggy-shop"
+SHOP = ROOT / "testbed" / "sites" / "buggy-shop"
 
 
 def find_binary() -> Path:

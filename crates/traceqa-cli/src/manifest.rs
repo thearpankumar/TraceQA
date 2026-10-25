@@ -1,4 +1,4 @@
-//! The manifest format (`spec/manifest.schema.json`, `fixtures/buggy-shop/manifest.yaml`): what a
+//! The manifest format (`spec/manifest.schema.json`, `testbed/sites/buggy-shop/manifest.yaml`): what a
 //! page should have. `traceqa baseline init` writes one from a finished run; this module builds it
 //! and writes the YAML. Every page string is quoted by [`scalar`], so a hostile name cannot add keys.
 
@@ -136,7 +136,7 @@ pub fn scalar(text: &str) -> String {
         .replace('\u{85}', "\\u0085")
 }
 
-/// The manifest as YAML in the layout of `fixtures/buggy-shop/manifest.yaml`, after a header that
+/// The manifest as YAML in the layout of `testbed/sites/buggy-shop/manifest.yaml`, after a header that
 /// says where it came from.
 pub fn to_yaml(manifest: &ManifestFile, source: &str) -> String {
     let mut out = String::new();

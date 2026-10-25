@@ -1,4 +1,4 @@
-"""The collector against the case pages in fixtures/collector-cases/, in every browser.
+"""The collector against the case pages in testbed/sites/collector-cases/, in every browser.
 
 Each case page states what the collector must report, on the elements themselves:
 
@@ -8,7 +8,7 @@ Each case page states what the collector must report, on the elements themselves
 Every element with `data-expect` becomes one test per browser. A page also fails when the
 collector lists an element that states no expectation. `data-known-gap="why"` marks a case
 the collector is known to get wrong; it is reported as an expected failure until it is fixed.
-See fixtures/collector-cases/README.md.
+See testbed/sites/collector-cases/README.md.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from traceqa_protocol import contracts
 from traceqa_protocol.testing import DriverClient
 
 ROOT = Path(__file__).resolve().parents[2]
-CASES = ROOT / "fixtures" / "collector-cases"
+CASES = ROOT / "testbed" / "sites" / "collector-cases"
 COLLECTOR = (ROOT / "page-script" / "page-script.js").read_text(encoding="utf-8")
 # Real Safari runs only where it can: on a Mac with "Allow remote automation" switched on,
 # which CI machines are not. TRACEQA_TEST_SAFARI=1 adds it, as in the WebDriver driver's tests.

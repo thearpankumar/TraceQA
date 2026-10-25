@@ -1,6 +1,6 @@
 """`traceqa heal`: healing as a diff query against a baseline.
 
-fixtures/heal serves one page in five versions: a (the baseline), b (a rename and a locator that
+testbed/sites/heal serves one page in five versions: a (the baseline), b (a rename and a locator that
 needs its landmark), c (a removal), d (an ambiguous rename) and e (a sign-in page). The tests run
 the real engine in Chromium on a free port; the baseline is made from a and copied for each test,
 because --accept changes it.
@@ -45,7 +45,7 @@ def traceqa(*args: str | Path, env: dict[str, str] | None = None) -> subprocess.
 
 @pytest.fixture(scope="module")
 def site() -> Iterator[str]:
-    spec = importlib.util.spec_from_file_location("heal_serve", ROOT / "fixtures" / "heal" / "serve.py")
+    spec = importlib.util.spec_from_file_location("heal_serve", ROOT / "testbed" / "sites" / "heal" / "serve.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     server = module.start()

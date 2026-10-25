@@ -1,11 +1,11 @@
-"""The whole engine on pages built like real sites: fixtures/patterns/.
+"""The whole engine on pages built like real sites: testbed/sites/patterns/.
 
 Each page copies a pattern found on real sites (a mega menu, a carousel, a cookie banner, a
 login form, a product grid, tabs, an accordion, a modal dialog, a data table) and states two
 things:
 
 - On its elements, what the engine must report about them, in the format the collector
-  cases use (see fixtures/collector-cases/README.md), read here from components.json.
+  cases use (see testbed/sites/collector-cases/README.md), read here from components.json.
 - In `<script type="application/json" id="expected-components">`, the exact list of
   components: role, name, how many instances, and whether the name is a template.
 
@@ -32,7 +32,7 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-PATTERNS = ROOT / "fixtures" / "patterns"
+PATTERNS = ROOT / "testbed" / "sites" / "patterns"
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
 )
