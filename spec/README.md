@@ -19,6 +19,12 @@ Every `$ref` must be `#/$defs/Name` or `file.schema.json#/$defs/Name`, and each 
 must be unique across files: the three generators flatten refs to the last segment.
 `scripts/check_spec_refs.py` enforces this in CI.
 
+A `Viewport` side is 1 to 10000 (`common.schema.json`). The engine enforces it with one check,
+`Viewport::check`, for every way a viewport arrives; the generated Python and TypeScript types
+carry the bounds, and `crates/traceqa-protocol/build.rs` leaves them out of the Rust types
+(typify would make the field `NonZero<u64>`), where a test keeps the schema equal to
+`MAX_VIEWPORT_SIDE`.
+
 ## How messages travel
 
 Both protocols are JSON-RPC 2.0, one message per line.

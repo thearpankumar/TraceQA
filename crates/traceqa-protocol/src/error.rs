@@ -125,6 +125,8 @@ pub enum ParseError {
     Viewport(String),
     #[error("viewport sides must be between 1 and {max}, got {0:?}", max = crate::MAX_VIEWPORT_SIDE)]
     ViewportSize(String),
+    #[error("viewport {width}x{height}: each side must be between 1 and {max}", max = crate::MAX_VIEWPORT_SIDE)]
+    ViewportRange { width: u64, height: u64 },
     #[error("unknown browser {0:?}. Known: {known}", known = crate::KNOWN_BROWSERS.join(", "))]
     UnknownBrowser(String),
 }

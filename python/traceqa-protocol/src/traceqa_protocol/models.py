@@ -120,14 +120,14 @@ class Empty(BaseModel):
 
 class Viewport(BaseModel):
     """
-    Size of the browser window content area, in CSS pixels.
+    Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    width: int = Field(..., ge=0)
-    height: int = Field(..., ge=0)
+    width: int = Field(..., ge=1, le=10000)
+    height: int = Field(..., ge=1, le=10000)
 
 
 class Rect(BaseModel):

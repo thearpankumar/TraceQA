@@ -123,6 +123,13 @@ impl Run {
         if params.targets.is_empty() || params.viewports.is_empty() {
             return Err(EngineError::invalid("a run needs at least one target and one viewport"));
         }
+        // Before the run folder exists, so a refused request leaves nothing behind. A huge size
+        // would otherwise only end when the driver's open timed out.
+        for viewport in &params.viewports {
+            viewport
+                .check()
+                .map_err(|error| EngineError::invalid(error.to_string()))?;
+        }
         let out_dir = PathBuf::from(params.out_dir.as_deref().unwrap_or("runs"));
         // An id that is already taken on disk (another process, same second) is simply drawn again.
         let mut attempts = 0;
@@ -920,6 +927,24 @@ mod tests {
             parallel: None,
             options: None,
             storage_state: None,
+        }
+    }
+
+    #[test]
+    fn prepare_refuses_a_zero_or_huge_viewport_before_creating_the_run_folder() {
+        for (width, height) in [(0, 800), (800, 0), (0, 0), (99_999, 99_999), (10_001, 800)] {
+            let out =
+                std::env::temp_dir().join(format!("traceqa-run-viewport-{width}x{height}-{}", std::process::id()));
+            let mut bad = request("extract", "https://shop.test", 1);
+            bad.viewports = vec![Viewport { width, height }];
+            bad.out_dir = Some(out.to_string_lossy().into_owned());
+            let error = Run::prepare(bad).err().expect("should be refused");
+            assert!(matches!(error, EngineError::Invalid(_)), "{error:?}");
+            assert!(
+                error.to_string().contains(&format!("viewport {width}x{height}")),
+                "{error}"
+            );
+            assert!(!out.exists(), "no run folder may be left behind for {width}x{height}");
         }
     }
 

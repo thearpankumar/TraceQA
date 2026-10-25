@@ -40,6 +40,9 @@ fn main() {
             }
             let mut def = def.clone();
             flatten_refs(&mut def);
+            if name == "Viewport" {
+                strip_bounds(&mut def);
+            }
             definitions.insert(name.clone(), def);
         }
 
@@ -83,6 +86,24 @@ fn flatten_refs(value: &mut Value) {
         }
         Value::Array(items) => items.iter_mut().for_each(flatten_refs),
         _ => {}
+    }
+}
+
+/// Relaxes the bounds of the properties of a type to `minimum: 0`, which typify reads as `u64`, and
+/// drops `maximum`. typify turns `minimum: 1` into `NonZero<u64>` and ignores `maximum`, which
+/// would change every `Viewport { width: 1280, .. }`.
+/// The bounds stay in the schema for the generated Python and TypeScript types; the engine
+/// enforces them through `Viewport::check`, and a test keeps the schema equal to the constant.
+fn strip_bounds(def: &mut Value) {
+    for property in def["properties"]
+        .as_object_mut()
+        .into_iter()
+        .flat_map(|p| p.values_mut())
+    {
+        if let Some(property) = property.as_object_mut() {
+            property.insert("minimum".to_string(), Value::from(0));
+            property.remove("maximum");
+        }
     }
 }
 

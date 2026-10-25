@@ -433,6 +433,31 @@ mod tests {
         std::fs::remove_dir_all(replies[0]["result"]["runFolder"].as_str().unwrap()).unwrap();
     }
 
+    #[test]
+    fn run_start_with_a_bad_viewport_answers_invalid_params_at_once() {
+        for (width, height) in [(99_999_u64, 99_999_u64), (0, 0)] {
+            let out_dir = std::env::temp_dir().join(format!("traceqa-serve-viewport-{width}-{}", std::process::id()));
+            let start = serde_json::json!({
+                "feature": "extract",
+                "url": "https://shop.test",
+                "targets": [{ "browser": "firefox" }],
+                "viewports": [{ "width": width, "height": height }],
+                "outDir": out_dir,
+            });
+            let replies = converse(&[
+                request(1, "run.start", start),
+                request(2, "engine.shutdown", serde_json::json!({})),
+            ]);
+            assert_eq!(replies[0]["error"]["code"], code::INVALID_PARAMS, "{replies:?}");
+            assert_eq!(replies[0]["error"]["data"]["kind"], "invalid_params");
+            let message = replies[0]["error"]["message"].as_str().unwrap();
+            assert!(message.contains(&format!("viewport {width}x{height}")), "{message}");
+            assert!(!out_dir.exists(), "no run folder may be made");
+            // No run was accepted, so nothing but the two answers was sent.
+            assert_eq!(replies.len(), 2, "{replies:?}");
+        }
+    }
+
     fn replies_in(captured: &Captured) -> Vec<Value> {
         let bytes = captured.0.lock().unwrap().clone();
         String::from_utf8(bytes)

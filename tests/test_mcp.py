@@ -39,6 +39,19 @@ def data(result) -> dict:
     return json.loads(result.content[-1].text)
 
 
+@pytest.mark.parametrize("size", ["99999x99999", "0x0"])
+def test_a_viewport_out_of_range_is_answered_at_once_and_makes_no_run(size: str, tmp_path: Path) -> None:
+    async def conversation() -> None:
+        async with server(tmp_path / "runs") as client:
+            with anyio.fail_after(5):
+                result = await client.call_tool("extract", {"url": "https://example.com/", "viewports": [size]})
+            assert result.is_error, result.content[0].text
+            assert "between 1 and 10000" in result.content[0].text or "WIDTHxHEIGHT" in result.content[0].text
+
+    anyio.run(conversation)
+    assert not any((tmp_path / "runs").glob("r_*")), "no run folder is made"
+
+
 def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_folder_checker) -> None:
     async def conversation() -> None:
         steps: list[float] = []

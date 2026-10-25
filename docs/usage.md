@@ -188,7 +188,10 @@ Limits: a request line longer than 8 MiB is skipped and answered with a
 JSON-RPC error (code `-32600`, id `null`); the next line is read as usual. At
 most `--max-runs` runs (default 4) go at once; a `run.start` beyond that gets an
 error with kind `busy` and `retryable: true`, and can be sent again when a run
-has ended (as soon as its `run.done` arrives).
+has ended (as soon as its `run.done` arrives). A `run.start` whose viewport has a
+side outside 1 to 10000 is answered at once with `-32602` (kind `invalid_params`);
+no browser is started and no run folder is made. The command line, the MCP
+`extract` tool and both SDKs refuse the same sizes the same way.
 
 Closing: a client that means to close sends `engine.shutdown` (answered with
 `{}`), then ends the engine's input. From then on `run.start` is refused with
@@ -512,7 +515,7 @@ with traceqa.Engine() as engine:
 | Option | Default | Meaning |
 |---|---|---|
 | `browsers` | `("chromium",)` | Browser values as on the command line, or `BrowserTarget` objects. |
-| `viewports` | `((1280, 800),)` | `(width, height)` pairs. |
+| `viewports` | `((1280, 800),)` | `(width, height)` pairs. Each side is 1 to 10000; a size outside that raises `TraceQAError` before anything starts. |
 | `out_dir` | `runs` | Where the run folder is created. |
 | `headless` | `True` | Hide the browser windows. |
 | `crops` | `False` | Also save a screenshot of the page and a picture of each component. |
