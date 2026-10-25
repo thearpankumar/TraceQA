@@ -592,7 +592,7 @@ import traceqa
 
 result = traceqa.extract("https://example.com", browsers=["chromium", "firefox"])
 
-with traceqa.Engine() as engine:   # several calls on one engine process
+with traceqa.Engine() as engine:  # several calls on one engine process
     first = engine.extract("https://example.com")
 ```
 
