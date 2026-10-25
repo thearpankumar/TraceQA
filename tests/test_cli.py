@@ -151,7 +151,7 @@ def test_serve_run_start_refuses_a_bad_viewport_at_once(size: dict[str, int], tm
 
 def test_known_browsers_match_what_the_drivers_open() -> None:
     """The CLI's list of browser names must not drift from the names the drivers accept."""
-    lib = (ROOT / "crates" / "traceqa-protocol" / "src" / "lib.rs").read_text(encoding="utf-8")
+    lib = (ROOT / "crates" / "traceqa-common" / "src" / "lib.rs").read_text(encoding="utf-8")
     block = re.search(r"KNOWN_BROWSERS: \[&str; (\d+)\] = \[(.*?)\];", lib, re.S)
     assert block, "KNOWN_BROWSERS not found in lib.rs"
     known = set(re.findall(r'"(\w+)"', block.group(2)))
