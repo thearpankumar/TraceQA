@@ -1,0 +1,20 @@
+[package]
+name = "traceqa-visual"
+description = "Compares the component crops of two runs pixel by pixel, for the components a structural diff found unchanged."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+image.workspace = true
+traceqa-diff.workspace = true
+traceqa-protocol.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

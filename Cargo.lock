@@ -845,6 +845,7 @@ dependencies = [
  "traceqa-mcp",
  "traceqa-protocol",
  "traceqa-recorder",
+ "traceqa-visual",
 ]
 
 [[package]]
@@ -939,6 +940,16 @@ name = "traceqa-replay"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "traceqa-visual"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde_json",
+ "traceqa-diff",
+ "traceqa-protocol",
 ]
 
 [[package]]

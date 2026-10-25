@@ -1284,6 +1284,105 @@ class InstanceRange(BaseModel):
     max: int = Field(..., ge=0)
 
 
+class VisualSide(BaseModel):
+    """
+    One of the two compared targets.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    label: str = Field(..., description="What the person typed for this side.")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    target: str | None = Field(
+        default=None, description="The target folder name, when known."
+    )
+    browser: BrowserInfo
+    viewport: Viewport
+
+
+class VisualThresholds(BaseModel):
+    """
+    The settings a verdict depends on.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    threshold: float = Field(
+        ...,
+        description="Per-pixel colour distance, 0 to 1, as in pixelmatch and Playwright (default 0.2). Lower is stricter.",
+    )
+    max_diff_ratio: float = Field(
+        ...,
+        validation_alias="maxDiffRatio", serialization_alias="maxDiffRatio",
+        description="A component is the same when differing pixels divided by all pixels is at most this (default 0.001).",
+    )
+
+
+class Status(str, Enum):
+    """
+    same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.
+    """
+
+    same = "same"
+    different = "different"
+    size_changed = "size_changed"
+    skipped = "skipped"
+
+
+class VisualResult(BaseModel):
+    """
+    The verdict for one component.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(..., description="The component id.")
+    role: str
+    name: str
+    status: Status = Field(
+        ...,
+        description="same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Why a component was skipped. Known values: added, removed, structurally_changed, covered, not_visible, no_crop, name_changes, name_is_template, unsafe_crop, crop_unreadable.",
+    )
+    detail: str | None = Field(
+        default=None,
+        description="Free text that helps a person: for example the fields that changed.",
+    )
+    unreliable: bool | None = Field(
+        default=None,
+        description="True on compared results when environmentMatch is false.",
+    )
+    diff_pixels: int | None = Field(default=None, validation_alias="diffPixels", serialization_alias="diffPixels", ge=0)
+    total_pixels: int | None = Field(default=None, validation_alias="totalPixels", serialization_alias="totalPixels", ge=0)
+    diff_ratio: float | None = Field(default=None, validation_alias="diffRatio", serialization_alias="diffRatio")
+    diff_image: str | None = Field(
+        default=None,
+        validation_alias="diffImage", serialization_alias="diffImage",
+        description="Path of the diff picture (red mask over a faded copy of side B), relative to the --out folder. Only for different components.",
+    )
+
+
+class VisualSummary(BaseModel):
+    """
+    How many components fall in each group.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    compared: int = Field(..., description="same + different.", ge=0)
+    same: int = Field(..., ge=0)
+    different: int = Field(..., ge=0)
+    size_changed: int = Field(..., validation_alias="sizeChanged", serialization_alias="sizeChanged", ge=0)
+    skipped: int = Field(..., ge=0)
+
+
 class BaselineTarget(BaseModel):
     """
     One saved browser-and-viewport folder.
@@ -1610,6 +1709,27 @@ class ComponentStability(BaseModel):
         ...,
         description="Known values: unstable (0 < rate < 1), count_varies (the instance count differs between the runs that had it), state_flaps (visible or enabled differs between those runs), name_varies (more than one name).",
     )
+
+
+class VisualReport(BaseModel):
+    """
+    Output of `traceqa visual --format json`. Fully determined by the two runs and the thresholds; it holds no timestamp of its own. Results are ordered by component id.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    a: VisualSide
+    b: VisualSide
+    thresholds: VisualThresholds
+    environment_match: bool = Field(
+        ...,
+        validation_alias="environmentMatch", serialization_alias="environmentMatch",
+        description="False when the two sides ran in different major versions of the browser. Pixels then differ for reasons other than the page, so every compared result carries unreliable: true.",
+    )
+    results: list[VisualResult]
+    summary: VisualSummary
 
 
 class BaselineFile(BaseModel):

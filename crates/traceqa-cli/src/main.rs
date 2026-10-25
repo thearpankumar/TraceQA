@@ -22,6 +22,7 @@ mod mcp;
 mod runs;
 mod serve;
 mod stability;
+mod visual;
 
 use std::process::ExitCode;
 
@@ -83,6 +84,10 @@ enum Command {
     ///
     /// Then: traceqa runs prune --keep 20 --dry-run
     Runs(runs::RunsArgs),
+    /// Compare the component crops of two runs pixel by pixel (same browser and viewport only).
+    ///
+    /// Run extract with --crops on both sides first. Then: traceqa visual runs/A runs/B --target chromium-1280x800
+    Visual(visual::VisualArgs),
 }
 
 fn main() -> ExitCode {
@@ -99,5 +104,6 @@ fn main() -> ExitCode {
         Command::Mcp(args) => mcp::run(&args),
         Command::Runs(args) => runs::run(&args),
         Command::Serve(args) => serve::run(&args),
+        Command::Visual(args) => visual::run(&args),
     }
 }

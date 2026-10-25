@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "visual.schema.json",
+  "title": "TraceQA visual comparison",
+  "description": "The result of `traceqa visual A B`: component crops of two runs compared pixel by pixel. Pixels are compared only within one browser name and one viewport, and only for components that the structural diff (diff.schema.json) found unchanged; everything else is skipped with a reason. It never modifies a run folder.",
+  "x-traceqa": { "contract": "visual", "version": 1 },
+  "$defs": {
+    "VisualReport": {
+      "description": "Output of `traceqa visual --format json`. Fully determined by the two runs and the thresholds; it holds no timestamp of its own. Results are ordered by component id.",
+      "type": "object",
+      "required": ["formatVersion", "a", "b", "thresholds", "environmentMatch", "results", "summary"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "a": { "$ref": "#/$defs/VisualSide" },
+        "b": { "$ref": "#/$defs/VisualSide" },
+        "thresholds": { "$ref": "#/$defs/VisualThresholds" },
+        "environmentMatch": {
+          "description": "False when the two sides ran in different major versions of the browser. Pixels then differ for reasons other than the page, so every compared result carries unreliable: true.",
+          "type": "boolean"
+        },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/VisualResult" } },
+        "summary": { "$ref": "#/$defs/VisualSummary" }
+      }
+    },
+    "VisualSide": {
+      "description": "One of the two compared targets.",
+      "type": "object",
+      "required": ["label", "runId", "browser", "viewport"],
+      "properties": {
+        "label": { "description": "What the person typed for this side.", "type": "string" },
+        "runId": { "type": "string" },
+        "target": { "description": "The target folder name, when known.", "type": "string" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" }
+      }
+    },
+    "VisualThresholds": {
+      "description": "The settings a verdict depends on.",
+      "type": "object",
+      "required": ["threshold", "maxDiffRatio"],
+      "properties": {
+        "threshold": { "description": "Per-pixel colour distance, 0 to 1, as in pixelmatch and Playwright (default 0.2). Lower is stricter.", "type": "number" },
+        "maxDiffRatio": { "description": "A component is the same when differing pixels divided by all pixels is at most this (default 0.001).", "type": "number" }
+      }
+    },
+    "VisualResult": {
+      "description": "The verdict for one component.",
+      "type": "object",
+      "required": ["id", "role", "name", "status"],
+      "properties": {
+        "id": { "description": "The component id.", "type": "string" },
+        "role": { "type": "string" },
+        "name": { "type": "string" },
+        "status": {
+          "description": "same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.",
+          "type": "string",
+          "enum": ["same", "different", "size_changed", "skipped"]
+        },
+        "reason": {
+          "description": "Why a component was skipped. Known values: added, removed, structurally_changed, covered, not_visible, no_crop, name_changes, name_is_template, unsafe_crop, crop_unreadable.",
+          "type": "string"
+        },
+        "detail": { "description": "Free text that helps a person: for example the fields that changed.", "type": "string" },
+        "unreliable": { "description": "True on compared results when environmentMatch is false.", "type": "boolean" },
+        "diffPixels": { "type": "integer", "minimum": 0 },
+        "totalPixels": { "type": "integer", "minimum": 0 },
+        "diffRatio": { "type": "number" },
+        "diffImage": { "description": "Path of the diff picture (red mask over a faded copy of side B), relative to the --out folder. Only for different components.", "type": "string" }
+      }
+    },
+    "VisualSummary": {
+      "description": "How many components fall in each group.",
+      "type": "object",
+      "required": ["compared", "same", "different", "sizeChanged", "skipped"],
+      "properties": {
+        "compared": { "description": "same + different.", "type": "integer", "minimum": 0 },
+        "same": { "type": "integer", "minimum": 0 },
+        "different": { "type": "integer", "minimum": 0 },
+        "sizeChanged": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
