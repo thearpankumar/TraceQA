@@ -248,6 +248,8 @@ use `traceqa diff RUN_A RUN_B`; see [docs/usage.md](docs/usage.md#traceqa-diff).
 To fail a CI job when a component is lost or disabled, save a reference with `traceqa baseline save` and
 check with `traceqa diff RUN --against NAME --fail-on removed,disabled`; see
 [Baselines and the CI gate](docs/usage.md#baselines-and-the-ci-gate).
+To catch a style change on one component, extract both runs with `--crops` and run `traceqa visual RUN_A RUN_B`
+(same browser and viewport only); see [docs/usage.md](docs/usage.md#traceqa-visual).
 All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
 
 ### Python
@@ -398,6 +400,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `crates/traceqa-cli/` | The `traceqa` command, including `install` and `doctor`. |
 | `crates/traceqa-mcp/` | The MCP server behind `traceqa mcp`. |
 | `crates/traceqa-diff/` | Compares two runs by component id, behind `traceqa diff`, and keeps baselines, the `--fail-on` gate and the GitHub and SARIF output. |
+| `crates/traceqa-visual/` | Compares the crops of two runs pixel by pixel, behind `traceqa visual`. |
 | `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
 | `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
 | `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |

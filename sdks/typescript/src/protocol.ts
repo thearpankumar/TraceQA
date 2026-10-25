@@ -147,6 +147,11 @@ StabilityFile?: StabilityFile
 TargetStability?: TargetStability
 ComponentStability?: ComponentStability
 InstanceRange?: InstanceRange
+VisualReport?: VisualReport
+VisualSide?: VisualSide
+VisualThresholds?: VisualThresholds
+VisualResult?: VisualResult
+VisualSummary?: VisualSummary
 }
 /**
  * baseline.json. Holds no storage state, no run.json and no error text, so the folder is safe to commit.
@@ -1728,6 +1733,97 @@ export interface InstanceRange {
 min: number
 max: number
 }
+/**
+ * Output of `traceqa visual --format json`. Fully determined by the two runs and the thresholds; it holds no timestamp of its own. Results are ordered by component id.
+ */
+export interface VisualReport {
+formatVersion: number
+a: VisualSide
+b: VisualSide
+thresholds: VisualThresholds
+/**
+ * False when the two sides ran in different major versions of the browser. Pixels then differ for reasons other than the page, so every compared result carries unreliable: true.
+ */
+environmentMatch: boolean
+results: VisualResult[]
+summary: VisualSummary
+}
+/**
+ * One of the two compared targets.
+ */
+export interface VisualSide {
+/**
+ * What the person typed for this side.
+ */
+label: string
+runId: string
+/**
+ * The target folder name, when known.
+ */
+target?: string
+browser: BrowserInfo
+viewport: Viewport
+}
+/**
+ * The settings a verdict depends on.
+ */
+export interface VisualThresholds {
+/**
+ * Per-pixel colour distance, 0 to 1, as in pixelmatch and Playwright (default 0.2). Lower is stricter.
+ */
+threshold: number
+/**
+ * A component is the same when differing pixels divided by all pixels is at most this (default 0.001).
+ */
+maxDiffRatio: number
+}
+/**
+ * The verdict for one component.
+ */
+export interface VisualResult {
+/**
+ * The component id.
+ */
+id: string
+role: string
+name: string
+/**
+ * same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.
+ */
+status: ("same" | "different" | "size_changed" | "skipped")
+/**
+ * Why a component was skipped. Known values: added, removed, structurally_changed, covered, not_visible, no_crop, name_changes, name_is_template, unsafe_crop, crop_unreadable.
+ */
+reason?: string
+/**
+ * Free text that helps a person: for example the fields that changed.
+ */
+detail?: string
+/**
+ * True on compared results when environmentMatch is false.
+ */
+unreliable?: boolean
+diffPixels?: number
+totalPixels?: number
+diffRatio?: number
+/**
+ * Path of the diff picture (red mask over a faded copy of side B), relative to the --out folder. Only for different components.
+ */
+diffImage?: string
+}
+/**
+ * How many components fall in each group.
+ */
+export interface VisualSummary {
+/**
+ * same + different.
+ */
+compared: number
+same: number
+different: number
+sizeChanged: number
+skipped: number
+}
 
 // Contract versions and method names.
 
@@ -1831,3 +1927,5 @@ export const HEAL_VERSION = 1;
 export const MANIFEST_VERSION = 1;
 
 export const RUN_FOLDER_VERSION = 1;
+
+export const VISUAL_VERSION = 1;

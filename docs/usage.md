@@ -390,6 +390,45 @@ jobs:
 When the change is meant, run `traceqa baseline promote RUN --name main --yes` locally and commit
 the baseline folder, so the new reference is reviewed like code.
 
+## `traceqa visual`
+
+Compares the component crops of two runs pixel by pixel, to catch a style change that the structural
+diff cannot see (a colour, a font, a padding).
+
+```
+traceqa extract URL --crops --out runs/before
+traceqa extract URL --crops --out runs/after
+traceqa visual runs/before/RUN runs/after/RUN --target chromium-1280x800
+traceqa visual runs/RUN --against main        # the baseline must have been saved from a run with crops
+```
+
+Options: `--target NAME` (the target folder, needed for a run with several), `--threshold 0.2` (how far
+two pixels' colours may differ, 0 to 1, as in Playwright's `toHaveScreenshot`), `--max-diff-ratio 0.001`
+(a component is the same when at most this share of its pixels differ), `--out DIR` (default
+`./visual-diff`; the pictures go to `DIR/TARGET/ID.diff.png`, a red mask over a faded copy of side B,
+only for components that differ), `--format markdown|json` (json is the `VisualReport` of
+[spec/visual.schema.json](../spec/visual.schema.json)), `--fail-on-different`, `--baseline-dir`, `--runs-dir`.
+It never writes into either run folder.
+
+> **Environment warning.** Pixels are compared only within one browser and one viewport. Another
+> browser name or viewport exits 2 (use `traceqa diff` across browsers). A different browser
+> *version* is recorded in the report; when the major versions differ, `environmentMatch` is false and
+> every compared result has `unreliable: true`, because a new browser release changes text rendering.
+> Run both sides on the same machine image (as Playwright advises for its own screenshots), and review
+> reference updates like code. A different `devicePixelRatio` gives crops of another size, which are
+> reported as `size_changed`, not compared.
+
+Only components the structural diff found unchanged are compared. Everything else is listed with a
+reason in `results[].reason`: `added`, `removed`, `structurally_changed` (with the fields), `covered`,
+`not_visible`, `no_crop` (it never appeared on screen while scrolling), `name_changes` and
+`name_is_template` (a name that moves cannot be masked, because the collector does not record where the
+text is, so the whole component is skipped), `unsafe_crop` and `crop_unreadable`. A component whose box
+differs by more than 1 px, or whose crops differ in size, is `size_changed`. A crop is cut from the screen
+that showed most of the component while the page scrolled, so sticky headers and animations can pollute
+it; that is why covered components are skipped. Anti-aliased pixels are ignored (Vysniauskas' detector,
+as pixelmatch does). Exit codes: 0 when the comparison ran, 1 with `--fail-on-different` and a different
+component, 2 for input that cannot be compared (another browser or viewport, a side without crops).
+
 ## `traceqa serve`
 
 ```

@@ -11,6 +11,7 @@ from them, so the sides cannot drift apart.
 | `collector.schema.json` | Collector output | The in-page script and the engine |
 | `run-folder.schema.json` | Run folder | The engine and anything that reads results |
 | `diff.schema.json` | Diff output | `traceqa diff` and anything that reads its report |
+| `visual.schema.json` | Visual comparison | `traceqa visual` and anything that reads its report. Pixels are compared only within one browser and viewport. |
 | `baseline.schema.json` | Baseline | `traceqa baseline`, `traceqa diff --against` and anything that reads a baseline folder. Written only by `baseline save`, `promote` and `alias`, never by `extract` or `diff`; see [docs/usage.md](../docs/usage.md#baselines-and-the-ci-gate). |
 | `heal.schema.json` | Heal report | `traceqa heal` and anything that reads `heal.json`. A query over a diff against a baseline: it proposes, and only `--accept` (refused in CI) writes an alias. See [docs/usage.md](../docs/usage.md#traceqa-heal). |
 | `manifest.schema.json` | Manifest | `traceqa baseline init` and anything that compares a run with a list of expected components (the bench). The file is YAML; the schema describes the parsed document. |

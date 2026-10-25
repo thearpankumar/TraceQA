@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visual fixture</title>
+<!--
+  A still page for `traceqa visual` (tests/test_visual.py, 1280x800). Nothing moves, nothing scrolls
+  and no control changes size, so two extractions of it give identical crops.
+
+  ?theme=b changes exactly two components, without changing the layout or any component's size:
+    "Alpha"  gets another background colour,
+    "Gamma"  gets another padding (its text moves inside the same fixed-size box).
+  Everything else is the same in both themes.
+-->
+<style>
+  body { font: 16px/1.4 sans-serif; margin: 0; padding: 24px; background: #fff; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .row { display: flex; gap: 24px; margin-bottom: 24px; align-items: center; }
+  button, a.link, input { box-sizing: border-box; font: inherit; }
+  button { width: 140px; height: 44px; padding: 8px; border: 2px solid #345; border-radius: 6px; background: #eef; color: #123; }
+  a.link { display: inline-block; width: 120px; height: 44px; line-height: 44px; color: #036; }
+  input { width: 220px; height: 40px; padding: 4px 8px; border: 1px solid #567; }
+  html[data-theme="b"] #alpha { background: #fc8; }
+  html[data-theme="b"] #gamma { padding: 8px 8px 8px 40px; }
+</style>
+<script>
+  if (new URLSearchParams(location.search).get("theme") === "b") document.documentElement.dataset.theme = "b";
+</script>
+</head>
+<body>
+  <h1>Visual fixture</h1>
+  <div class="row">
+    <button id="alpha" type="button">Alpha</button>
+    <button id="beta" type="button">Beta</button>
+    <button id="gamma" type="button">Gamma</button>
+    <button id="delta" type="button">Delta</button>
+  </div>
+  <div class="row">
+    <a class="link" href="/docs">Docs</a>
+    <a class="link" href="/pricing">Pricing</a>
+    <input type="text" aria-label="Search the site" placeholder="Search">
+  </div>
+</body>
+</html>
