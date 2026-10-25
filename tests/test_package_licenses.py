@@ -13,8 +13,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = [
-    "sdks/typescript",
-    "sdks/python",
+    # "sdks/typescript",  # the SDKs were removed
+    # "sdks/python",
     "web-drivers/playwright-py",
     "web-drivers/webdriver-py",
     "web-drivers/traceqa-protocol",
@@ -28,7 +28,7 @@ def test_every_package_ships_the_license(package: str) -> None:
     assert copy.read_bytes() == (ROOT / "LICENSE").read_bytes(), f"{package}/LICENSE differs from the root LICENSE"
 
 
-PYTHON_PACKAGES = [p for p in PACKAGES if p != "sdks/typescript"]
+PYTHON_PACKAGES = PACKAGES
 REPO = "https://github.com/thearpankumar/TraceQA"
 
 

@@ -156,7 +156,7 @@ runs/g_<id>/
 ```
 
 A group folder has no `run.json`, so everything that lists runs by `runs/*/run.json` (MCP
-`list_runs`, the SDKs, the run-folder checker) skips it and sees the member runs unchanged.
+`list_runs`, clients, the run-folder checker) skips it and sees the member runs unchanged.
 `traceqa runs prune` removes a group folder when none of its runs is left.
 
 Status of a stopped run: a cancel (Ctrl-C, `run.cancel`) turns every target that
@@ -201,7 +201,6 @@ made before it exist stay valid; `traceqa codegen` asks for those to be extracte
 ```
 cargo test                               # Rust types regenerate on build
 uv run scripts/gen_python_protocol.py    # rewrite the Python types
-(cd sdks/typescript && npm run gen)      # rewrite the TypeScript types
 uv run scripts/record_transcripts.py     # after a client protocol change
 uv run pytest
 ```

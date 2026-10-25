@@ -1,8 +1,6 @@
 # Writing a client in another language
 
-TraceQA has clients for Python (`sdks/python`) and TypeScript
-(`sdks/typescript`). A client for any other language is a small amount of
-plumbing, because the engine does all the work. This guide says what that
+A client for any language is a small amount of plumbing, because the engine does all the work. This guide says what that
 plumbing must do and how to prove it does.
 
 ## What a client is
@@ -59,7 +57,7 @@ A full recorded example of each case is in [spec/transcripts/](../spec/transcrip
 | Leave out options the caller did not set. Do not send `null`. | The engine applies its own defaults. |
 | Leave the engine's standard error alone, or pass it through. | It holds logs for people. Only standard output is protocol. |
 | When the caller is done, cancel runs still going, close standard input and wait for the process to exit. | No browser or run folder is left half finished. |
-| A missing engine gets a clear error. Look for it in the caller's setting, then `TRACEQA_BIN`, then `traceqa` on `PATH`. | Same order as the other clients. |
+| A missing engine gets a clear error. Look for it in the caller's setting, then `TRACEQA_BIN`, then `traceqa` on `PATH`. | One order for every client. |
 
 ## Types
 
@@ -70,27 +68,12 @@ not write the types by hand: generate them, so they cannot drift from the spec.
 |---|---|
 | Rust | `typify`, in `crates/traceqa-common/build.rs` |
 | Python | `datamodel-code-generator`, in `scripts/gen_python_protocol.py` |
-| TypeScript | `json-schema-to-typescript`, in `sdks/typescript/scripts/gen-protocol.mjs` |
 
 For another language, pick a JSON Schema generator for it and follow the same
 pattern: every `spec/*.schema.json` file adds its `$defs` to one shared
 namespace, and a `--check` mode fails when the generated file is out of date.
 Two kinds of field are open and must stay open: an object with no listed
 properties (any keys), and a property with no type (any JSON value).
-
-## Shape of the API
-
-Keep the same shape as the other clients, in the language's own style, so a
-reader of one can use another:
-
-| Python | TypeScript | Purpose |
-|---|---|---|
-| `traceqa.extract(url, **options)` | `extract(url, options)` | Start an engine, run once, stop the engine. |
-| `traceqa.Engine()` as a context manager | `Engine.start()`, then `close()` | Several runs on one engine. |
-| `on_event=` | `onEvent:` | Called with each event, live and in order. |
-| `on_log=` | `onLog:` | Called with each log line of the engine and drivers. Off by default: the SDK prints nothing. |
-| `result.components(target_dir)` | `result.components(targetDir)` | Read one target's `components.json`. |
-| `TraceQAError` with `.kind` | `TraceQAError` with `.kind` | A refusal, or an engine that cannot be reached. |
 
 ## Testing a client
 
@@ -105,13 +88,12 @@ A client is finished when it passes both of these.
 3. Close the engine and check that the report file says `ok`.
 
 The stand-in checks every field of every message the client sends, so these
-tests prove the client speaks the protocol exactly as the others do, without a
-browser. `sdks/python/tests/test_transcripts.py` and
-`sdks/typescript/test/transcripts.test.ts` are worked examples.
+tests prove the client speaks the protocol exactly as the engine expects, without a
+browser.
 
 **2. The real engine.** Run an extraction against the Buggy Shop
 (`python testbed/sites/buggy-shop/serve.py --port 0` prints its address) and check
-the result, as `sdks/python/tests/test_sdk.py` does. This proves the client
+the result. This proves the client
 works end to end.
 
 ## Adding it to the repository

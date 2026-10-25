@@ -17,7 +17,7 @@ uv sync
 uv run playwright install chromium firefox webkit
 ```
 
-`cargo build` makes `target/debug/traceqa`; `uv sync` puts the drivers and the Python SDK in `.venv`.
+`cargo build` makes `target/debug/traceqa`; `uv sync` puts the drivers in `.venv`.
 
 ## Drivers
 
@@ -300,8 +300,8 @@ chromium-1280x800 (desktop): FAIL, 37 components checked, 1 failures
 traceqa serve [--max-runs N] [--driver COMMAND]...
 ```
 
-Speaks the client protocol (JSON-RPC, one message per line) on standard input and output; the SDKs start the engine
-this way. See [architecture.md](architecture.md#client-protocol) and [clients.md](clients.md).
+Speaks the client protocol (JSON-RPC, one message per line) on standard input and output; a client in any language starts
+the engine this way. See [architecture.md](architecture.md#client-protocol) and [clients.md](clients.md).
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -480,8 +480,7 @@ traceqa findings runs/<runId>
 - Rule tags: `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`, `best-practice`. It runs in every reachable frame,
   and a page's Content-Security-Policy does not block it. If it cannot run, the target gets `axe_failed` and the run
   still completes.
-- Available from the CLI and `traceqa serve` (`options.axe` in `run.start`); the SDKs and the MCP server have no axe
-  option.
+- Available from the CLI and `traceqa serve` (`options.axe` in `run.start`); the MCP server has no axe option.
 - Automation finds only part of the problems: contrast over images, meaning, alt text, keyboard order, focus and
   closed menus need a person.
 
@@ -585,64 +584,6 @@ A state file can also be written by hand:
 - With `--crops`, pictures of signed-in pages may show personal data (`signed_in_pictures`); keep such run folders
   private.
 
-## Python SDK
-
-```python
-import traceqa
-
-result = traceqa.extract("https://example.com", browsers=["chromium", "firefox"])
-
-with traceqa.Engine() as engine:  # several calls on one engine process
-    first = engine.extract("https://example.com")
-```
-
-| Option | Default | Meaning |
-|---|---|---|
-| `browsers` | `("chromium",)` | Browser values as on the command line, or `BrowserTarget` objects. |
-| `viewports` | `((1280, 800),)` | `(width, height)` pairs, each side 1 to 10000. |
-| `out_dir` | `runs` | Where the run folder is created. |
-| `headless` | `True` | Hide the browser windows. |
-| `crops` | `False` | Also save pictures. |
-| `include_hidden` | `True` | Include elements that are not visible. |
-| `max_scroll_steps`, `timeout_ms`, `settle_ms` | `50`, `30000`, `0` | As on the command line. |
-| `parallel` | from the machine | Browsers at once. |
-| `storage_state` | none | A state file path, a dict or a `StorageState`. |
-| `on_event` | `None` | Called with each progress event. |
-| `on_log`, `binary`, `drivers` | | Also on `Engine`: log-line callback (off by default), the engine path (else `TRACEQA_BIN`, then `PATH`), driver commands. |
-
-- `ExtractResult`: `status`, `targets`, `manifest`, `run_folder` and `components(target_dir)`. A failed browser does
-  not raise; check `status`.
-- `engine.diff(a, b)` returns a `DiffFile` and `engine.findings(run)` a `FindingsResult`, without a browser.
-- `engine.cancel()` from any thread ends the run as `cancelled`; Ctrl-C cancels and re-raises. One extraction at a
-  time per `Engine`. `close(timeout=30.0)` stops the engine.
-- Errors: `TraceQAError` (with `kind`; a caller's mistake), `EngineStartError`, `EngineExitedError` (`exit_code`,
-  `stderr_tail`), `EngineRefusedError` (`kind`, `code`), `EngineProtocolError`.
-
-## TypeScript SDK
-
-Node 24 or later, ESM only, no runtime dependencies (from CommonJS, see [its README](../sdks/typescript/README.md#esm-only)).
-
-```ts
-import { extract, Engine } from "traceqa";
-
-const result = await extract("https://example.com", { browsers: ["chromium", "firefox"] });
-const components = await result.components("chromium-1280x800");
-
-const engine = await Engine.start();   // several calls on one engine process
-try {
-  await engine.extract("https://example.org", { browsers: ["webkit"] });
-} finally {
-  await engine.close();
-}
-```
-
-- Options are the Python ones in camel case (`outDir`, `includeHidden`, `onEvent`, `onLog`...), plus `signal`, an
-  `AbortSignal` that cancels the run. A throwing `onEvent` cancels the run and rejects `extract` with its error.
-- One engine can run several extractions at once. `engine.close({ timeoutMs })` (default 30000) stops it.
-- `engine.diff(a, b, { targetA, targetB })` and `engine.findings(run, { target, suppressions })` as in Python.
-- Errors are the Python classes with camel-case fields (`exitCode`, `stderrTail`). The spec types are exported,
-  all under `protocol`.
-
 ## Other languages
 
 Any language that can start a process and read and write lines can use the engine. See [clients.md](clients.md).
@@ -664,7 +605,7 @@ runs/<runId>/
 - `run.json`: run id, URL, times, status, and per target its status, counts, duration, error and `timings`
   (`openMs`, `loadMs`, `readMs`, `scrollMs`, `screenshotMs`, `cropMs`, `screens`).
 - `events.jsonl`: one event per line, numbered from 0 (`run.*`, `target.*`, `page.*`, `elements.collected`,
-  `components.grouped`, `crop.saved`, `warning`, `error`). The same events go live to the SDKs.
+  `components.grouped`, `crop.saved`, `warning`, `error`). The same events go live to `traceqa serve` clients.
 - Secret query and fragment values (`token`, `access_token`, `api_key`, `password`, `secret`, `sig`, `x_amz_*` and
   similar) become `REDACTED` in every file. A URL with a user name or password is refused (exit 2).
 

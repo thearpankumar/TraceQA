@@ -31,7 +31,7 @@ What you can do with TraceQA, one line each. How to use each one is in [usage.md
 - **Signed-in pages**: `traceqa login` saves a sign-in once and `--storage-state` reuses it; the state is never written to a run folder.
 - **Run folders**: `run.json`, `events.jsonl` and one `components.json` per browser and size, plus pictures, `axe.json` and `findings.json` when asked for.
 - **Secrets redacted**: tokens, passwords and signatures in addresses are replaced by `REDACTED` in every file.
-- **Progress**: every step is an event, written to `events.jsonl` and streamed live to the SDKs.
+- **Progress**: every step is an event, written to `events.jsonl` and streamed live to `traceqa serve` clients.
 
 ## 4. Command line
 
@@ -44,7 +44,7 @@ What you can do with TraceQA, one line each. How to use each one is in [usage.md
 - **`traceqa install`**: installs the browser drivers and browsers (and axe-core with `--axe`).
 - **`traceqa doctor`**: checks the setup and says how to fix what is missing.
 - **`traceqa login`**: signs in once in a browser window and saves the state.
-- **`traceqa serve`**: the engine for the SDKs and other languages.
+- **`traceqa serve`**: the engine for clients in any language.
 - **`traceqa mcp`**: the MCP server for AI tools (section 8).
 - **CI output**: `diff`, `findings` and `verify` can print GitHub annotations and SARIF, and exit 1 when a gate fails.
 
@@ -94,26 +94,6 @@ What you can do with TraceQA, one line each. How to use each one is in [usage.md
 - **`get_crop`**: returns a component's picture.
 - **Safe by default**: page text is marked untrusted, cloud metadata addresses are refused, and remote browsers and sign-in states need the operator's permission.
 
-## 9. Python SDK
-
-- **`traceqa.extract(url, ...)`**: one call that runs an extraction and returns an `ExtractResult`.
-- **`Engine`**: one engine for many calls, as a context manager.
-- **Options**: browsers, sizes, pictures, hidden elements, timeouts, parallelism and a sign-in state.
-- **Live events**: `on_event` receives each step as it happens.
-- **Diff and findings**: `engine.diff` and `engine.findings`, without a browser.
-- **Cancel**: `engine.cancel()` from any thread.
-- **Errors**: `TraceQAError`, `EngineStartError`, `EngineExitedError` (with the engine's last log lines), `EngineRefusedError` and `EngineProtocolError`.
-
-## 10. TypeScript SDK
-
-- **`extract(url, options)`**: one call that runs an extraction and returns an `ExtractResult`.
-- **`Engine.start()`**: one engine for many calls, several at once.
-- **Options**: as in Python, plus `signal` to cancel with an `AbortSignal`.
-- **Live events and logs**: `onEvent` and `onLog`.
-- **Diff and findings**: `engine.diff` and `engine.findings`.
-- **Typed**: every type comes from the contracts; `toTarget` and `BINARY_ENV` are exported helpers.
-- **Requirements**: Node 24 or later, ESM, no runtime dependencies.
-
-## 11. Other languages
+## 9. Other languages
 
 - **Any language**: `traceqa serve` speaks a documented JSON-RPC protocol over standard input and output; see [clients.md](clients.md).

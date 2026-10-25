@@ -13,14 +13,14 @@ on:
     paths:
       - Cargo.lock
       - uv.lock
-      - sdks/typescript/package-lock.json
+      # - sdks/typescript/package-lock.json  # the TypeScript SDK was removed
       - deny.toml
       - .github/workflows/audit.yml
   pull_request:
     paths:
       - Cargo.lock
       - uv.lock
-      - sdks/typescript/package-lock.json
+      # - sdks/typescript/package-lock.json  # the TypeScript SDK was removed
       - deny.toml
       - .github/workflows/audit.yml
 
@@ -67,17 +67,18 @@ jobs:
           uv export --frozen --no-hashes --no-emit-workspace --no-header > "$RUNNER_TEMP/requirements.txt"
           uvx "pip-audit==$PIP_AUDIT_VERSION" -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip
 
-  typescript:
-    name: TypeScript
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - name: Audit the locked packages
-        working-directory: sdks/typescript
-        run: npm audit --audit-level=high --package-lock-only
+  # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
+  # typescript:
+    # name: TypeScript
+    # runs-on: ubuntu-latest
+    # timeout-minutes: 10
+    # steps:
+      # - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # with:
+          # persist-credentials: false
+      # - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # with:
+          # node-version: 24
+      # - name: Audit the locked packages
+        # working-directory: sdks/typescript
+        # run: npm audit --audit-level=high --package-lock-only

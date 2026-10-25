@@ -15,7 +15,7 @@ spec.loader.exec_module(check_version)
 def test_every_package_has_the_same_version() -> None:
     assert check_version.problems() == []
     assert len(set(check_version.versions().values())) == 1
-    assert len(check_version.versions()) == 6
+    assert len(check_version.versions()) == 4  # Cargo.toml and the three Python packages (the SDKs were removed)
 
 
 def test_a_tag_must_name_that_version() -> None:
@@ -32,7 +32,7 @@ def repository_copy(tmp_path: Path) -> Path:
     """The files check_version.py reads, copied so a test can drift one of them."""
     wanted = [
         "Cargo.toml",
-        "sdks/typescript/package.json",
+        # "sdks/typescript/package.json",  # the TypeScript SDK was removed
         *(str(path.relative_to(ROOT)) for path in check_version.PYPROJECTS),
         *(str(path.relative_to(ROOT)) for path in ROOT.glob("crates/*/Cargo.toml")),
         *(str(path.relative_to(ROOT)) for path in ROOT.glob("web-drivers/*/src/*/driver.py")),
@@ -67,9 +67,9 @@ def test_a_drifted_protocol_pin_is_reported(tmp_path: Path) -> None:
 def test_an_unpinned_protocol_dependency_is_reported(tmp_path: Path) -> None:
     root = repository_copy(tmp_path)
     (version,) = set(check_version.versions().values())
-    edit(root, "sdks/python/pyproject.toml", f"traceqa-protocol=={version}", "traceqa-protocol")
+    edit(root, "web-drivers/playwright-py/pyproject.toml", f"traceqa-protocol=={version}", "traceqa-protocol")
     (error,) = check_version.problems(root=root)
-    assert "sdks/python/pyproject.toml" in error
+    assert "web-drivers/playwright-py/pyproject.toml" in error
 
 
 def test_a_literal_driver_version_is_reported(tmp_path: Path) -> None:

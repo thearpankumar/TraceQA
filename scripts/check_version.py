@@ -12,7 +12,6 @@ Plain standard library, so it runs before anything is installed.
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
@@ -25,9 +24,9 @@ PYPROJECTS = [
     ROOT / "web-drivers" / "traceqa-protocol" / "pyproject.toml",
     ROOT / "web-drivers" / "playwright-py" / "pyproject.toml",
     ROOT / "web-drivers" / "webdriver-py" / "pyproject.toml",
-    ROOT / "sdks" / "python" / "pyproject.toml",
+    # ROOT / "sdks" / "python" / "pyproject.toml",  # the Python SDK was removed
 ]
-PACKAGE_JSON = ROOT / "sdks" / "typescript" / "package.json"
+# PACKAGE_JSON = ROOT / "sdks" / "typescript" / "package.json"  # the TypeScript SDK was removed
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -55,8 +54,9 @@ def versions(root: Path = ROOT) -> dict[str, str]:
     found = {str(CARGO.relative_to(ROOT)): section_version(under(root, CARGO), "workspace.package", root)}
     for path in PYPROJECTS:
         found[str(path.relative_to(ROOT))] = section_version(under(root, path), "project", root)
-    package_json = under(root, PACKAGE_JSON)
-    found[str(PACKAGE_JSON.relative_to(ROOT))] = json.loads(package_json.read_text(encoding="utf-8"))["version"]
+    # The TypeScript SDK (sdks/typescript/package.json) was removed:
+    # package_json = under(root, PACKAGE_JSON)
+    # found[str(PACKAGE_JSON.relative_to(ROOT))] = json.loads(package_json.read_text(encoding="utf-8"))["version"]
     return found
 
 

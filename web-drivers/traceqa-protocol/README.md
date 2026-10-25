@@ -2,7 +2,7 @@
 
 TraceQA message and file types for Python, generated from the JSON Schemas in
 [spec/](https://github.com/thearpankumar/TraceQA/tree/master/spec) by
-`scripts/gen_python_protocol.py`. The Python SDK and both Python drivers depend
+`scripts/gen_python_protocol.py`. Both Python drivers depend
 on it. Models take snake_case names, validate camelCase wire names and serialise
 to camelCase.
 
