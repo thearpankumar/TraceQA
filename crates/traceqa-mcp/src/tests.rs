@@ -48,6 +48,7 @@ impl Host {
             max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
             interrupt: None,
             scripted: None,
+            suppressions: None,
         })
     }
 
@@ -188,7 +189,7 @@ fn says_hello_in_the_hosts_version_when_it_knows_it() {
 }
 
 #[test]
-fn lists_six_tools_each_with_a_schema() {
+fn lists_eight_tools_each_with_a_schema() {
     let mut host = Host::start(runs_folder("list"));
     let tools = host.request("tools/list", json!({}))["result"]["tools"].clone();
     let names: Vec<&str> = tools
@@ -205,6 +206,8 @@ fn lists_six_tools_each_with_a_schema() {
             "get_components",
             "describe_page",
             "find",
+            "diff_runs",
+            "findings",
             "get_crop"
         ]
     );
@@ -467,6 +470,7 @@ fn extract_asks_the_engine_for_visible_elements_only_unless_include_hidden_is_se
         max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
         interrupt: None,
         scripted: None,
+        suppressions: None,
     };
     let hidden = |arguments: Value| {
         let request = extract_request(&config, arguments).unwrap();
@@ -633,6 +637,7 @@ fn config_with(state_dir: Option<PathBuf>) -> Config {
         max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
         interrupt: None,
         scripted: None,
+        suppressions: None,
     }
 }
 
@@ -1148,6 +1153,7 @@ fn extra_extract_calls_beyond_the_cap_are_answered_busy_at_once_and_reads_still_
         max_concurrent_extracts: 1,
         interrupt: None,
         scripted: Some(scripted),
+        suppressions: None,
     });
     let extract = json!({ "name": "extract", "arguments": { "url": "https://example.test/" } });
     let first = host.send_request("tools/call", extract.clone());
@@ -1163,6 +1169,11 @@ fn extra_extract_calls_beyond_the_cap_are_answered_busy_at_once_and_reads_still_
     let list = host.call("list_runs", json!({}));
     assert_eq!(list["isError"], false);
     assert!(!text_of(&list)["runs"].as_array().unwrap().is_empty());
+    // So are the new reading tools: they take slots from the reading pool, not the extraction one.
+    let diff = host.call("diff_runs", json!({ "run_a": RUN_ID, "run_b": RUN_ID }));
+    assert_eq!(diff["isError"], false, "{diff}");
+    let findings = host.call("findings", json!({ "run_id": RUN_ID }));
+    assert_eq!(findings["isError"], false, "{findings}");
     // A cancel is still understood when the cap is full.
     host.write(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 99 } }));
     assert_eq!(host.request("ping", json!({}))["result"], json!({}));
@@ -1195,6 +1206,7 @@ fn the_interrupt_cancels_an_extract_without_answering_it_and_refuses_new_ones() 
         max_concurrent_extracts: 2,
         interrupt: Some(Interrupt { cancel, abort }),
         scripted: Some(scripted),
+        suppressions: None,
     });
     let extract = json!({ "name": "extract", "arguments": { "url": "https://example.test/" } });
     let first = host.send_request("tools/call", extract.clone());
@@ -1329,3 +1341,374 @@ fn png_content_is_standard_base64_with_padding() {
 }
 
 mod f3;
+
+// ---- diff_runs, findings and the locator hint ----
+
+const RUN_B: &str = "r_20261014_080000_b2c3";
+
+/// Copies the example run to a second run id, then lets `edit` change its components.
+fn second_run(runs: &Path, edit: impl FnOnce(&mut Value)) {
+    let from = runs.join(RUN_ID);
+    let to = runs.join(RUN_B);
+    let target = to.join("firefox-1280x800");
+    fs::create_dir_all(target.join("crops")).unwrap();
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(from.join("run.json")).unwrap()).unwrap();
+    manifest["runId"] = json!(RUN_B);
+    fs::write(to.join("run.json"), manifest.to_string()).unwrap();
+    let mut file: Value =
+        serde_json::from_str(&fs::read_to_string(from.join("firefox-1280x800").join("components.json")).unwrap())
+            .unwrap();
+    file["runId"] = json!(RUN_B);
+    edit(&mut file);
+    fs::write(target.join("components.json"), file.to_string()).unwrap();
+}
+
+/// A copy of the example component under another id, name and confidence, with one visible
+/// instance and no locator.
+fn clone_component(file: &Value, id: &str, name: &str, confidence: &str) -> Value {
+    let mut component = file["components"][0].clone();
+    component["id"] = json!(id);
+    component["name"] = json!(name);
+    component["confidence"] = json!(confidence);
+    component.as_object_mut().unwrap().remove("locator");
+    let mut instance = component["instances"][0].clone();
+    instance["key"] = json!(format!("{id}:0"));
+    instance["name"] = json!(name);
+    component["instances"] = json!([instance]);
+    component
+}
+
+fn modern_host(runs: PathBuf) -> Host {
+    let mut host = Host::start(runs);
+    host.request(
+        "initialize",
+        json!({ "protocolVersion": "2025-11-25", "capabilities": {} }),
+    );
+    host
+}
+
+#[test]
+fn diff_and_findings_are_listed_as_read_only_tools_with_output_schemas() {
+    let mut host = modern_host(runs_folder("list-new"));
+    let tools = host.request("tools/list", json!({}))["result"]["tools"].clone();
+    for name in ["diff_runs", "findings"] {
+        let tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is not listed"));
+        assert_eq!(tool["annotations"]["readOnlyHint"], true, "{name}");
+        assert_eq!(tool["annotations"]["openWorldHint"], false, "{name}");
+        assert_eq!(tool["outputSchema"]["type"], "object", "{name}");
+        assert!(tool["description"].as_str().unwrap().starts_with("Use this"), "{name}");
+    }
+    host.stop();
+}
+
+#[test]
+fn diff_runs_lists_what_one_side_lacks_and_what_differs() {
+    let runs = runs_folder("diff");
+    second_run(&runs, |file| {
+        // The shared component loses its visible instances; a new one appears.
+        for instance in file["components"][0]["instances"].as_array_mut().unwrap() {
+            instance["state"]["visible"] = json!(false);
+        }
+        let added = clone_component(file, "c_00000000aa01", "Buy now", "high");
+        file["components"].as_array_mut().unwrap().push(added);
+    });
+    let mut host = modern_host(runs.clone());
+    let result = host.call("diff_runs", json!({ "run_a": RUN_ID, "run_b": RUN_B }));
+    assert_eq!(result["isError"], false);
+    let answer = text_of(&result);
+    assert_eq!(result["structuredContent"]["untrusted_page_content"], true);
+    assert_eq!(answer["summary"]["added"], 1);
+    assert_eq!(answer["summary"]["changed"], 1);
+    assert_eq!(answer["mode"], "run-to-run");
+    let changes = answer["changes"].as_array().unwrap();
+    let added = changes.iter().find(|c| c["change"] == "added").unwrap();
+    assert_eq!(added["id"], "c_00000000aa01");
+    assert_eq!(added["name"], "Buy now");
+    let changed = changes.iter().find(|c| c["change"] == "changed").unwrap();
+    assert_eq!(changed["id"], COMPONENT);
+    assert!(changed["flags"].as_array().unwrap().contains(&json!("became_hidden")));
+    assert!(changed["fields"].as_array().unwrap().contains(&json!("visible")));
+    // Concise rows carry no summaries.
+    assert!(changed.get("before").is_none());
+
+    let detailed = text_of(&host.call(
+        "diff_runs",
+        json!({ "run_a": RUN_ID, "run_b": RUN_B, "response_format": "detailed" }),
+    ));
+    let changed = detailed["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["change"] == "changed")
+        .unwrap();
+    assert_eq!(changed["before"]["visible"], 2);
+    assert_eq!(changed["after"]["visible"], 0);
+
+    // Paging.
+    let page = text_of(&host.call("diff_runs", json!({ "run_a": RUN_ID, "run_b": RUN_B, "limit": 1 })));
+    assert_eq!(page["shown"], 1);
+    assert_eq!(page["next_offset"], 1);
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn diffing_a_run_with_itself_finds_nothing() {
+    let runs = runs_folder("diff-same");
+    let mut host = modern_host(runs.clone());
+    let answer = text_of(&host.call("diff_runs", json!({ "run_a": RUN_ID, "run_b": RUN_ID })));
+    assert_eq!(answer["matching"], 0);
+    assert_eq!(answer["changes"], json!([]));
+    assert_eq!(answer["summary"]["unchanged"], 1);
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn diff_runs_and_findings_refuse_bad_input_in_words_the_ai_can_use() {
+    let runs = runs_folder("diff-errors");
+    let mut host = modern_host(runs.clone());
+    let cases = [
+        (
+            "diff_runs",
+            json!({ "run_a": RUN_ID, "run_b": "r_missing" }),
+            "no run r_missing",
+        ),
+        ("diff_runs", json!({ "run_a": "../etc", "run_b": RUN_ID }), "plain name"),
+        (
+            "diff_runs",
+            json!({ "run_a": RUN_ID, "run_b": "C:/runs/x" }),
+            "plain name",
+        ),
+        (
+            "diff_runs",
+            json!({ "run_a": RUN_ID, "run_b": RUN_ID, "target_b": "webkit-1x1" }),
+            "has no target",
+        ),
+        ("diff_runs", json!({ "run_a": RUN_ID }), "missing field `run_b`"),
+        ("findings", json!({ "run_id": "r_missing" }), "no run r_missing"),
+        (
+            "findings",
+            json!({ "run_id": RUN_ID, "path": "/etc" }),
+            "unknown field `path`",
+        ),
+        (
+            "findings",
+            json!({ "run_id": RUN_ID, "min_severity": "fatal" }),
+            "invalid arguments",
+        ),
+    ];
+    for (tool, arguments, expected) in cases {
+        let result = host.call(tool, arguments.clone());
+        assert_eq!(result["isError"], true, "{tool} {arguments}");
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(expected), "{tool} {arguments}: {text}");
+    }
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn a_run_with_several_targets_must_say_which_side_to_diff() {
+    let runs = runs_folder("diff-targets");
+    let run = runs.join(RUN_ID);
+    let mut manifest: Value = serde_json::from_str(&fs::read_to_string(run.join("run.json")).unwrap()).unwrap();
+    let mut second = manifest["targets"][0].clone();
+    second["dir"] = json!("firefox-390x844");
+    manifest["targets"].as_array_mut().unwrap().push(second);
+    fs::write(run.join("run.json"), manifest.to_string()).unwrap();
+    let phone = run.join("firefox-390x844");
+    fs::create_dir_all(&phone).unwrap();
+    let mut file: Value =
+        serde_json::from_str(&fs::read_to_string(run.join("firefox-1280x800").join("components.json")).unwrap())
+            .unwrap();
+    file["viewport"] = json!({ "width": 390, "height": 844 });
+    fs::write(phone.join("components.json"), file.to_string()).unwrap();
+
+    let mut host = modern_host(runs.clone());
+    let result = host.call("diff_runs", json!({ "run_a": RUN_ID, "run_b": RUN_ID }));
+    assert_eq!(result["isError"], true);
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("target_a") && text.contains("firefox-390x844"), "{text}");
+
+    let answer = text_of(&host.call(
+        "diff_runs",
+        json!({ "run_a": RUN_ID, "run_b": RUN_ID, "target_a": "firefox-1280x800", "target_b": "firefox-390x844" }),
+    ));
+    assert_eq!(answer["mode"], "cross-viewport");
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn hostile_names_in_a_diff_are_cleaned_in_the_text_and_the_structured_content() {
+    let runs = runs_folder("diff-hostile");
+    second_run(&runs, |file| {
+        let added = clone_component(file, "c_00000000aa01", "Buy\u{E0049}\u{202E} now\u{200B}", "high");
+        file["components"].as_array_mut().unwrap().push(added);
+    });
+    let mut host = modern_host(runs.clone());
+    let result = host.call(
+        "diff_runs",
+        json!({ "run_a": RUN_ID, "run_b": RUN_B, "response_format": "detailed" }),
+    );
+    for answer in [text_of(&result), result["structuredContent"].clone()] {
+        let added = answer["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["change"] == "added")
+            .unwrap()
+            .clone();
+        assert_eq!(added["name"], "Buy now");
+        assert_eq!(added["after"]["name"], "Buy now");
+    }
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+/// A run with an unnamed button (an error) and an unnamed low-confidence one (a warning).
+fn run_with_findings(name: &str) -> PathBuf {
+    let runs = runs_folder(name);
+    change_components(&runs, |file| {
+        let error = clone_component(file, "c_00000000bb01", "", "high");
+        let warning = clone_component(file, "c_00000000bb02", "", "low");
+        let list = file["components"].as_array_mut().unwrap();
+        list.push(error);
+        list.push(warning);
+    });
+    runs
+}
+
+#[test]
+fn findings_lists_checks_and_filters_by_severity_and_rule() {
+    let runs = run_with_findings("findings");
+    let mut host = modern_host(runs.clone());
+    let result = host.call("findings", json!({ "run_id": RUN_ID }));
+    assert_eq!(result["isError"], false);
+    let all = text_of(&result);
+    assert_eq!(result["structuredContent"]["run_id"], RUN_ID);
+    assert_eq!(all["counts"]["error"], 1);
+    assert_eq!(all["counts"]["warning"], 1);
+    let first = &all["findings"][0];
+    for key in ["id", "rule", "severity", "componentId", "name", "message"] {
+        assert!(first.get(key).is_some(), "{key} is missing from {first}");
+    }
+    assert!(first.get("evidence").is_none(), "concise rows carry no evidence");
+
+    let errors = text_of(&host.call("findings", json!({ "run_id": RUN_ID, "min_severity": "error" })));
+    assert_eq!(errors["matching"], 1);
+    assert_eq!(errors["findings"][0]["id"], "unnamed-control:c_00000000bb01");
+    assert_eq!(errors["findings"][0]["severity"], "error");
+
+    let none = text_of(&host.call("findings", json!({ "run_id": RUN_ID, "rules": ["small-target"] })));
+    assert_eq!(none["matching"], 0);
+
+    let detailed = text_of(&host.call(
+        "findings",
+        json!({ "run_id": RUN_ID, "rules": ["unnamed-control"], "min_severity": "error", "response_format": "detailed" }),
+    ));
+    assert!(detailed["findings"][0]["evidence"].is_object());
+    assert!(detailed["findings"][0]["wcag"].is_array());
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn findings_honours_the_operators_suppression_file_and_nothing_the_ai_says() {
+    let runs = run_with_findings("findings-suppress");
+    let file = runs.join("suppress.yaml");
+    fs::write(
+        &file,
+        "suppressions:\n  - id: unnamed-control:c_00000000bb01\n    reason: Decorative.\n",
+    )
+    .unwrap();
+    let mut host = Host::start_config(Config {
+        runs_dir: runs.clone(),
+        drivers: vec![DriverCommand::parse("traceqa-no-such-driver").unwrap()],
+        state_dir: None,
+        allow_remote_browsers: false,
+        policy: UrlPolicy::default(),
+        max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+        suppressions: Some(file.clone()),
+        interrupt: None,
+        scripted: None,
+    });
+    let answer = text_of(&host.call("findings", json!({ "run_id": RUN_ID })));
+    assert_eq!(answer["suppressed"], 1);
+    assert_eq!(answer["counts"]["error"], 0);
+
+    // A path from the AI is refused as an unknown argument.
+    let result = host.call(
+        "findings",
+        json!({ "run_id": RUN_ID, "suppressions": file.display().to_string() }),
+    );
+    assert_eq!(result["isError"], true);
+
+    // A broken file is reported without its path.
+    fs::write(&file, "suppressions: [oops").unwrap();
+    let broken = host.call("findings", json!({ "run_id": RUN_ID }));
+    assert_eq!(broken["isError"], true);
+    let text = broken["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("suppression file"), "{text}");
+    assert!(!text.contains("suppress.yaml"), "{text}");
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn get_components_rows_carry_a_locator_and_whether_it_is_unique() {
+    let runs = runs_folder("locator");
+    change_components(&runs, |file| {
+        let mut ambiguous = clone_component(file, "c_00000000cc01", "Add to cart", "high");
+        ambiguous["locator"] = json!({
+            "strategy": "role", "role": "button", "name": "Add to cart", "exact": true,
+            "unique": false, "matches": 3, "own": 1, "forced": false, "needsIncludeHidden": false
+        });
+        file["components"].as_array_mut().unwrap().push(ambiguous);
+        // One component has no locator at all (a run from an older engine).
+        let bare = clone_component(file, "c_00000000cc02", "Bare", "high");
+        file["components"].as_array_mut().unwrap().push(bare);
+    });
+    let mut host = modern_host(runs.clone());
+    let concise = text_of(&host.call("get_components", json!({ "run_id": RUN_ID })));
+    let rows = concise["components"].as_array().unwrap();
+    assert_eq!(
+        rows[0]["locator"],
+        r#"page.getByRole("button", { name: "Add to cart", exact: true })"#
+    );
+    // Concise rows say so only when the locator is not unique.
+    assert!(rows[0].get("locator_unique").is_none());
+    assert_eq!(rows[1]["locator_unique"], false);
+    assert!(rows[2].get("locator").is_none());
+
+    let detailed = text_of(&host.call(
+        "get_components",
+        json!({ "run_id": RUN_ID, "response_format": "detailed" }),
+    ));
+    let rows = detailed["components"].as_array().unwrap();
+    assert_eq!(rows[0]["locator_unique"], true);
+    assert_eq!(rows[1]["locator_unique"], false);
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn a_hostile_name_cannot_break_out_of_the_locator_hint() {
+    let runs = runs_folder("locator-hostile");
+    change_components(&runs, |file| {
+        file["components"][0]["locator"]["name"] = json!("x\"); process.exit(1); //\u{202E}\n");
+    });
+    let mut host = modern_host(runs.clone());
+    let answer = text_of(&host.call("get_components", json!({ "run_id": RUN_ID })));
+    let locator = answer["components"][0]["locator"].as_str().unwrap();
+    assert!(!locator.contains('\n') && !locator.contains('\u{202E}'), "{locator}");
+    assert!(locator.contains(r#"x\"); process.exit(1); //"#), "{locator}");
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}

@@ -9,6 +9,22 @@ import traceqa
 result = traceqa.extract("https://example.com", browsers=["chromium", "firefox"])
 ```
 
+Compare two runs and run the automated checks, on one engine, without a browser:
+
+```python
+with traceqa.Engine() as engine:
+    before = engine.extract("https://example.com")
+    after = engine.extract("https://example.com")
+    diff = engine.diff(before, after)  # a DiffFile; `added` means only in `after`
+    found = engine.findings(after, suppressions="suppress.yaml")  # a FindingsResult
+```
+
+`diff(a, b, target_a=None, target_b=None)` takes run folders (paths or the results
+of `extract`); name a target (`chromium-1280x800`) for a run with several. A wrong
+folder or target raises `EngineRefusedError` (kind `invalid_params`) with a message
+that says what to fix. `findings(run, target=None, suppressions=None)` returns the
+checks, not a conformance claim.
+
 This package is built from the repository and is not published to PyPI yet. To
 use it, work from a checkout (`uv sync`). It needs the `traceqa` engine binary
 and a browser driver; see [docs/usage.md](https://github.com/thearpankumar/TraceQA/blob/master/docs/usage.md#python-sdk)

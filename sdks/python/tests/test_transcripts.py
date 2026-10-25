@@ -92,3 +92,40 @@ def test_version_mismatch(replay) -> None:
         traceqa.Engine(binary=REPLAY)
     assert refused.value.kind == "version_mismatch"
     assert verdict() == "ok"
+
+
+def test_diff(replay, tmp_path: Path) -> None:
+    verdict = replay("diff")
+    with traceqa.Engine(binary=REPLAY) as engine:
+        result = engine.extract(
+            SHOP, out_dir=tmp_path, viewports=TWO_VIEWPORTS, max_scroll_steps=0, timeout_ms=30000, parallel=2
+        )
+        # The transcript names the folder with forward slashes on every system.
+        folder = result.run_folder.as_posix()
+        diff = engine.diff(folder, folder, target_a="chromium-1280x800", target_b="chromium-390x844")
+    assert verdict() == "ok"
+
+    recorded = next(m["result"] for m in engine_said("diff") if m.get("id") == 5)
+    assert diff.model_dump(mode="json", by_alias=True, exclude_none=True) == recorded
+    assert isinstance(diff, models.DiffFile)
+    assert diff.mode == "cross-viewport"
+    assert diff.a.target == "chromium-1280x800"
+    assert diff.summary.removed + diff.summary.added + diff.summary.changed + diff.summary.unchanged > 0
+
+
+def test_findings(replay, tmp_path: Path) -> None:
+    verdict = replay("findings")
+    with traceqa.Engine(binary=REPLAY) as engine:
+        result = engine.extract(
+            SHOP, out_dir=tmp_path, viewports=TWO_VIEWPORTS, max_scroll_steps=0, timeout_ms=30000, parallel=2
+        )
+        found = engine.findings(result.run_folder.as_posix())
+    assert verdict() == "ok"
+
+    recorded = next(m["result"] for m in engine_said("findings") if m.get("id") == 5)
+    assert found.model_dump(mode="json", by_alias=True, exclude_none=True) == recorded
+    assert isinstance(found, models.FindingsResult)
+    assert [f.target for f in found.files if f.scope == models.FindingScope.target] == [
+        "chromium-1280x800",
+        "chromium-390x844",
+    ]

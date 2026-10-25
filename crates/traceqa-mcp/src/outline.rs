@@ -6,7 +6,7 @@
 //! about quotes and not with a plain `split`.
 
 use serde_json::{json, Map, Value};
-use traceqa_protocol::types::{Component, ComponentsFile};
+use traceqa_protocol::types::{Component, ComponentsFile, DiffEntry, Finding};
 
 /// Roles that start a region of the page. The first of these on a path names its group.
 const LANDMARKS: [&str; 9] = [
@@ -103,6 +103,80 @@ pub(crate) fn add_detail(row: &mut Map<String, Value>, component: &Component) {
     row.insert("selector".into(), json!(first.and_then(|i| i.selectors.first())));
     row.insert("confidence".into(), json!(component.confidence));
     row.insert("has_crop".into(), json!(component.crop.is_some()));
+}
+
+/// The longest locator a concise row carries; a longer one is cut and ends in an ellipsis.
+const SHORT_LOCATOR_CHARS: usize = 120;
+
+/// Adds a Playwright locator (TypeScript flavour) to a row of `get_components`. A detailed row
+/// has the whole locator and `locator_unique`, whether it matches this component alone on the
+/// page. A concise row has the locator cut to a short length, and `locator_unique: false` only
+/// when it is not unique, so an AI never copies an ambiguous one without knowing. Components
+/// without a locator get neither key.
+pub(crate) fn add_locator(row: &mut Map<String, Value>, component: &Component, detailed: bool) {
+    let Some(locator) = &component.locator else { return };
+    let text = locator.playwright_ts();
+    if detailed {
+        row.insert("locator".into(), json!(text));
+        row.insert("locator_unique".into(), json!(locator.unique));
+        return;
+    }
+    let short = if text.chars().count() > SHORT_LOCATOR_CHARS {
+        let mut cut: String = text.chars().take(SHORT_LOCATOR_CHARS - 1).collect();
+        cut.push('…');
+        cut
+    } else {
+        text
+    };
+    row.insert("locator".into(), json!(short));
+    if !locator.unique {
+        row.insert("locator_unique".into(), json!(false));
+    }
+}
+
+/// One row of `diff_runs`: `change`, `id`, `role`, `name`, `fields` and `flags`; detailed adds the
+/// summaries before and after, and the entry it is paired with.
+pub(crate) fn diff_row(entry: &DiffEntry, detailed: bool) -> Value {
+    let shown = entry.b.as_ref().or(entry.a.as_ref());
+    let mut row = Map::new();
+    row.insert("change".into(), json!(entry.kind));
+    row.insert("id".into(), json!(entry.id));
+    row.insert("role".into(), json!(shown.map(|s| s.role.as_str())));
+    row.insert("name".into(), json!(shown.map(|s| s.name.as_str())));
+    row.insert("fields".into(), json!(entry.fields));
+    row.insert("flags".into(), json!(entry.flags));
+    if detailed {
+        row.insert("before".into(), json!(entry.a));
+        row.insert("after".into(), json!(entry.b));
+        if let Some(pair) = &entry.paired_with {
+            row.insert("pairedWith".into(), json!(pair));
+        }
+    }
+    Value::Object(row)
+}
+
+/// One row of `findings`; detailed adds the measurements and where the component sits.
+pub(crate) fn finding_row(finding: &Finding, target: &str, detailed: bool) -> Value {
+    let mut row = Map::new();
+    row.insert("id".into(), json!(finding.id));
+    row.insert("rule".into(), json!(finding.rule));
+    row.insert("severity".into(), json!(finding.severity));
+    row.insert("componentId".into(), json!(finding.component_id));
+    row.insert("name".into(), json!(finding.name));
+    row.insert("message".into(), json!(finding.message));
+    row.insert("target".into(), json!(target));
+    if detailed {
+        row.insert("confidence".into(), json!(finding.confidence));
+        row.insert("role".into(), json!(finding.role));
+        row.insert("path".into(), json!(finding.path));
+        row.insert("instances".into(), json!(finding.instances));
+        row.insert("evidence".into(), json!(finding.evidence));
+        row.insert("wcag".into(), json!(finding.wcag));
+        if let Some(url) = &finding.help_url {
+            row.insert("helpUrl".into(), json!(url));
+        }
+    }
+    Value::Object(row)
 }
 
 /// The outline of one page: components grouped by landmark, in page order.

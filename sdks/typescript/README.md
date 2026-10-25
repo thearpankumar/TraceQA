@@ -22,6 +22,23 @@ for (const target of result.targets) {
 }
 ```
 
+Compare two runs and run the automated checks, on one engine, without a browser:
+
+```ts
+const engine = await Engine.start();
+const before = await engine.extract("https://example.com");
+const after = await engine.extract("https://example.com");
+const diff = await engine.diff(before, after); // a DiffFile; `added` means only in `after`
+const found = await engine.findings(after, { suppressions: "suppress.yaml" }); // a FindingsResult
+await engine.close();
+```
+
+`diff(a, b, { targetA, targetB })` takes run folders (paths or the results of
+`extract`); name a target (`chromium-1280x800`) for a run with several. A wrong folder
+or target rejects with an `EngineRefusedError` (kind `invalid_params`) whose message
+says what to fix. Answers are checked at run time, like `components.json`. `findings`
+returns the checks, not a conformance claim.
+
 All options are in [docs/usage.md](../../docs/usage.md#typescript-sdk).
 
 ## Logs

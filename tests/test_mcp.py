@@ -65,7 +65,16 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
         async with server(tmp_path / "runs") as client:
             assert client.server_info.name == "traceqa"
             tools = [tool.name for tool in (await client.list_tools()).tools]
-            assert tools == ["extract", "list_runs", "get_components", "describe_page", "find", "get_crop"]
+            assert tools == [
+                "extract",
+                "list_runs",
+                "get_components",
+                "describe_page",
+                "find",
+                "diff_runs",
+                "findings",
+                "get_crop",
+            ]
 
             arguments = {"url": shop_url, "viewports": ["1280x800", "390x844"], "crops": True, "include_hidden": True}
             summary = data(await client.call_tool("extract", arguments, progress_callback=on_progress))
@@ -122,7 +131,16 @@ def test_an_agent_orients_searches_and_reads_resources(shop_url: str, tmp_path: 
     async def conversation() -> None:
         async with server(tmp_path / "runs") as client:
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-            assert list(tools) == ["extract", "list_runs", "get_components", "describe_page", "find", "get_crop"]
+            assert list(tools) == [
+                "extract",
+                "list_runs",
+                "get_components",
+                "describe_page",
+                "find",
+                "diff_runs",
+                "findings",
+                "get_crop",
+            ]
             for name, tool in tools.items():
                 assert tool.output_schema and tool.output_schema["type"] == "object", name
                 assert tool.annotations is not None
@@ -184,7 +202,8 @@ def test_an_agent_orients_searches_and_reads_resources(shop_url: str, tmp_path: 
             detailed = await client.call_tool("get_components", {**ask, "response_format": "detailed"})
             small, large = len(concise.content[-1].text.encode()), len(detailed.content[-1].text.encode())
             print(f"get_components, 37 rows: concise {small} bytes, detailed {large} bytes ({small / large:.0%})")
-            assert small <= 0.4 * large
+            # The short locator hint (QW7) is in concise rows too, so they are a bit over half of detailed ones.
+            assert small <= 0.6 * large
 
     anyio.run(conversation)
 
@@ -408,3 +427,80 @@ def test_a_signal_to_mcp_cancels_the_in_flight_extract(tmp_path: Path, run_folde
     replies = [json.loads(line) for line in result.stdout.splitlines()]
     assert [reply["id"] for reply in replies if "id" in reply] == [1], "a cancelled call is not answered"
     assert result.left == [], f"{signal_name} left processes running: {result.left}"
+
+
+def test_an_agent_extracts_twice_diffs_checks_and_copies_a_locator(shop_url: str, tmp_path: Path) -> None:
+    """The flow of an agent that tests a change: read a page, read it again, see what differs, check
+    the rules, and take a locator for a control. The client checks every answer against its output schema."""
+    runs = tmp_path / "runs"
+    suppressions = tmp_path / "suppress.yaml"
+    suppressions.write_text("suppressions: []\n", encoding="utf-8")
+
+    async def conversation() -> None:
+        params = StdioServerParameters(
+            command=str(BINARY),
+            args=["mcp", "--out", str(runs), "--suppressions", str(suppressions)],
+            env=dict(os.environ),
+        )
+        async with Client(params) as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            for name in ("diff_runs", "findings"):
+                assert tools[name].output_schema and tools[name].annotations is not None, name
+                assert tools[name].annotations.read_only_hint is True, name
+
+            first = structured(await client.call_tool("extract", {"url": shop_url, "browsers": ["chromium"]}))
+            second = structured(await client.call_tool("extract", {"url": shop_url, "browsers": ["chromium"]}))
+            before, after = first["run_id"], second["run_id"]
+            assert before != after
+
+            # The same page twice: the same components, nothing added or removed.
+            diff = structured(await client.call_tool("diff_runs", {"run_a": before, "run_b": after}))
+            assert diff["mode"] == "run-to-run"
+            assert diff["summary"]["added"] == 0 and diff["summary"]["removed"] == 0
+            assert diff["summary"]["unchanged"] + diff["summary"]["changed"] == diff["a"]["components"] > 0
+            assert all(row["change"] == "changed" for row in diff["changes"])
+
+            # An unknown run is a tool error the agent can read.
+            wrong = await client.call_tool("diff_runs", {"run_a": before, "run_b": "r_missing"})
+            assert wrong.is_error and "no run r_missing" in wrong.content[0].text
+
+            found = structured(await client.call_tool("findings", {"run_id": after, "min_severity": "error"}))
+            assert found["disclaimer"].startswith("Automated checks")
+            assert found["counts"]["warning"] == 0 and found["counts"]["info"] == 0
+            assert found["matching"] == found["counts"]["error"] > 0, "the Buggy Shop has an unnamed button"
+            assert {row["rule"] for row in found["findings"]} <= {"unnamed-control", "fake-button"}
+            assert all(row["severity"] == "error" for row in found["findings"])
+            by_rule = structured(
+                await client.call_tool(
+                    "findings", {"run_id": after, "rules": ["unnamed-control"], "response_format": "detailed"}
+                )
+            )
+            assert by_rule["findings"] and all(row["rule"] == "unnamed-control" for row in by_rule["findings"])
+            assert all(isinstance(row["evidence"], dict) for row in by_rule["findings"])
+
+            # A locator hint with a uniqueness flag, concise and detailed.
+            ask = {"run_id": after, "name": "add to cart"}
+            (concise,) = structured(await client.call_tool("get_components", ask))["components"]
+            assert concise["locator"].startswith("page.getByRole(")
+            (detailed,) = structured(await client.call_tool("get_components", {**ask, "response_format": "detailed"}))[
+                "components"
+            ]
+            assert detailed["locator"] == concise["locator"] or concise["locator"].endswith("…")
+            assert isinstance(detailed["locator_unique"], bool)
+
+    anyio.run(conversation)
+
+
+def test_a_bad_suppression_file_stops_the_server_with_exit_2(tmp_path: Path) -> None:
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("suppressions: [oops", encoding="utf-8")
+    for path, expected in ((tmp_path / "missing.yaml", "--suppressions"), (broken, "not valid")):
+        done = subprocess.run(
+            [str(BINARY), "mcp", "--out", str(tmp_path / "runs"), "--suppressions", str(path)],
+            input="",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert done.returncode == 2 and expected in done.stderr, done.stderr

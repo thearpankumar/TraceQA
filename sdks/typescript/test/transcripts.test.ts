@@ -30,7 +30,7 @@ function verdict(report: string): string {
 }
 
 /** The engine's lines of one transcript. */
-function engineSaid(name: string): { method?: string; params?: { event?: Event } }[] {
+function engineSaid(name: string): { id?: number; method?: string; params?: { event?: Event }; result?: unknown }[] {
   return readFileSync(join(ROOT, "spec", "transcripts", `${name}.jsonl`), "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim())
@@ -114,6 +114,50 @@ describe("recorded conversations", { skip: existsSync(REPLAY) ? false : "build t
       },
     });
     assert.equal(result.status, "cancelled");
+    assert.equal(verdict(report), "ok");
+  });
+
+  test("diff", async () => {
+    const report = replay("diff");
+    const engine = await Engine.start({ binary: REPLAY });
+    try {
+      const result = await engine.extract(SHOP, {
+        outDir: tempDir(),
+        viewports: TWO_VIEWPORTS,
+        maxScrollSteps: 0,
+        timeoutMs: 30000,
+        parallel: 2,
+      });
+      const diff = await engine.diff(result, result, { targetA: "chromium-1280x800", targetB: "chromium-390x844" });
+      assert.deepEqual(diff, engineSaid("diff").find((message) => message.id === 5)!.result);
+      assert.equal(diff.mode, "cross-viewport");
+      assert.equal(diff.a.target, "chromium-1280x800");
+    } finally {
+      await engine.close();
+    }
+    assert.equal(verdict(report), "ok");
+  });
+
+  test("findings", async () => {
+    const report = replay("findings");
+    const engine = await Engine.start({ binary: REPLAY });
+    try {
+      const result = await engine.extract(SHOP, {
+        outDir: tempDir(),
+        viewports: TWO_VIEWPORTS,
+        maxScrollSteps: 0,
+        timeoutMs: 30000,
+        parallel: 2,
+      });
+      const found = await engine.findings(result);
+      assert.deepEqual(found, engineSaid("findings").find((message) => message.id === 5)!.result);
+      assert.deepEqual(
+        found.files.filter((file) => file.scope === "target").map((file) => file.target),
+        ["chromium-1280x800", "chromium-390x844"],
+      );
+    } finally {
+      await engine.close();
+    }
     assert.equal(verdict(report), "ok");
   });
 

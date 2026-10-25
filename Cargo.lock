@@ -865,7 +865,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+ "traceqa-diff",
  "traceqa-engine",
+ "traceqa-findings",
  "traceqa-protocol",
  "traceqa-recorder",
  "unicode-normalization",
@@ -890,7 +892,9 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "traceqa-diff",
  "traceqa-engine",
+ "traceqa-findings",
  "traceqa-protocol",
 ]
 

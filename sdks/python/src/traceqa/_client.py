@@ -105,6 +105,18 @@ class ExtractResult:
             raise EngineProtocolError(f"{path.name} in {target_dir} does not match the protocol") from error
 
 
+RunRef = str | os.PathLike[str] | ExtractResult
+"""A run folder: its path, or the result of `extract`."""
+
+
+def _folder(run: RunRef) -> str:
+    """The run folder as the engine wants it. A relative path is read against this process's
+    working directory, which the engine inherits."""
+    if isinstance(run, ExtractResult):
+        return str(run.run_folder)
+    return os.fspath(run)
+
+
 def _viewports(sizes: Sequence[tuple[int, int]]) -> list[models.Viewport]:
     """The sizes as protocol viewports. A side outside 1 to 10000 is refused here, as the engine
     would refuse it, before anything is started."""
@@ -473,6 +485,61 @@ class Engine:
         finally:
             with self._lock:
                 self._extracting = False
+
+    def _query(self, method: str, feature: str, params: models.BaseModel, result: type[Any]) -> Any:
+        """One request that reads local files and answers at once. It cannot overlap an extraction
+        or another query on this Engine, because the answers are read from one pipe."""
+        if feature not in self.info.features:
+            raise TraceQAError(
+                f"this engine ({self.info.engine_version}) does not offer {feature}. Upgrade traceqa.",
+                "unsupported",
+            )
+        with self._lock:
+            if self._extracting:
+                raise TraceQAError("this engine is busy with another call; use one Engine per concurrent call")
+            self._extracting = True
+        try:
+            return self._validated(result, self._call(method, params))
+        finally:
+            with self._lock:
+                self._extracting = False
+
+    def diff(
+        self,
+        a: RunRef,
+        b: RunRef,
+        target_a: str | None = None,
+        target_b: str | None = None,
+    ) -> models.DiffFile:
+        """Compare one target of run `a` with one target of run `b`, by component id.
+
+        `a` and `b` are run folders (paths, or the results of `extract`); they may be the same run,
+        to compare two of its targets. `target_a` and `target_b` are target folder names such as
+        `chromium-1280x800`; leave one out when its run has a single target. In the result, `added`
+        means only in `b`. Reads local files and starts no browser. Raises `EngineRefusedError`
+        (kind `invalid_params`) with a message that says what to fix when a folder or target is wrong.
+        """
+        request = models.DiffCompareParams(a=_folder(a), b=_folder(b), target_a=target_a, target_b=target_b)
+        return self._query("diff.compare", "diff", request, models.DiffFile)
+
+    def findings(
+        self,
+        run: RunRef,
+        target: str | None = None,
+        suppressions: str | os.PathLike[str] | None = None,
+    ) -> models.FindingsResult:
+        """Run the automated checks over a finished run. These are checks, not a conformance claim.
+
+        Returns one `FindingsFile` per target, then one for the run when it has something to say.
+        `target` keeps only that target's file. `suppressions` is the path of a suppression file
+        (YAML) as `traceqa findings --suppressions` takes it. Nothing is written to the run folder.
+        """
+        request = models.FindingsAnalyseParams(
+            run=_folder(run),
+            target=target,
+            suppressions=os.fspath(suppressions) if suppressions is not None else None,
+        )
+        return self._query("findings.analyse", "findings", request, models.FindingsResult)
 
     def _follow(self, accepted: models.RunStartResult, on_event: EventHandler | None) -> ExtractResult:
         while True:

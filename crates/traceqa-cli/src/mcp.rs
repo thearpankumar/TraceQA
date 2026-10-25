@@ -36,6 +36,10 @@ pub struct McpArgs {
     /// fires many calls cannot start many browsers. Reading tools have a higher limit of their own.
     #[arg(long, value_name = "N", default_value_t = traceqa_mcp::DEFAULT_MAX_CONCURRENT_EXTRACTS)]
     max_concurrent_extracts: usize,
+    /// A suppression file (YAML, see `traceqa findings --help`) that the `findings` tool honours.
+    /// The AI cannot name a file; without this flag nothing is suppressed.
+    #[arg(long, value_name = "FILE")]
+    suppressions: Option<PathBuf>,
     #[command(flatten)]
     drivers: DriverArgs,
 }
@@ -58,6 +62,21 @@ pub fn run(args: &McpArgs) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Some(path) = &args.suppressions {
+        let checked = std::fs::metadata(path)
+            .map_err(|e| e.to_string())
+            .and_then(|meta| {
+                if meta.len() > traceqa_findings::suppress::MAX_FILE_BYTES as u64 {
+                    return Err("the file is too large".to_string());
+                }
+                std::fs::read_to_string(path).map_err(|e| e.to_string())
+            })
+            .and_then(|text| traceqa_findings::suppress::parse(&text).map_err(|e| e.to_string()));
+        if let Err(why) = checked {
+            eprintln!("traceqa: --suppressions {}: {why}", path.display());
+            return ExitCode::from(2);
+        }
+    }
     let config = traceqa_mcp::Config {
         runs_dir,
         drivers: driver_commands(&args.drivers.drivers),
@@ -65,6 +84,7 @@ pub fn run(args: &McpArgs) -> ExitCode {
         allow_remote_browsers: args.allow_remote_browsers,
         policy: traceqa_mcp::UrlPolicy::new(args.block_private, &args.allow_hosts),
         max_concurrent_extracts: args.max_concurrent_extracts,
+        suppressions: args.suppressions.clone(),
         interrupt: Some(server_interrupt()),
     };
     install_server_interrupt("traceqa: stopping: cancelling the calls. Press Ctrl-C again to quit at once.");

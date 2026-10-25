@@ -250,7 +250,8 @@ fn concise_rows_are_short_and_detailed_rows_are_todays_fields() {
     let row = concise["components"][0].as_object().unwrap();
     let mut keys: Vec<&str> = row.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["id", "instances", "name", "role"]);
+    // QW7: the locator hint rides along in concise rows (here a unique one, so no flag).
+    assert_eq!(keys, ["id", "instances", "locator", "name", "role"]);
     let detailed = text_of(&host.call(
         "get_components",
         json!({ "run_id": RUN_ID, "response_format": "detailed" }),
@@ -265,6 +266,8 @@ fn concise_rows_are_short_and_detailed_rows_are_todays_fields() {
         "selector",
         "confidence",
         "has_crop",
+        "locator",
+        "locator_unique",
     ] {
         assert!(detailed["components"][0].get(key).is_some(), "{key}");
     }

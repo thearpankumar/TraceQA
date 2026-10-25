@@ -10,7 +10,9 @@
       "engine.hello": { "params": "EngineHelloParams", "result": "EngineHelloResult" },
       "run.start": { "params": "RunStartParams", "result": "RunStartResult" },
       "run.cancel": { "params": "RunCancelParams", "result": "Empty" },
-      "engine.shutdown": { "params": "Empty", "result": "Empty" }
+      "engine.shutdown": { "params": "Empty", "result": "Empty" },
+      "diff.compare": { "params": "DiffCompareParams", "result": "DiffFile" },
+      "findings.analyse": { "params": "FindingsAnalyseParams", "result": "FindingsResult" }
     },
     "notifications": {
       "run.event": { "params": "RunEventParams" },
@@ -33,7 +35,7 @@
       "properties": {
         "engineVersion": { "type": "string" },
         "protocolVersion": { "type": "integer", "minimum": 0 },
-        "features": { "description": "Features this engine can run. Known values: extract.", "type": "array", "items": { "type": "string" } }
+        "features": { "description": "Features this engine can run. Known values: extract, diff, findings. diff and findings are the methods diff.compare and findings.analyse; a client that needs them checks this list.", "type": "array", "items": { "type": "string" } }
       }
     },
     "ExtractOptions": {
@@ -79,6 +81,35 @@
       "properties": {
         "runId": { "type": "string" },
         "runFolder": { "description": "Absolute path.", "type": "string" }
+      }
+    },
+    "DiffCompareParams": {
+      "description": "Compares one target of run folder a with one target of run folder b. Reads local files, at most 64 MiB per components.json, and answers when done; it does not start a browser.",
+      "type": "object",
+      "required": ["a", "b"],
+      "properties": {
+        "a": { "description": "Path of a run folder made by run.start (side A, the older or reference side).", "type": "string" },
+        "b": { "description": "Path of a run folder (side B, the newer or other side). May be the same folder as a, to compare two targets of one run.", "type": "string" },
+        "targetA": { "description": "Target folder name in a, for example chromium-1280x800. May be left out when the run has one target.", "type": "string" },
+        "targetB": { "description": "Target folder name in b. As targetA.", "type": "string" }
+      }
+    },
+    "FindingsAnalyseParams": {
+      "description": "Runs the automated checks over a finished run folder. Reads local files, at most 64 MiB per components.json; writes nothing.",
+      "type": "object",
+      "required": ["run"],
+      "properties": {
+        "run": { "description": "Path of a run folder.", "type": "string" },
+        "target": { "description": "Only this target's findings are returned (every target is still analysed, so a suppression used in another browser is not reported unused). Default: all targets, then the run-level findings.", "type": "string" },
+        "suppressions": { "description": "Path of a suppression file (YAML, at most 256 KiB), as `traceqa findings --suppressions` takes it. Default: none.", "type": "string" }
+      }
+    },
+    "FindingsResult": {
+      "description": "One FindingsFile per target, in the run's order, then a run-scope file when there is something for it.",
+      "type": "object",
+      "required": ["files"],
+      "properties": {
+        "files": { "type": "array", "items": { "$ref": "findings.schema.json#/$defs/FindingsFile" } }
       }
     },
     "RunCancelParams": {

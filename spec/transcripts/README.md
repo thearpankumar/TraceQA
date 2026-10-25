@@ -51,6 +51,8 @@ reason.
 |---|---|---|
 | `extract.jsonl` | Extract `http://127.0.0.1:4173/` in chromium at 1280x800 and 390x844, with no scrolling, a 30000 ms timeout and 2 browsers at a time. Pass any `outDir`. | Deliver every event, in order, then return a completed result for the run folder named in the answer. |
 | `refused.jsonl` | Extract `not-a-url` with default options. | Fail the call with kind `invalid_params`. |
+| `diff.jsonl` | Extract the shop as for `extract.jsonl`, then call `diff.compare` with the run folder from the answer as both `a` and `b`, `targetA` `chromium-1280x800` and `targetB` `chromium-390x844`. Write the folder with forward slashes, as the transcript does. | Send the request exactly as recorded and return the `DiffFile` of the answer. |
+| `findings.jsonl` | Extract the shop as for `extract.jsonl`, then call `findings.analyse` with the run folder as `run` and nothing else. | Send the request exactly as recorded and return the `FindingsResult` of the answer. |
 | `cancel.jsonl` | Extract the shop at both viewports, 1 browser at a time, and cancel the run when the `page.opened` event arrives. | Send `run.cancel` for the run. |
 | `version-mismatch.jsonl` | Start an engine. | Fail with kind `version_mismatch`. |
 
