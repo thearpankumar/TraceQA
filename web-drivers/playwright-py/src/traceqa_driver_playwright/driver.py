@@ -579,6 +579,15 @@ class PlaywrightDriver(BaseDriver[Session]):
                     "unsupported", f"{target.browser} is not installed. Run: traceqa install {target.browser}"
                 ) from error
             raise RpcError("internal", f"could not open {target.browser}: {first_line(error.message)}") from error
+        except RpcError:
+            raise
+        except Exception as error:
+            # Anything else, such as a KeyError from inside Playwright's client, must not leave the browser
+            # running either. The client may be broken by then, so closing may fail too.
+            if browser is not None:
+                with contextlib.suppress(Exception):
+                    browser.close()
+            raise RpcError("internal", f"could not open {target.browser}: {type(error).__name__}: {error}") from error
 
         session_id = self._new_session_id()
         chromium = target.browser == CDP or BROWSERS.get(target.browser, ("",))[0] == "chromium"
