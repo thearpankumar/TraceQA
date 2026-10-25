@@ -759,7 +759,7 @@ through a link), and error texts are cut to 500 characters. No answer, error or
 progress message shows a local path: the runs folder is never named, and other
 absolute paths in engine errors are replaced by `<path>`. The tools carry MCP
 annotations: `extract` opens pages (open world, not read-only); the other
-five are read-only.
+seven are read-only.
 
 ## `traceqa install`
 

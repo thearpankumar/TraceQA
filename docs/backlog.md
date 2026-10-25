@@ -502,15 +502,17 @@ focusability, and styles.
 
 **Size.** M
 
-### ARC-2: MCP progress notifications (rest of A8)
+### ARC-2: Rate-limited, tested MCP progress notifications (rest of A8)
 
-**Why.** An agent that calls `extract` for a long page sees nothing for a minute and may give up.
+**Why.** `extract` already sends `notifications/progress` when the request carries a progress token: one per
+engine event, so a long page can send many in a burst, and no test pins the behaviour, so it can break unseen.
 
-**Design.** When the request carries a progress token, send `notifications/progress` with the steps the
-engine already reports (browser started, navigated, settled, extracted), rate-limited to one per second.
+**Design.** Keep the notifications on the steps the engine already reports (browser started, navigated,
+settled, extracted), rate-limited to one per second with the last step always sent, and add an MCP test.
 
 **Acceptance.** A test client that sends a progress token receives at least 3 progress notifications during an
-extract of the buggy shop and none when it sends no token; each notification has an increasing `progress` value.
+extract of the buggy shop, never two within one second, and none when it sends no token; each notification has
+an increasing `progress` value.
 
 **Size.** S
 

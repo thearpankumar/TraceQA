@@ -88,7 +88,7 @@ reader of one can use another:
 | `traceqa.extract(url, **options)` | `extract(url, options)` | Start an engine, run once, stop the engine. |
 | `traceqa.Engine()` as a context manager | `Engine.start()`, then `close()` | Several runs on one engine. |
 | `on_event=` | `onEvent:` | Called with each event, live and in order. |
-| `on_log=` | (none) | Called with each log line of the engine and drivers. Off by default: the SDK prints nothing. |
+| `on_log=` | `onLog:` | Called with each log line of the engine and drivers. Off by default: the SDK prints nothing. |
 | `result.components(target_dir)` | `result.components(targetDir)` | Read one target's `components.json`. |
 | `TraceQAError` with `.kind` | `TraceQAError` with `.kind` | A refusal, or an engine that cannot be reached. |
 
