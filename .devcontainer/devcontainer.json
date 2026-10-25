@@ -34,8 +34,10 @@
     "source=traceqa-cargo-registry,target=/usr/local/cargo/registry,type=volume",
     "source=traceqa-cache,target=/home/vscode/.cache,type=volume"
   ],
-  // New volumes belong to root.
-  "onCreateCommand": "sudo chown -R vscode:vscode target .venv tests/codegen_ts/node_modules /usr/local/cargo/registry /home/vscode/.cache",
+  // New volumes belong to root. The workspace is mounted from the host with another owner, which git
+  // refuses ("dubious ownership"); trust this one folder in the system config, so VS Code can still copy
+  // your own ~/.gitconfig in.
+  "onCreateCommand": "sudo chown -R vscode:vscode target .venv tests/codegen_ts/node_modules /usr/local/cargo/registry /home/vscode/.cache && sudo git config --system --add safe.directory ${containerWorkspaceFolder}",
   "updateContentCommand": "uv sync --locked && cargo fetch --locked && npm ci --prefix tests/codegen_ts",
   // The browsers' system libraries need root; the browsers themselves are installed as vscode.
   "postCreateCommand": "sudo .venv/bin/playwright install-deps chromium firefox webkit && .venv/bin/playwright install chromium firefox webkit",
