@@ -432,7 +432,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `bench/` | Scores extraction against the demo site. |
 | `tests/` | End-to-end tests of the MCP server and the installer. |
 | `scripts/` | Code generation and transcript recording. |
-| `docs/` | Usage, architecture, client guide and project plan. |
+| `docs/` | Usage, features, architecture, client guide, testing, releasing, backlog and security policy. |
 
 ## Development and testing
 
@@ -532,7 +532,6 @@ The Rust types regenerate on build.
 | [docs/SECURITY.md](docs/SECURITY.md) | How to report a vulnerability privately. |
 | [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
 | [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
-| [docs/PLAN.md](docs/PLAN.md) | Project plan, decisions and current status. |
 
 ## License
 
