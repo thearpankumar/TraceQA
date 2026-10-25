@@ -1,7 +1,9 @@
 # Backlog
 
-Work that is designed but not built. Nothing here exists in the code yet. Each item says why it matters, how
-it should work and how to tell that it is done, so that someone can pick it up without asking.
+Work that is designed but not built. Where an item builds on code that already exists, it names that code;
+everything else it describes does not exist yet. `LIM-` items are limits of features that shipped, and CUT-8
+records a refusal that the code already enforces. Each item says why it matters, how it should work and how to
+tell that it is done, so that someone can pick it up without asking.
 
 ## How to read this file
 
@@ -56,8 +58,9 @@ that tree edit distance is too slow, which is why it supports configurable compa
 - The URL is normalised: fragment dropped, volatile query parameters removed (a configurable list, with
   defaults such as `utm_*`, `_`, `ts`, `cache`), remaining parameters sorted.
 - The component id set is the ids of visible components in `components.json`, with the site chrome factored out.
-  Chrome means ids that the site map (`traceqa map`, `site.json`) shows on at least a configurable share of
-  pages (default 0.8), such as the header and footer links. They are tracked once, globally, and not per state.
+  Chrome means ids shown on at least a configurable share of the pages (default 0.8), such as the header and
+  footer links. Today `site.json` from `traceqa map` lists as `shared` only the ids on every page read, so the
+  share has to be added to `map`. Chrome ids are tracked once, globally, and not per state.
 - The modal marker is the id of the open dialog (`role=dialog` or `aria-modal`) or empty.
 - The frame set is the list of frame ids that are attached.
 - Two states are equal when their URLs are equal, their modal markers are equal and the Jaccard similarity of
@@ -135,7 +138,8 @@ not possible in general.
 
 ### EXP-4: The page.act protocol extension (A3)
 
-**Why.** Today `page.act` is reserved and returns only `{ok}`. The walker and the oracles need to know what the
+**Why.** Today `page.act` is only reserved: the schema's `PageActResult` holds just `ok`, and both drivers
+answer it with `unsupported`. The walker and the oracles need to know what the
 action did: whether the page navigated, whether a popup, dialog or download appeared, what failed.
 
 **Design.** Extend `PageActResult` in `spec/driver-protocol.schema.json` and regenerate types:
@@ -147,11 +151,14 @@ action did: whether the page navigated, whether a popup, dialog or download appe
 - `downloads`: list of `{url, suggestedName}`; the file is not stored.
 - `consoleErrors`: list of `{text, source}` raised during the action.
 - `failedRequests`: list of `{url, method, status or failure}`; the URL is redacted like other driver errors.
-- `domChanged`: whether a mutation observer saw any change during settle.
+- `domChanged`: whether a mutation observer, which the driver installs for the action, saw any change during
+  settle (no mutation observer exists today).
 - `settle`: `{waitedMs, quiet}` where `quiet` is false when the settle limit was reached.
 - Capability negotiation in `session.open`: the driver lists the action kinds and event kinds it supports
   (`click`, `hover`, `type`, `select`, `press`; `dialogs`, `popups`, `downloads`, `console`, `network`). The
-  existing `consoleEvents` and `networkEvents` flags are replaced by this list. WebDriver (Safari) reports
+  existing `consoleEvents` and `networkEvents` capability flags are required fields (false in both drivers
+  today), so they stay, deprecated, for older drivers; `failedRequests`, which reports failed requests at load
+  through `page.eval`, stays as it is. WebDriver (Safari) reports
   fewer kinds; the engine marks the missing signals as `not_observed` in findings instead of treating them as
   clean.
 - The change is additive: a driver that does not send the new fields still validates, and the extraction path
@@ -274,8 +281,8 @@ re-run the exact path that exposed a bug.
 - Output: a result per edge (`reproduced` when the target state equals the recorded one by EXP-1, `diverged`
   with the actual state, or `missing` when the component id is not on the page) and exit code 1 if any
   edge is not reproduced.
-- The existing recorder and replay crates model recorded conversations; replay of an explorer path reuses the
-  safety policy, so a replay is also read-only by default.
+- `traceqa-replay` today only replays recorded SDK conversations (a stand-in for `traceqa serve`), so this is
+  a new command. It reuses the safety policy, so a replay is also read-only by default.
 
 **Acceptance.**
 - Replaying every edge of a buggy-shop graph, edge by edge from the seed, reproduces at least 95% of the
@@ -291,7 +298,7 @@ re-run the exact path that exposed a bug.
 
 **Design.**
 - After an action, first ask the collector for the components under the nodes that changed (the mutation
-  observer used for settle gives the roots), by id, and merge them into the previous component list.
+  observer that EXP-4 adds for `domChanged` gives the roots; settling today uses none), by id, and merge them into the previous component list.
 - Fall back to a full extraction when the URL changed, a modal opened or closed, the changed region exceeds
   a share of the page (default 30%), or every Nth action (default 25) to catch drift.
 - The merge must give the same id set as a full extraction. A debug flag `--verify-incremental` does both and
@@ -311,7 +318,8 @@ re-run the exact path that exposed a bug.
 **Why.** One end-to-end check ties the pieces together and is what a verifier runs.
 
 **Design.** A test that starts the buggy shop on a free port and runs
-`traceqa explore <url> --seed 1 --max-actions 150` in read-only mode, in each of the three browsers.
+`traceqa explore <url> --seed 1 --max-actions 150` in read-only mode, in each of the three browsers. The
+shop's server logs nothing today, so it gains the request-method log that EXP-5 describes.
 
 **Acceptance.**
 - Touches at least 80% of the discoverable components within 150 actions.
@@ -333,7 +341,8 @@ origin allow-list (`--oracle-origin`, default the start origin). Signals that ar
 by repeat runs (ORA-10).
 
 Every oracle has a planted-bug fixture: a small page where the bug exists, plus an unmodified control page
-where the oracle must stay silent.
+where the oracle must stay silent. Rule ids are lower case with hyphens, like the existing findings rules
+(`covered-at-load`).
 
 ### ORA-1: Dead control
 
@@ -341,10 +350,10 @@ where the oracle must stay silent.
 
 **Design.** After a click, if the URL, the visible component id set, the modal marker and the DOM mutation
 observer all report no change, and no request was made, the control is dead. Controls whose only effect is an
-attribute change (such as `aria-pressed`) change the DOM and are therefore not dead. Rule id `dead_control`.
+attribute change (such as `aria-pressed`) change the DOM and are therefore not dead. Rule id `dead-control`.
 
 **Acceptance.**
-- On a fixture with one button that has no handler and one with a handler, exactly one `dead_control` finding
+- On a fixture with one button that has no handler and one with a handler, exactly one `dead-control` finding
   is reported, for the first.
 - On the control page, zero findings.
 - On the buggy shop in read-only mode, the finding ids are the same over 5 repeats.
@@ -356,11 +365,12 @@ attribute change (such as `aria-pressed`) change the DOM and are therefore not d
 **Why.** Script errors triggered by an interaction are real bugs, and often the only visible symptom.
 
 **Design.** Uses `consoleErrors` from EXP-4. Uncaught exceptions are errors; `console.error` is a warning;
-messages from non-allow-listed origins are dropped. Rule ids `uncaught_error`, `console_error`.
+messages from non-allow-listed origins are dropped. Rule ids `uncaught-error`, `console-error`.
 
-**Acceptance.** A fixture whose click handler throws gives one `uncaught_error` with the component id; a
-fixture that calls `console.error` gives one `console_error`; a third-party script that logs from another origin
-gives none. The `not_observed` marker appears on the WebDriver driver.
+**Acceptance.** A fixture whose click handler throws gives one `uncaught-error` with the component id; a
+fixture that calls `console.error` gives one `console-error`; a third-party script that logs from another origin
+gives none. The `not_observed` marker appears on the WebDriver driver. The `consoleEvents` capability exists
+today but is false in both drivers, and `not_observed` is a new marker set from it.
 
 **Size.** S
 
@@ -369,8 +379,10 @@ gives none. The `not_observed` marker appears on the WebDriver driver.
 **Why.** A click that triggers a 500 or a network failure is a bug the page may hide from the user.
 
 **Design.** Uses `failedRequests` from EXP-4. Status 400 and above on allowed origins, and network failures,
-are findings, `failed_request`, with the redacted URL. Optional status allow-list (`--ignore-status 404` for
-known probes).
+are findings, `failed-request`, with the redacted URL. Optional status allow-list (`--ignore-status 404` for
+known probes). What exists today covers the page load only: the Playwright driver's `failedRequests`
+capability and the `requests_failed` warning give a count and five URLs since `page.goto`, with no status or
+method, so they cannot be pinned on one click; the WebDriver driver reports none.
 
 **Acceptance.** A fixture whose button fetches a URL that returns 500 gives one finding with status 500; one that
 returns 404 with `--ignore-status 404` gives none; a request to a third-party origin gives none by default.
@@ -381,10 +393,11 @@ returns 404 with `--ignore-status 404` gives none; a request to a third-party or
 
 **Why.** A link that leads to a 404 page is a broken link.
 
-**Design.** Uses `navigated.status` and the existing `http_error_status` logic. Rule id `error_page`. The edge
+**Design.** Uses `navigated.status` and the threshold of the existing `http_error_status` warning (status 400
+and above), which today checks the page load only. Rule id `error-page`. The edge
 target state is marked as an error state and is not expanded.
 
-**Acceptance.** A fixture with a link to a 404 page gives one `error_page` finding with status 404 and the
+**Acceptance.** A fixture with a link to a 404 page gives one `error-page` finding with status 404 and the
 walker does not expand that state (no edges leave it).
 
 **Size.** S
@@ -393,14 +406,14 @@ walker does not expand that state (no edges leave it).
 
 **Why.** Keyboard users lose their place when focus vanishes after an action, or cannot leave a dialog.
 
-**Design.** After an action, read the active element. Findings: `focus_lost` (focus moved to the body after an
-action that removed the focused component), `focus_trapped` (in an open non-modal region, Tab does not leave the
+**Design.** After an action, read the active element. Findings: `focus-lost` (focus moved to the body after an
+action that removed the focused component), `focus-trapped` (in an open non-modal region, Tab does not leave the
 region in 20 presses). For modal dialogs trapping is correct; the check is the other direction: Escape must
-close it (`dialog_not_dismissible`).
+close it (`dialog-not-dismissible`).
 
-**Acceptance.** Fixtures: a button that removes itself and leaves focus on the body gives `focus_lost`; a
-non-modal panel with a Tab trap gives `focus_trapped`; a correct modal gives none; a modal that ignores Escape
-gives one `dialog_not_dismissible`.
+**Acceptance.** Fixtures: a button that removes itself and leaves focus on the body gives `focus-lost`; a
+non-modal panel with a Tab trap gives `focus-trapped`; a correct modal gives none; a modal that ignores Escape
+gives one `dialog-not-dismissible`.
 
 **Size.** M
 
@@ -409,11 +422,11 @@ gives one `dialog_not_dismissible`.
 **Why.** A click that makes the page jump is a visible quality problem.
 
 **Design.** Sum the movement of components that did not change (matching by id, using the bounding boxes already
-in `components.json`) relative to the viewport height. Above a threshold (default 0.1) report `layout_shift`
+in `components.json`) relative to the viewport height. Above a threshold (default 0.1) report `layout-shift`
 with the largest movers. It uses boxes before and after, not the browser's layout-shift API, so it works in every
 browser.
 
-**Acceptance.** A fixture that injects a banner above the content on click gives `layout_shift` with a score above
+**Acceptance.** A fixture that injects a banner above the content on click gives `layout-shift` with a score above
 0.1; a fixture that opens an overlay without moving content gives none.
 
 **Size.** S
@@ -423,10 +436,11 @@ browser.
 **Why.** If an action covers a primary control with something that stays (a toast, a sticky bar), the user
 cannot use it.
 
-**Design.** After the action, run the existing covered-at-load rule logic on the new state and report
-controls covered now but not before. Rule id `newly_covered`.
+**Design.** After the action, read the same collector `covered` state that the `covered-at-load` rule uses at
+load (and that `diff` compares across runs as `became_covered`), and report controls covered now but not
+before. Rule id `newly-covered`.
 
-**Acceptance.** A fixture with a sticky bar that appears over the checkout button gives one `newly_covered`
+**Acceptance.** A fixture with a sticky bar that appears over the checkout button gives one `newly-covered`
 finding naming that button; a fixture with a toast that disappears within the settle time gives none.
 
 **Size.** S
@@ -437,10 +451,11 @@ finding naming that button; a fixture with a toast that disappears within the se
 
 **Design.** For components with `aria-expanded`, `aria-pressed` or `aria-checked` in the collector's state, check
 that the value changed after a click that changed what is visible (for `aria-expanded`: the controlled region
-changed visibility). Rule id `aria_state_not_updated`.
+changed visibility). Rule id `aria-state-not-updated`.
 
 **Acceptance.** A fixture disclosure that shows its panel but keeps `aria-expanded="false"` gives one finding; a
-correct disclosure gives none; a toggle that has no ARIA state gives none (that is a different, static rule).
+correct disclosure gives none; a toggle that has no ARIA state gives none (that would be a separate static
+rule, not built either).
 
 **Size.** S
 
@@ -465,7 +480,8 @@ model name; without `--judge` there are zero model calls; a finding without a re
 
 **Design.** `traceqa explore --repeat N` (N at least 2) runs the same walk N times with the same seed and tags
 each finding with its occurrence count `k`. The report lists findings seen in all N runs as `confirmed` and the
-rest as `intermittent`. Gating by k-of-n is CUT-3.
+rest as `intermittent`. It extends the group folder and `stability.json` that `extract --repeat` already
+writes, from components to findings. Gating by k-of-n is CUT-3.
 
 **Acceptance.** A fixture whose handler throws on a random 50% of clicks produces `intermittent` over
 10 repeats; a deterministic bug produces `confirmed` in 10 of 10.
@@ -485,8 +501,8 @@ focusability, and styles.
 **Design.** Add a collector options tier, like the existing `includeHidden`, so the default output stays small:
 - `aria`: copy `aria-describedby`, `aria-labelledby` resolved text, `aria-controls`, `aria-haspopup`,
   `aria-current`, `aria-live` into `attrs`.
-- `focus`: `tabindex` value, whether the element is focusable, and its position in sequential tab order
-  (computed without moving focus).
+- `focus`: whether the element is focusable and its position in sequential tab order (computed without moving
+  focus); the `tabindex` value is already in `attrs`.
 - `styles`: an optional computed-styles tier: colour, background colour, font size, outline when focused, and
   `cursor`. Off by default because it is large and slow.
 - Each tier is a field of `ExtractOptions` and of the CLI (`--collect aria,focus,styles`), and is recorded in
@@ -505,10 +521,11 @@ focusability, and styles.
 ### ARC-2: Rate-limited, tested MCP progress notifications (rest of A8)
 
 **Why.** `extract` already sends `notifications/progress` when the request carries a progress token: one per
-engine event, so a long page can send many in a burst, and no test pins the behaviour, so it can break unseen.
+engine event, so a long page can send many in a burst. The one test (`extract_reports_progress_and_a_summary`
+in `crates/traceqa-mcp/src/tests.rs`) checks only the token and increasing values, on a run with no browser.
 
 **Design.** Keep the notifications on the steps the engine already reports (browser started, navigated,
-settled, extracted), rate-limited to one per second with the last step always sent, and add an MCP test.
+settled, extracted), rate-limited to one per second with the last step always sent, and extend the tests.
 
 **Acceptance.** A test client that sends a progress token receives at least 3 progress notifications during an
 extract of the buggy shop, never two within one second, and none when it sends no token; each notification has
@@ -580,31 +597,33 @@ one-line justification in the config. Tests may be exempt through `per-file-igno
 
 **Size.** M
 
-### HYG-2: A run.start racing the first signal can still be accepted (X19 residual)
+### HYG-2: A run.start racing the first signal is accepted, then cancelled (X19 residual)
 
-**Why.** `traceqa serve` and `traceqa mcp` cancel all runs on a signal. A `run.start` request that arrives at
-the same moment as the first signal can be accepted after the cancellation sweep, and then runs unguarded until
-the escalation timer ends it.
+**Why.** `traceqa serve` and `traceqa mcp` refuse new runs once the first signal is seen, and a monitor
+cancels every registered run again every 20 ms. A `run.start` that passes the check just before the signal is
+still accepted and registered after the sweep; the monitor cancels it within about 20 ms, but the client has
+been given a run that never had a chance, and a driver may already be starting.
 
 **Design.** Set the cancel flag first, then take the runs lock and check the flag again before registering a run.
 A start that sees the flag set answers with a "shutting down" error and starts nothing. The sweep takes the same
 lock after setting the flag, so no run can be added after it.
 
 **Acceptance.** A stress test sends the signal and a `run.start` concurrently, 200 times; every iteration ends
-with no run left running, either a refused start or a started run that was then cancelled, and the process
-exits within the documented bound. Run before the fix, the test fails in at least one of the 200 iterations.
+with no run left running, a start answered after the cancel flag was set is always refused (never given a run
+id), and the process exits within the documented bound. Run before the fix, at least one of the 200 iterations
+gives a run id after the flag was set.
 
 **Size.** S
 
 ### HYG-3: Driver tree kill without `ps -A -o pid=,ppid=` (X20 residual)
 
 **Why.** On Unix the engine kills the whole driver process tree by walking `ps`. On busybox (Alpine) `ps` does
-not accept `-A -o pid=,ppid=`, so only the driver itself is killed and its browser child processes can be left
-running.
+not accept `-A -o pid=,ppid=` (to confirm in the image first), so only the driver itself is killed and its
+browser child processes can be left running.
 
 **Design.** Fall back, in order: (1) read `/proc/<pid>/stat` for every pid and build the tree from the parent
-field; (2) start each driver in its own session (`setsid`) so the whole group can be killed with one signal to
-the negative pid. Prefer (2) for new starts and keep (1) as the fallback for the process list.
+field; (2) start each driver in its own session so the whole group can be killed with one signal to the
+negative pid, through the `setsid` command, because the workspace forbids the `unsafe` a `pre_exec` call needs. Prefer (2) for new starts and keep (1) as the fallback for the process list.
 
 **Acceptance.** A test inside an Alpine container image (`alpine:3`) starts a driver that spawns two children,
 cancels the run, and asserts that none of the three processes is left (process count of zero). The test fails on
@@ -616,14 +635,14 @@ the current code in the same image.
 
 **Why.** `check_run_folder` in `conftest.py` checks `run.json`, `events.jsonl` and every `components.json`
 against `spec/`, but not the files that only some runs write: `axe.json` (`--axe`), `findings.json`
-(`traceqa findings`) and the group folders `runs/g_<id>/` (`--repeat`, `traceqa map`). `tests/test_axe.py`
-validates `axe.json` by itself, so a test that reaches one of these files another way (through `serve`, MCP or
-`map`) checks nothing about it.
+(`traceqa findings`) and the group folders `runs/g_<id>/` (`--repeat`, `traceqa map`). They are validated only
+inside the tests that make them (`test_axe.py`, `test_findings.py`, `test_findings_cross_browser.py`,
+`test_repeat.py`, `test_map.py`), so a file reached another way (through `serve` or MCP) is not checked.
 
 **Design.** In the target check, validate `axe.json` against `AxeResults` and `findings.json` against
 `FindingsFile` when they exist, with the same round-trip rule as `components.json`. Add a `check_group_folder`
-for `group.json` (`RunGroup`), `stability.json` (`StabilityFile`) and `site.json` (`SiteFile`), and call it from
-the repeat and map tests.
+for `group.json` (`RunGroup`), `stability.json` (`StabilityFile`) and `site.json` (`SiteFile`), and use it in
+the repeat and map tests instead of their own helpers.
 
 **Acceptance.** A copy of a run folder whose `axe.json` lacks `axeVersion` fails `check_run_folder` with a
 message naming `axe.json`; the same for a `findings.json` with an unknown field and a `site.json` without
@@ -667,6 +686,8 @@ each component, and concise mode flags every component below 1.0; on a run witho
 ### CUT-3: Findings gating by k-of-n repeats
 
 **Why.** `--fail-on` gates on one run. With flaky signals (ORA-2, ORA-3) a single run causes false failures.
+`extract --fail-on-unstable` already gates on component presence over `--repeat` runs; nothing gates findings
+that way.
 
 **Design.** `--fail-on-repeats K/N` runs N times and fails only for findings seen in K or more runs. Builds on
 ORA-10 and `--repeat`.
@@ -851,12 +872,14 @@ item is marked as untrusted page content like the rest of the tool's output.
 concise `get_components` on the buggy shop is about 52% of the detailed answer (5759 against 11058 bytes for
 37 rows), where the aim was about a third.
 
-**Design.** In concise rows, give the locator only when it is unique and short, and add a flag that says a
-locator is available through `find` or the detailed answer otherwise. Measure with the same call the MCP test
+**Design.** Today every concise row carries the locator cut to 120 characters, plus `locator_unique: false`
+when it is not unique. Give it only when it is unique and short, and add a flag that says a locator is
+available through `find` or the detailed answer otherwise. Measure with the same call the MCP test
 makes.
 
 **Acceptance.** The MCP test's measurement of `get_components` with `limit` 37 on `chromium-1280x800` prints a
-concise size of at most 40% of the detailed size, and the test asserts that bound; an agent can still get every
+concise size of at most 40% of the detailed size, and the test's bound (today `small <= 0.6 * large`) is
+tightened to that; an agent can still get every
 component's locator from the detailed answer.
 
 **Size.** S
