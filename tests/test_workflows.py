@@ -172,19 +172,20 @@ def test_audit_workflow_never_uses_the_self_hosted_pool_and_has_read_only_permis
         assert command in text, command
 
 
-def test_dependabot_covers_every_ecosystem_in_the_repo() -> None:
-    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
-    assert config["version"] == 2
-    ecosystems = {u["package-ecosystem"] for u in config["updates"]}
-    assert {"cargo", "github-actions"} <= ecosystems  # npm: the TypeScript SDK was removed
-    assert ecosystems & {"uv", "pip"}
-    for update in config["updates"]:
-        assert (ROOT / update["directory"].lstrip("/")).is_dir(), update
-        assert update["schedule"]["interval"] == "weekly"
-        assert update["commit-message"]["prefix"] == "chore(deps)"
-    # Each ecosystem's manifest or lock file really is where Dependabot is pointed.
-    assert (ROOT / "Cargo.lock").is_file() and (ROOT / "uv.lock").is_file()
-    # assert (ROOT / "sdks" / "typescript" / "package-lock.json").is_file()  # the TypeScript SDK was removed
+# Dependabot is switched off (.github/dependabot.yml is commented out), so is its test.
+# def test_dependabot_covers_every_ecosystem_in_the_repo() -> None:
+#     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+#     assert config["version"] == 2
+#     ecosystems = {u["package-ecosystem"] for u in config["updates"]}
+#     assert {"cargo", "github-actions"} <= ecosystems  # npm: the TypeScript SDK was removed
+#     assert ecosystems & {"uv", "pip"}
+#     for update in config["updates"]:
+#         assert (ROOT / update["directory"].lstrip("/")).is_dir(), update
+#         assert update["schedule"]["interval"] == "weekly"
+#         assert update["commit-message"]["prefix"] == "chore(deps)"
+#     # Each ecosystem's manifest or lock file really is where Dependabot is pointed.
+#     assert (ROOT / "Cargo.lock").is_file() and (ROOT / "uv.lock").is_file()
+#     # assert (ROOT / "sdks" / "typescript" / "package-lock.json").is_file()  # the TypeScript SDK was removed
 
 
 def test_codeowners_gates_the_github_directory() -> None:
