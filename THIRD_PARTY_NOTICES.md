@@ -34,6 +34,6 @@ The MPL-2.0 licence text is the `LICENSE` file installed next to `axe.min.js`, a
 https://www.mozilla.org/en-US/MPL/2.0/. If TraceQA ever bundled axe-core, MPL-2.0 would require the licence text and
 the notices inside the file to be kept and recipients to be told where the source is (the address above), as the
 Mozilla MPL 2.0 FAQ describes (https://www.mozilla.org/en-US/MPL/2.0/FAQ/, questions 7 to 9). That is why a release
-must not include it (see `docs/releasing.md`).
+must not include it.
 
 axe-core's own third-party notices, if the package has any, are installed as `LICENSE-3RD-PARTY.txt`.

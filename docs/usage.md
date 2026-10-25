@@ -416,7 +416,7 @@ matches nothing.
   SARIF viewers and other tools; use `--format github` for GitHub. Mapping components to source files
   is on the backlog. `traceqa findings --format sarif` is the same for findings.
 
-A workflow (every action is pinned to a full commit SHA, as `docs/releasing.md` requires; install
+A workflow (every action is pinned to a full commit SHA; install
 TraceQA in the way that suits you before the first `traceqa` step):
 
 ```yaml
