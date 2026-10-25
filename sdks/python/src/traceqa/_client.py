@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,12 @@ LogHandler = Callable[[str], None]
 
 BINARY_ENV = "TRACEQA_BIN"
 EXCERPT_CHARS = 80
+
+# How much of the engine's stderr an exit error carries: the last lines, each cut short. The same
+# bounds as the TypeScript SDK.
+TAIL_LINES = 20
+TAIL_LINE_CHARS = 500
+TAIL_CHARS = 4000
 
 
 class TraceQAError(Exception):
@@ -39,11 +46,21 @@ class EngineStartError(TraceQAError):
 
 
 class EngineExitedError(TraceQAError):
-    """The engine's pipe closed or the process died. `exit_code` is set when it is known."""
+    """The engine's pipe closed or the process died.
 
-    def __init__(self, message: str, exit_code: int | None = None) -> None:
+    `exit_code` is set when it is known. `stderr_tail` holds the last lines the engine wrote to its
+    standard error (at most 20 lines, 500 characters each, 4000 in all), also at the end of the
+    message; it is `None` when the engine wrote nothing. The engine redacts what it logs.
+    """
+
+    def __init__(self, message: str, exit_code: int | None = None, stderr_tail: str | None = None) -> None:
         super().__init__(message)
         self.exit_code = exit_code
+        self._stderr_tail = stderr_tail
+
+    @property
+    def stderr_tail(self) -> str | None:
+        return self._stderr_tail
 
 
 class EngineRefusedError(TraceQAError):
@@ -140,14 +157,39 @@ def _find_binary(binary: str | os.PathLike[str] | None) -> str:
     return str(candidate)
 
 
-def _pump_log(stream: IO[str], on_log: LogHandler | None) -> None:
-    """Read the engine's stderr to its end, calling `on_log` for each line when there is one."""
+class _StderrTail:
+    """The last lines of the engine's stderr, bounded. Fed by the reader thread, read by whoever
+    builds an exit error, so it has a lock."""
+
+    def __init__(self) -> None:
+        self._lines: deque[str] = deque(maxlen=TAIL_LINES)
+        self._lock = threading.Lock()
+
+    def add(self, line: str) -> None:
+        if len(line) > TAIL_LINE_CHARS:
+            line = line[:TAIL_LINE_CHARS] + "..."
+        with self._lock:
+            self._lines.append(line)
+
+    def text(self) -> str | None:
+        """The kept lines joined, the end of them when over the total bound; `None` when empty."""
+        with self._lock:
+            text = "\n".join(self._lines)
+        if len(text) > TAIL_CHARS:
+            text = text[len(text) - TAIL_CHARS :]
+        return text or None
+
+
+def _pump_log(stream: IO[str], on_log: LogHandler | None, tail: _StderrTail) -> None:
+    """Read the engine's stderr to its end. Every line is kept in `tail`; `on_log` gets it when set."""
     with contextlib.suppress(OSError, ValueError):
-        for line in stream:
+        for raw in stream:
+            line = raw.rstrip("\r\n")
+            tail.add(line)
             if on_log is None:
                 continue
             try:
-                on_log(line.rstrip("\r\n"))
+                on_log(line)
             except Exception:  # a broken handler must not stop the reading: the pipe has to be drained
                 on_log = None
 
@@ -194,10 +236,11 @@ class Engine:
         # logs, already redacted by the engine) is read here so the pipe never fills, and goes to
         # the caller only when it asked for it with on_log.
         self._log_thread: threading.Thread | None = None
+        self._stderr_tail = _StderrTail()
         stderr: IO[str] | None = getattr(self._process, "stderr", None)
         if stderr is not None:
             self._log_thread = threading.Thread(
-                target=_pump_log, args=(stderr, on_log), name="traceqa-log", daemon=True
+                target=_pump_log, args=(stderr, on_log, self._stderr_tail), name="traceqa-log", daemon=True
             )
             self._log_thread.start()
         self._next_id = 0
@@ -284,12 +327,22 @@ class Engine:
         except subprocess.TimeoutExpired:
             return None
 
+    def _exited(self, code: int | None) -> EngineExitedError:
+        """The error for an engine that is gone: its exit code and the last lines it wrote to stderr."""
+        # The pipe closes when the engine exits, so the reader is about to finish; wait a moment for
+        # the last lines to be in.
+        if self._log_thread is not None:
+            self._log_thread.join(1)
+        message = "the engine exited unexpectedly" + (f" with code {code}" if code is not None else "")
+        tail = self._stderr_tail.text()
+        if tail is not None:
+            message += "\nengine stderr (last lines):\n  " + tail.replace("\n", "\n  ")
+        return EngineExitedError(message, code, tail)
+
     def _read(self) -> dict[str, Any]:
         line = self._stdout.readline()
         if not line:
-            code = self._exit_code()
-            suffix = f" with code {code}" if code is not None else ""
-            raise EngineExitedError(f"the engine exited unexpectedly{suffix}", code)
+            raise self._exited(self._exit_code())
         self._last_line = line
         try:
             message = json.loads(line)
@@ -319,7 +372,7 @@ class Engine:
                 self._stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
                 self._stdin.flush()
             except (OSError, ValueError) as error:  # a broken pipe, or stdin already closed
-                raise EngineExitedError("the engine exited unexpectedly", self._process.poll()) from error
+                raise self._exited(self._process.poll()) from error
         return request_id
 
     def _call(self, method: str, params: models.BaseModel) -> dict[str, Any]:

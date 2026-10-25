@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import queue
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -92,8 +93,22 @@ class FakeStdin:
 class FakeProcess:
     """Stands in for subprocess.Popen. `reply` sees every request and returns the lines to send back."""
 
-    def __init__(self, reply: Reply, *, hangs: bool = False, broken: bool = False, returncode: int = 0) -> None:
+    def __init__(
+        self,
+        reply: Reply,
+        *,
+        hangs: bool = False,
+        broken: bool = False,
+        returncode: int = 0,
+        stderr: list[str] | None = None,
+    ) -> None:
         self.reply = reply
+        if stderr is not None:
+            # What the engine wrote to its standard error before it went.
+            self.stderr = FakeStdout()
+            for text in stderr:
+                self.stderr.push(text + "\n")
+            self.stderr.eof()
         self.hangs = hangs  # does not exit when its stdin closes
         self.broken = broken
         self.returncode = returncode
@@ -360,3 +375,116 @@ def test_second_concurrent_extract_is_refused(install) -> None:
     worker.join(10)
     engine.close()
     assert outcome and outcome[0].status == "cancelled"
+
+
+def dies(reply_line: str = "") -> Reply:
+    def reply(request: dict[str, Any]) -> list[str] | None:
+        return [reply_line]  # the engine dies before it answers
+
+    return reply
+
+
+def test_an_engine_that_dies_says_why(install) -> None:
+    with pytest.raises(traceqa.EngineExitedError) as raised:
+        extract_with(dies(), install, returncode=3, stderr=["boom: driver crashed"])
+    error = raised.value
+    assert error.exit_code == 3
+    assert str(error) == (
+        "the engine exited unexpectedly with code 3\nengine stderr (last lines):\n  boom: driver crashed"
+    )
+    assert error.stderr_tail == "boom: driver crashed"
+
+
+def test_the_tail_is_bounded(install) -> None:
+    lines = [f"line {number} " + "x" * 2000 for number in range(100)]
+    with pytest.raises(traceqa.EngineExitedError) as raised:
+        extract_with(dies(), install, returncode=1, stderr=lines)
+    tail = raised.value.stderr_tail
+    assert tail is not None
+    kept = tail.split("\n")
+    assert len(kept) <= _client.TAIL_LINES
+    assert len(tail) <= _client.TAIL_CHARS
+    assert all(len(text) <= _client.TAIL_LINE_CHARS + len("...") for text in kept)
+    assert kept[-1].startswith("line 99 ") and kept[-1].endswith("...")
+    assert "line 0 " not in tail
+    assert str(raised.value).endswith(kept[-1])
+
+
+def test_a_few_long_lines_keep_the_end_of_the_tail(install) -> None:
+    lines = [f"{number}:" + "y" * 600 for number in range(10)]
+    with pytest.raises(traceqa.EngineExitedError) as raised:
+        extract_with(dies(), install, stderr=lines)
+    tail = raised.value.stderr_tail
+    assert tail is not None and len(tail) == _client.TAIL_CHARS
+    assert tail.endswith("9:" + "y" * 498 + "...")
+
+
+def test_stderr_tail_is_read_only() -> None:
+    error = traceqa.EngineExitedError("gone", 1, "why")
+    assert error.stderr_tail == "why"
+    with pytest.raises(AttributeError):
+        error.stderr_tail = "other"  # type: ignore[misc]
+    assert traceqa.EngineExitedError("gone").stderr_tail is None
+    assert traceqa.EngineExitedError("gone", 2).exit_code == 2
+
+
+def test_no_stderr_text_means_the_message_has_no_suffix(install) -> None:
+    with pytest.raises(traceqa.EngineExitedError) as raised:
+        extract_with(dies(), install, returncode=3, stderr=[])
+    assert str(raised.value) == "the engine exited unexpectedly with code 3"
+    assert raised.value.stderr_tail is None
+    with pytest.raises(traceqa.EngineExitedError) as raised:
+        extract_with(dies(), install, returncode=3)  # no stderr pipe at all
+    assert raised.value.stderr_tail is None
+
+
+def test_a_raising_on_log_keeps_draining_and_keeping_the_tail(install) -> None:
+    seen: list[str] = []
+
+    def broken(text: str) -> None:
+        seen.append(text)
+        raise RuntimeError("the caller's handler is broken")
+
+    install(FakeProcess(dies(), returncode=1, stderr=["first", "second", "third"]))
+    with pytest.raises(traceqa.EngineExitedError) as raised:
+        traceqa.Engine(binary="fake-traceqa", on_log=broken)
+    assert seen == ["first"], "the handler is dropped after it raised"
+    assert raised.value.stderr_tail == "first\nsecond\nthird"
+
+
+def test_on_log_still_gets_every_line(install) -> None:
+    seen: list[str] = []
+    install(FakeProcess(dies(), stderr=["a", "b"]))
+    with pytest.raises(traceqa.EngineExitedError):
+        traceqa.Engine(binary="fake-traceqa", on_log=seen.append)
+    assert seen == ["a", "b"]
+
+
+NOISY_ENGINE = """
+import json, sys
+sys.stderr.write(("noise " * 40 + "\\n") * 25000)  # about 6 MB, far more than a pipe holds
+sys.stderr.flush()
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": %s}), flush=True)
+sys.stdin.read()
+"""
+
+
+def test_a_chatty_engine_never_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_popen = subprocess.Popen
+    code = NOISY_ENGINE % json.dumps(HELLO)
+    monkeypatch.setattr(
+        _client.subprocess, "Popen", lambda _command, **kwargs: real_popen([sys.executable, "-c", code], **kwargs)
+    )
+    outcome: dict[str, Any] = {}
+
+    def start() -> None:
+        engine = traceqa.Engine(binary="fake-traceqa")
+        outcome["info"] = engine.info
+        engine.close(timeout=20)
+
+    thread = threading.Thread(target=start, daemon=True)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive(), "the engine blocked on a full stderr pipe"
+    assert "info" in outcome
