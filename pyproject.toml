@@ -1,7 +1,7 @@
 [project]
 name = "traceqa-workspace"
 version = "0.1.0"
-description = "Python side of the TraceQA monorepo. Not published: the packages live in python/."
+description = "Python side of the TraceQA monorepo. Not published: the packages live in web-drivers/."
 requires-python = ">=3.10"
 dependencies = []
 
@@ -24,7 +24,8 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["python/*", "web-drivers/*", "sdks/python"]
+# members = ["python/*", "web-drivers/*", "sdks/python"]  # python/ moved into web-drivers/
+members = ["web-drivers/*", "sdks/python"]
 
 [tool.uv.sources]
 traceqa-protocol = { workspace = true }
@@ -33,15 +34,18 @@ traceqa-driver-webdriver = { workspace = true }
 traceqa = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["python", "page-script", "web-drivers", "sdks", "tests"]
+# testpaths = ["python", "page-script", "web-drivers", "sdks", "tests"]  # python/ moved into web-drivers/
+testpaths = ["page-script", "web-drivers", "sdks", "tests"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
 line-length = 120
 # Generated files.
 extend-exclude = [
-    "python/traceqa-protocol/src/traceqa_protocol/models.py",
-    "python/traceqa-protocol/src/traceqa_protocol/contracts.py",
+    # "python/traceqa-protocol/src/traceqa_protocol/models.py",
+    # "python/traceqa-protocol/src/traceqa_protocol/contracts.py",
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/models.py",
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py",
 ]
 
 [tool.ruff.lint]
@@ -59,17 +63,21 @@ ignore = [
 # list and no shell. Nothing here builds the command from untrusted input.
 "sdks/python/src/**" = ["S603"]
 "web-drivers/*/src/**" = ["S603", "S310"]  # S310: urlopen only talks to the local WebDriver / fixture server
-"python/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
+# "python/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
+"web-drivers/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
 "scripts/*.py" = ["S603"]
 "testbed/bench/*.py" = ["S603"]
 
 [tool.pyright]
-include = ["python", "web-drivers", "sdks/python"]
+# include = ["python", "web-drivers", "sdks/python"]  # python/ moved into web-drivers/
+include = ["web-drivers", "sdks/python"]
 exclude = [
     "**/node_modules",
     "**/.venv",
-    "python/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
-    "python/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
+    # "python/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
+    # "python/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
 ]
 pythonVersion = "3.10"
 typeCheckingMode = "standard"

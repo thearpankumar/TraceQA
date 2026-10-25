@@ -17,7 +17,7 @@ PACKAGES = [
     "sdks/python",
     "web-drivers/playwright-py",
     "web-drivers/webdriver-py",
-    "python/traceqa-protocol",
+    "web-drivers/traceqa-protocol",
 ]
 
 

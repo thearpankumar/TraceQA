@@ -20,7 +20,7 @@ classifiers = [
 dependencies = ["pydantic>=2.7"]
 
 [project.urls]
-Homepage = "https://github.com/thearpankumar/TraceQA/tree/master/python/traceqa-protocol#readme"
+Homepage = "https://github.com/thearpankumar/TraceQA/tree/master/web-drivers/traceqa-protocol#readme"
 Repository = "https://github.com/thearpankumar/TraceQA"
 Issues = "https://github.com/thearpankumar/TraceQA/issues"
 Documentation = "https://github.com/thearpankumar/TraceQA/blob/master/docs/usage.md"

@@ -431,7 +431,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `page-script/` | The script that runs inside each page and reads its elements (the collector). |
 | `sdks/python/` | The Python SDK. |
 | `sdks/typescript/` | The TypeScript SDK. |
-| `python/traceqa-protocol/` | Python types generated from `spec/`, shared by the drivers and the SDK. |
+| `web-drivers/traceqa-protocol/` | Python types generated from `spec/` and the base the drivers share. |
 | `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
 | `testbed/sites/buggy-shop/` | Demo site with a manifest of its expected components. |
 | `testbed/sites/collector-cases/` | Small pages that test the collector one behaviour at a time. |

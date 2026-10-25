@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # The engine, the CLI and every crate take their version from the workspace.
 CARGO = ROOT / "Cargo.toml"
 PYPROJECTS = [
-    ROOT / "python" / "traceqa-protocol" / "pyproject.toml",
+    ROOT / "web-drivers" / "traceqa-protocol" / "pyproject.toml",
     ROOT / "web-drivers" / "playwright-py" / "pyproject.toml",
     ROOT / "web-drivers" / "webdriver-py" / "pyproject.toml",
     ROOT / "sdks" / "python" / "pyproject.toml",
