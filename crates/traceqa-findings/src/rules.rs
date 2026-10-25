@@ -13,7 +13,7 @@ use traceqa_protocol::types::{
 use crate::{clean, RunInput};
 
 /// Rule ids in report order.
-pub const RULES: [&str; 7] = [
+pub const RULES: [&str; 8] = [
     "unnamed-control",
     "weak-name-source",
     "fake-button",
@@ -21,6 +21,7 @@ pub const RULES: [&str; 7] = [
     "covered-at-load",
     "ambiguous-names",
     "missing-autocomplete",
+    "browsers-disagree",
 ];
 
 const NOT_A_CLAIM: &str = "This is an automated check, not a conformance claim.";
@@ -98,7 +99,7 @@ impl Draft<'_> {
     }
 }
 
-fn sanitise_map(map: Map<String, Value>) -> Map<String, Value> {
+pub(crate) fn sanitise_map(map: Map<String, Value>) -> Map<String, Value> {
     map.into_iter().map(|(k, v)| (k, sanitise(v))).collect()
 }
 
@@ -133,9 +134,11 @@ pub fn target_findings(file: &ComponentsFile) -> Vec<Finding> {
     out
 }
 
-/// Findings that need every target of a run. None yet: the browsers-disagree rule will use this.
-pub fn run_findings(_run: &RunInput) -> Vec<Finding> {
-    Vec::new()
+/// Findings that need every target of a run: `browsers-disagree`.
+pub fn run_findings(run: &RunInput) -> Vec<Finding> {
+    let mut out = Vec::new();
+    crate::cross_browser::browsers_disagree(run, &mut out);
+    out
 }
 
 fn unnamed_control(file: &ComponentsFile, out: &mut Vec<Finding>) {

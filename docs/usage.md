@@ -683,6 +683,7 @@ characters removed.
 | `covered-at-load` | `warning` | `medium` | none | `coveredBy` (selector), `coveredInstances` | Check that the cover is meant to be there (a dialog, a banner). If not, fix the stacking. |
 | `ambiguous-names` | `info` | `medium` | 2.4.4 | `name`, `destinationCount`, `destinations` (up to 10), `components` (up to 10) | Make the link text say where it goes, or add an `aria-label` that does. |
 | `missing-autocomplete` | `info` | `low` | 1.3.5 | `inputType`, `instances` | Add `autocomplete` (`current-password`, `email`, `tel`, ...). |
+| `browsers-disagree` (run scope) | `warning` when the component is missing in some browsers, or visible or enabled in some and not others; `info` when only the instance count differs | `high` (missing), `medium` | none | `viewport`, `differs` (`presence`, `visible`, `enabled`, `instances`), `browsers` (per browser: `present`, `instances`, `visible`, `enabled`), `presentIn`, `missingIn`, `similar` | Check which browser is right. A page read before it settled does this too: try `--settle-ms`. |
 
 Only visible instances are checked, and only these rules are shipped: a rule that
 is often wrong costs more trust than it earns.
@@ -711,6 +712,16 @@ is often wrong costs more trust than it earns.
   the lowest component id of the group. Two links with the same name and the same
   destination are fine.
 - `missing-autocomplete` checks `<input>` of type `password`, `email` and `tel`.
+- `browsers-disagree` needs two or more browsers at one viewport and is the only rule
+  that looks across targets. Its findings are written to the run-level
+  `findings.json` (`scope: "run"`), with the id `browsers-disagree:<componentId>@<width>x<height>`
+  (the size is part of the id because a component can disagree at one size and not
+  at another). No browser is the reference: the evidence lists every browser's values.
+  It compares the same component id (see `traceqa diff`) by presence, by whether
+  none, some or all instances are visible or enabled, and by the number of instances.
+  A control whose role differs between browsers has a different id in each, so it
+  shows as missing in one; `similar` then names the component of that browser at the
+  same path that looks like it (`role_changed` or `name_changed`).
 
 ### Suppressions
 
@@ -1187,7 +1198,7 @@ Roles the collector reports but Playwright does not see (`summary` as a button, 
 | `frame_eval_failed` | A same-origin frame could not be read. |
 | `scroll_limit_reached` | The page is longer than the scroll limit, so its end was not read. |
 | `screenshot_failed` | The browser could not take a screenshot, so some crops are missing. The component data is unaffected. |
-| `browsers_disagree` | Browsers found different numbers of elements at the same viewport. Reported once for the run, in `events.jsonl`. |
+| `browsers_disagree` | Browsers found different numbers of elements at the same viewport. Reported once per such viewport, in `events.jsonl`. The message names the component ids each browser lacks (up to 5 per browser, `and N more` after that), never page text; the event data holds `viewport`, `counts`, `missing` (up to 20 ids per browser) and `missingTotal`. It fires when the instance counts differ; browsers that find the same number of different elements raise no warning, but `traceqa findings` reports them as `browsers-disagree` findings. |
 | `http_error_status` | The page answered with an HTTP error, such as 404 or 500. It was still read, since an error page can be the thing under test. WebDriver browsers do not report the status, so they never raise this. |
 | `page_load_incomplete` | The page's content arrived, but it had not finished loading when the time limit ran out, for example because one image never arrived. It was read as it stood. A page whose content never arrives fails instead. |
 | `covered_elements` | Components on screen lie under something else, such as a cookie banner or a modal's backdrop, so a click would not reach them. Each such instance has `covered: true` and `coveredBy`. |
@@ -1233,7 +1244,7 @@ end of any running intro animation. A page can still be unready after all of
 that: a splash screen held by a timer gives no sign that more is coming.
 
 When browsers report different numbers of elements for the same page, the run
-ends with a `browsers_disagree` warning. Give such a page time with
+ends with a `browsers_disagree` warning that names the ids each browser lacks. Give such a page time with
 `--settle-ms`:
 
 ```sh

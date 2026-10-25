@@ -7,6 +7,7 @@
 //!
 //! Every finding is an automated check, not a conformance claim.
 
+mod cross_browser;
 pub mod rules;
 pub mod suppress;
 
@@ -322,7 +323,8 @@ mod tests {
                 },
                 TargetInput {
                     dir: "firefox-1280x800".into(),
-                    file: file_with(json!([])),
+                    // The same components in both browsers: no browsers-disagree finding.
+                    file: file_with(json!([unnamed("c_000000000001")])),
                 },
             ],
         };

@@ -47,6 +47,10 @@ struct Scripted {
     fail_text: &'static str,
     /// The `requestsFailed` the pretend page reports with every page.eval, as JSON, when it reports one.
     requests_failed: Option<&'static str>,
+    /// The browser whose page reads see one more element.
+    extra: Option<&'static str>,
+    /// The browser of the open session.
+    browser: String,
 }
 
 #[derive(Default)]
@@ -100,10 +104,12 @@ impl Transport for Scripted {
         }
         Ok(match method {
             "driver.hello" => json!({
-                "driverName": "scripted", "driverVersion": "0", "protocolVersion": 1, "browsers": ["firefox"],
+                "driverName": "scripted", "driverVersion": "0", "protocolVersion": 1,
+                "browsers": if self.extra.is_some() { vec!["firefox", "chromium"] } else { vec!["firefox"] },
                 "exclusiveBrowsers": if self.exclusive { vec!["firefox"] } else { vec![] }
             }),
             "session.open" => {
+                self.browser = params["target"]["browser"].as_str().unwrap_or_default().to_string();
                 let open = self.sessions.open.fetch_add(1, Ordering::SeqCst) + 1;
                 self.sessions.most_at_once.fetch_max(open, Ordering::SeqCst);
                 // Long enough for another worker to open its session too, if nothing stops it.
@@ -138,6 +144,12 @@ impl Transport for Scripted {
             }
             "page.eval" => {
                 let mut collected: Value = serde_json::from_str(COLLECTED).unwrap();
+                if collector && self.extra == Some(self.browser.as_str()) {
+                    let mut extra = collected["elements"][0].clone();
+                    extra["name"] = json!("Wishlist");
+                    extra["selectors"] = json!(["#wishlist"]);
+                    collected["elements"].as_array_mut().unwrap().push(extra);
+                }
                 collected["scroll"] = json!({ "y": self.y, "height": PAGE_HEIGHT, "viewportHeight": VIEW_HEIGHT });
                 let mut evaluated = json!({ "results": [
                     { "frame": { "id": "main", "url": "https://shop.test/", "crossOrigin": false }, "value": collected },
@@ -298,6 +310,8 @@ fn run_case(case: Case) -> Outcome {
                 chain: case.chain,
                 fail_text: case.fail_text,
                 requests_failed: case.requests_failed,
+                extra: None,
+                browser: String::new(),
             };
             Driver::connect(Box::new(transport))
         };
@@ -518,6 +532,8 @@ fn run_six_targets_with(
                 chain: None,
                 fail_text: "connection refused",
                 requests_failed: None,
+                extra: None,
+                browser: String::new(),
             };
             Driver::connect(Box::new(transport))
         };
@@ -534,6 +550,109 @@ fn run_six_targets_with(
         &mut |event| events.push(event.clone()),
     );
     (manifest, events, sessions.most_at_once.load(Ordering::SeqCst), folder)
+}
+
+/// Two browsers read one page one after the other; the named browser sees one more element.
+fn run_two_browsers_one_reads_more(extra_browser: Option<&'static str>) -> (Vec<Event>, PathBuf) {
+    let request = RunStartParams {
+        feature: "extract".into(),
+        url: "https://shop.test".into(),
+        targets: vec![BrowserTarget::named("firefox"), BrowserTarget::named("chromium")],
+        viewports: vec![Viewport {
+            width: 1280,
+            height: 400,
+        }],
+        out_dir: Some(
+            std::env::temp_dir()
+                .join("traceqa-engine-tests")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        parallel: Some(1),
+        options: None,
+        storage_state: None,
+    };
+    let run = Run::prepare(request).unwrap();
+    let folder = run.folder().to_path_buf();
+    let scripted = || {
+        let start = move || {
+            let transport = Scripted {
+                y: 0.0,
+                calls: Arc::default(),
+                full_page: true,
+                fail: None,
+                sessions: Arc::default(),
+                exclusive: false,
+                slow_loads: Arc::default(),
+                reaches: None,
+                final_url: "https://shop.test/".into(),
+                frame_url: "https://pay.example.com/widget".into(),
+                opened: Arc::default(),
+                chain: None,
+                fail_text: "connection refused",
+                requests_failed: None,
+                extra: extra_browser,
+                browser: String::new(),
+            };
+            Driver::connect(Box::new(transport))
+        };
+        Drivers::starting_with(vec![Box::new(start)])
+    };
+    let cancel = AtomicBool::new(false);
+    let mut events = Vec::new();
+    run.execute(
+        &Execution {
+            policy: None,
+            drivers: &scripted,
+            cancel: &cancel,
+        },
+        &mut |event| events.push(event.clone()),
+    );
+    (events, folder)
+}
+
+#[test]
+fn a_browser_that_finds_fewer_elements_is_named_with_the_ids_it_lacks() {
+    let (events, folder) = run_two_browsers_one_reads_more(Some("chromium"));
+    let warning = events
+        .iter()
+        .find(|event| event.data.get("code") == Some(&json!("browsers_disagree")))
+        .unwrap_or_else(|| {
+            panic!(
+                "no warning in {:#?}",
+                events.iter().map(|e| (&e.message, &e.data)).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(warning.data["viewport"], json!({ "width": 1280, "height": 400 }));
+    let (fewer, more) = (
+        warning.data["counts"]["firefox"].as_u64().unwrap(),
+        warning.data["counts"]["chromium"].as_u64().unwrap(),
+    );
+    assert_eq!(more, fewer + 1);
+    let missing = warning.data["missing"]["firefox"].as_array().unwrap();
+    assert_eq!(missing.len(), 1);
+    assert!(warning.data["missing"].get("chromium").is_none());
+    let id = missing[0].as_str().unwrap();
+    assert!(id.starts_with("c_"), "{id}");
+    assert!(
+        warning.message.contains(&format!(
+            "firefox found {fewer}, chromium found {more}; missing in firefox: {id}."
+        )),
+        "{}",
+        warning.message
+    );
+    // Ids only: none of the page's words are in the event.
+    assert!(!warning.message.contains("Buggy"), "{}", warning.message);
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn browsers_that_read_the_same_page_raise_no_disagreement() {
+    let (events, folder) = run_two_browsers_one_reads_more(Some("webkit"));
+    assert!(events
+        .iter()
+        .all(|event| event.data.get("code") != Some(&json!("browsers_disagree"))));
+    fs::remove_dir_all(folder).unwrap();
 }
 
 #[test]
