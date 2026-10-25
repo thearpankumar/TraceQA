@@ -162,9 +162,14 @@ def test_known_browsers_match_what_the_drivers_open() -> None:
     table = re.search(r"^BROWSERS: .*?= \{(.*?)^\}", playwright, re.S | re.M)
     assert table
     opened = set(re.findall(r'^\s+"(\w+)":', table.group(1), re.M))
-    opened.add(re.search(r'^CDP = "(\w+)"', playwright, re.M).group(1))
+    cdp = re.search(r'^CDP = "(\w+)"', playwright, re.M)
+    assert cdp
+    opened.add(cdp.group(1))
     webdriver = (ROOT / "web-drivers/webdriver-py/src/traceqa_driver_webdriver/driver.py").read_text(encoding="utf-8")
-    opened |= {re.search(rf'^{name} = "(\w+)"', webdriver, re.M).group(1) for name in ("SAFARI", "REMOTE")}
+    for name in ("SAFARI", "REMOTE"):
+        constant = re.search(rf'^{name} = "(\w+)"', webdriver, re.M)
+        assert constant
+        opened.add(constant.group(1))
     assert known == opened
 
 
@@ -369,6 +374,7 @@ SIGNALS = [
 
 def _interrupt_module():
     spec = importlib.util.spec_from_file_location("interrupt", SUPPORT / "interrupt.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["interrupt"] = module  # a dataclass in the module looks itself up here
     spec.loader.exec_module(module)

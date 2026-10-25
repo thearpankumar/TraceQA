@@ -64,7 +64,7 @@ def stop(server: FixtureServer) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--port", type=int, default=0)
     server = start(parser.parse_args().port)
     print(f"Heal fixture: http://127.0.0.1:{server.server_address[1]}/a", flush=True)

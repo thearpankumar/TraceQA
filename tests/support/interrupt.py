@@ -47,6 +47,7 @@ def send_interrupt(process: subprocess.Popen) -> None:
     `run_interrupted`, which takes care of that.
     """
     spec = importlib.util.spec_from_file_location("console_runner", RUNNER)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module._send(process)
@@ -91,6 +92,7 @@ def run_interrupted(
     }
     if os.name != "nt":
         runner = importlib.util.spec_from_file_location("console_runner", RUNNER)
+        assert runner is not None and runner.loader is not None
         module = importlib.util.module_from_spec(runner)
         runner.loader.exec_module(module)
         return Interrupted(**module.run(spec))

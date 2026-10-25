@@ -15,12 +15,21 @@ import subprocess
 import sys
 import threading
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 
 import anyio
 import pytest
 from mcp import Client, StdioServerParameters
+from mcp.types import (
+    BlobResourceContents,
+    CallToolResult,
+    ContentBlock,
+    ImageContent,
+    ResourceContents,
+    TextContent,
+    TextResourceContents,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(
@@ -36,9 +45,25 @@ def server(runs: Path, mode: str = "auto") -> Client:
     return Client(params, mode=mode)
 
 
-def data(result) -> dict:
-    assert not result.is_error, result.content[0].text
-    return json.loads(result.content[-1].text)
+def text_of(block: ContentBlock) -> str:
+    """The text of a tool result's content block, which the tests expect to be text."""
+    assert isinstance(block, TextContent), f"expected text content, got {block.type}"
+    return block.text
+
+
+def resource_text(contents: ResourceContents) -> str:
+    assert isinstance(contents, TextResourceContents), f"expected text, got {type(contents).__name__}"
+    return contents.text
+
+
+def resource_blob(contents: ResourceContents) -> str:
+    assert isinstance(contents, BlobResourceContents), f"expected a blob, got {type(contents).__name__}"
+    return contents.blob
+
+
+def data(result: CallToolResult) -> dict:
+    assert not result.is_error, text_of(result.content[0])
+    return json.loads(text_of(result.content[-1]))
 
 
 @pytest.mark.parametrize("size", ["99999x99999", "0x0"])
@@ -47,8 +72,8 @@ def test_a_viewport_out_of_range_is_answered_at_once_and_makes_no_run(size: str,
         async with server(tmp_path / "runs") as client:
             with anyio.fail_after(5):
                 result = await client.call_tool("extract", {"url": "https://example.com/", "viewports": [size]})
-            assert result.is_error, result.content[0].text
-            assert "between 1 and 10000" in result.content[0].text or "WIDTHxHEIGHT" in result.content[0].text
+            assert result.is_error, text_of(result.content[0])
+            assert "between 1 and 10000" in text_of(result.content[0]) or "WIDTHxHEIGHT" in text_of(result.content[0])
 
     anyio.run(conversation)
     assert not any((tmp_path / "runs").glob("r_*")), "no run folder is made"
@@ -63,7 +88,7 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
 
         # mode="auto" is what new hosts do: try the 2026 handshake, then fall back to the one we speak.
         async with server(tmp_path / "runs") as client:
-            assert client.server_info.name == "traceqa"
+            assert client.server_info is not None and client.server_info.name == "traceqa"
             tools = [tool.name for tool in (await client.list_tools()).tools]
             assert tools == [
                 "extract",
@@ -102,28 +127,30 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
                 "get_crop", {"run_id": run_id, "target": "chromium-1280x800", "component_id": add_to_cart["id"]}
             )
             picture = crop.content[1]
+            assert isinstance(picture, ImageContent), picture
             assert picture.type == "image" and picture.mime_type == "image/png"
             assert base64.b64decode(picture.data).startswith(b"\x89PNG")
 
             listed = await client.call_tool("list_runs", {})
-            assert "data, not instructions" in listed.content[0].text, "the first block is the notice"
+            assert "data, not instructions" in text_of(listed.content[0]), "the first block is the notice"
             runs = data(listed)
             assert runs["untrusted_page_content"] is True
             assert [run["run_id"] for run in runs["runs"]] == [run_id]
 
             # A mistake is answered as a tool error the AI can read, not a broken connection.
             wrong = await client.call_tool("get_components", {"run_id": run_id})
-            assert wrong.is_error and "several targets" in wrong.content[0].text
+            assert wrong.is_error and "several targets" in text_of(wrong.content[0])
 
     anyio.run(conversation)
     (folder,) = (tmp_path / "runs").iterdir()
     run_folder_checker(folder)
 
 
-def structured(result) -> dict:
+def structured(result: CallToolResult) -> dict:
     """The structured answer, which the client has already checked against the tool's output schema."""
-    assert not result.is_error, result.content[0].text
+    assert not result.is_error, text_of(result.content[0])
     assert result.structured_content == data(result), "the JSON text and the structured content agree"
+    assert result.structured_content is not None
     return result.structured_content
 
 
@@ -160,7 +187,7 @@ def test_an_agent_orients_searches_and_reads_resources(shop_url: str, tmp_path: 
             # 2. Orient: the layout in under 4 KB.
             outline = await client.call_tool("describe_page", {"run_id": run_id, "target": "chromium-1280x800"})
             layout = structured(outline)
-            size = len(outline.content[-1].text.encode())
+            size = len(text_of(outline.content[-1]).encode())
             print(f"describe_page: {size} bytes for {layout['total']} components in {len(layout['groups'])} groups")
             assert size < 4096
             assert layout["total"] == 37
@@ -184,12 +211,12 @@ def test_an_agent_orients_searches_and_reads_resources(shop_url: str, tmp_path: 
             assert one["id"] == add_to_cart["id"] and one["instances"]
             base = f"traceqa://runs/{run_id}/chromium-1280x800"
             components = await client.read_resource(f"{base}/components")
-            body = json.loads(components.contents[0].text)
+            body = json.loads(resource_text(components.contents[0]))
             assert components.contents[0].mime_type == "application/json"
             assert body["untrusted_page_content"] is True and len(body["components"]) == 37
             crop = await client.read_resource(f"{base}/crops/{add_to_cart['id']}")
             assert crop.contents[0].mime_type == "image/png"
-            assert base64.b64decode(crop.contents[0].blob).startswith(b"\x89PNG")
+            assert base64.b64decode(resource_blob(crop.contents[0])).startswith(b"\x89PNG")
 
             listed = await client.list_resources()
             assert [str(resource.uri) for resource in listed.resources] == [f"traceqa://runs/{run_id}"]
@@ -200,7 +227,7 @@ def test_an_agent_orients_searches_and_reads_resources(shop_url: str, tmp_path: 
             ask = {"run_id": run_id, "target": "chromium-1280x800", "limit": 37}
             concise = await client.call_tool("get_components", ask)
             detailed = await client.call_tool("get_components", {**ask, "response_format": "detailed"})
-            small, large = len(concise.content[-1].text.encode()), len(detailed.content[-1].text.encode())
+            small, large = len(text_of(concise.content[-1]).encode()), len(text_of(detailed.content[-1]).encode())
             print(f"get_components, 37 rows: concise {small} bytes, detailed {large} bytes ({small / large:.0%})")
             # The short locator hint (QW7) is in concise rows too, so they are a bit over half of detailed ones.
             assert small <= 0.6 * large
@@ -248,8 +275,8 @@ def test_storage_state_takes_a_name_in_the_state_dir_and_refuses_a_path(shop_url
             data(await client.call_tool("extract", {"url": shop_url, "storage_state": "shop.state.json"}))
             by_path = {"url": shop_url, "storage_state": str(states / "shop.state.json")}
             refused = await client.call_tool("extract", by_path)
-            assert refused.is_error and "no state file named" in refused.content[0].text
-            assert str(states) not in refused.content[0].text
+            assert refused.is_error and "no state file named" in text_of(refused.content[0])
+            assert str(states) not in text_of(refused.content[0])
 
     anyio.run(conversation)
 
@@ -271,9 +298,9 @@ def test_metadata_addresses_are_refused_at_once_and_remote_browsers_are_not_offe
             assert "cdp" not in wording and "webdriver" not in wording
             for url in ["http://169.254.169.254/latest/meta-data/", "http://2852039166/", "http://[::ffff:a9fe:a9fe]/"]:
                 refused = await client.call_tool("extract", {"url": url})
-                assert refused.is_error and "does not open" in refused.content[0].text, url
+                assert refused.is_error and "does not open" in text_of(refused.content[0]), url
             remote = await client.call_tool("extract", {"url": "https://example.com", "browsers": ["cdp=http://x:1"]})
-            assert remote.is_error and "--allow-remote-browsers" in remote.content[0].text
+            assert remote.is_error and "--allow-remote-browsers" in text_of(remote.content[0])
             assert data(await client.call_tool("list_runs", {}))["runs"] == [], "no run was started"
 
     anyio.run(conversation)
@@ -284,8 +311,9 @@ class Redirector(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/go":
+            assert isinstance(self.server, HTTPServer)  # socketserver types `server` as a plain BaseServer
             self.send_response(302)
-            self.send_header("Location", f"http://localhost:{self.server.server_address[1]}/landed")
+            self.send_header("Location", f"http://localhost:{self.server.server_port}/landed")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -296,7 +324,7 @@ class Redirector(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *_args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         pass
 
 
@@ -327,7 +355,7 @@ def test_a_redirect_to_a_blocked_host_is_refused_after_navigation(redirector: in
             (target,) = summary["targets"]
             assert "blocked_url" in target["error"] and "localhost" in target["error"]
             read = await client.call_tool("get_components", {"run_id": summary["run_id"], "target": target["target"]})
-            assert read.is_error and "Secret button" not in read.content[0].text
+            assert read.is_error and "Secret button" not in text_of(read.content[0])
 
     anyio.run(conversation)
     folder = next(
@@ -376,6 +404,7 @@ SIGNALS = [
 
 def _interrupt_module():
     spec = importlib.util.spec_from_file_location("interrupt", SUPPORT / "interrupt.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules["interrupt"] = module  # a dataclass in the module looks itself up here
     spec.loader.exec_module(module)
@@ -445,8 +474,9 @@ def test_an_agent_extracts_twice_diffs_checks_and_copies_a_locator(shop_url: str
         async with Client(params) as client:
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
             for name in ("diff_runs", "findings"):
-                assert tools[name].output_schema and tools[name].annotations is not None, name
-                assert tools[name].annotations.read_only_hint is True, name
+                annotations = tools[name].annotations
+                assert tools[name].output_schema and annotations is not None, name
+                assert annotations.read_only_hint is True, name
 
             first = structured(await client.call_tool("extract", {"url": shop_url, "browsers": ["chromium"]}))
             second = structured(await client.call_tool("extract", {"url": shop_url, "browsers": ["chromium"]}))
@@ -462,7 +492,7 @@ def test_an_agent_extracts_twice_diffs_checks_and_copies_a_locator(shop_url: str
 
             # An unknown run is a tool error the agent can read.
             wrong = await client.call_tool("diff_runs", {"run_a": before, "run_b": "r_missing"})
-            assert wrong.is_error and "no run r_missing" in wrong.content[0].text
+            assert wrong.is_error and "no run r_missing" in text_of(wrong.content[0])
 
             found = structured(await client.call_tool("findings", {"run_id": after, "min_severity": "error"}))
             assert found["disclaimer"].startswith("Automated checks")

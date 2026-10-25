@@ -8,6 +8,7 @@ from pathlib import Path
 SPEC = importlib.util.spec_from_file_location(
     "console_runner", Path(__file__).resolve().parent / "support" / "console_runner.py"
 )
+assert SPEC is not None and SPEC.loader is not None
 runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
 

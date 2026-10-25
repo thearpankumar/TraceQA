@@ -37,7 +37,7 @@ def start(port: int = 0) -> FixtureServer:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--port", type=int, default=4176)
     server = start(parser.parse_args().port)
     # Flushed, because tests in other languages start this script and wait for the line.

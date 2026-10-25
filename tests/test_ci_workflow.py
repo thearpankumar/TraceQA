@@ -10,14 +10,16 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def load_ci() -> dict[str, Any]:
+def load_ci() -> dict[Any, Any]:  # keys are not all strings: PyYAML reads `on` as True
     return yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
 
 def triggers() -> dict[str, Any]:
     ci = load_ci()
     # PyYAML reads the bare key `on` as the boolean True.
-    return ci.get(True, ci.get("on"))
+    on = ci.get(True, ci.get("on"))
+    assert on is not None, "ci.yml has no `on:` section"
+    return on
 
 
 def test_runs_on_demand_and_weekly() -> None:

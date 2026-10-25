@@ -18,6 +18,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import cast
 
 HERE = Path(__file__).resolve().parent
 # This file runs as a script and is also loaded by path, so the shared module is found by path too.
@@ -30,7 +31,10 @@ FLAKY = '<button type="button">Flaky</button>'
 
 
 class Handler(BaseHTTPRequestHandler):
-    server: Counting
+    @property
+    def fixture(self) -> Counting:
+        # socketserver types `server` as a plain BaseServer; this handler is only ever served by Counting.
+        return cast(Counting, self.server)
 
     def log_message(self, format: str, *args: object) -> None:
         pass
@@ -40,7 +44,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         page = (HERE / "index.html").read_text(encoding="utf-8")
-        body = page.replace(MARKER, FLAKY if self.server.next_request_has_flaky() else "").encode("utf-8")
+        body = page.replace(MARKER, FLAKY if self.fixture.next_request_has_flaky() else "").encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -71,7 +75,7 @@ def start(port: int = 0) -> Counting:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--port", type=int, default=4176)
     server = start(parser.parse_args().port)
     # Flushed, because tests in other languages start this script and wait for the line.

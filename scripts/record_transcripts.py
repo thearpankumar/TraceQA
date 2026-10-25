@@ -103,6 +103,8 @@ def start_shop() -> tuple[int, list[Any]]:
     spec = importlib.util.spec_from_file_location(
         "buggy_shop_serve", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py"
     )
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load a module from its path")
     shop = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shop)
     return shop.start_on_free_ports()
@@ -122,17 +124,20 @@ def record(name: str, scenario: dict[str, Any], port: int, runs: str) -> list[di
     process = subprocess.Popen(
         [str(BINARY), "serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8"
     )
+    if process.stdin is None or process.stdout is None:
+        raise RuntimeError("the engine was started without its pipes")
+    engine_in, engine_out = process.stdin, process.stdout
     lines: list[dict[str, Any]] = [{"note": scenario["note"]}]
 
     def send(message: dict[str, Any], real: dict[str, Any]) -> None:
         lines.append({"client": message})
-        process.stdin.write(json.dumps(real) + "\n")
-        process.stdin.flush()
+        engine_in.write(json.dumps(real) + "\n")
+        engine_in.flush()
 
     raw: list[dict[str, Any]] = []
 
     def receive() -> dict[str, Any]:
-        line = process.stdout.readline()
+        line = engine_out.readline()
         if not line:
             raise SystemExit(f"{name}: the engine exited")
         raw.append(json.loads(line))
@@ -184,8 +189,8 @@ def record(name: str, scenario: dict[str, Any], port: int, runs: str) -> list[di
     shutdown = {"jsonrpc": "2.0", "id": 4, "method": "engine.shutdown", "params": {}}
     send(shutdown, shutdown)
     receive()
-    process.stdin.close()
-    rest = process.stdout.read()
+    engine_in.close()
+    rest = engine_out.read()
     if process.wait() != 0 or rest.strip():
         raise SystemExit(f"{name}: the engine did not end cleanly: exit {process.returncode}, then {rest[:300]!r}")
     return lines
