@@ -90,6 +90,25 @@ function Resolve-TraceQAVersion([string]$Repo, [string]$Wanted) {
     return $Wanted
 }
 
+# Hashing and unzipping use .NET directly, not Get-FileHash and Expand-Archive: Windows PowerShell started
+# from PowerShell 7 inherits PowerShell 7's module path, loads the wrong Utility module, and has no
+# Get-FileHash at all.
+function Get-TraceQASha256([string]$Path) {
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try { $bytes = $sha.ComputeHash($stream) } finally { $sha.Dispose() }
+    } finally {
+        $stream.Dispose()
+    }
+    return ([BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+}
+
+function Expand-TraceQAZip([string]$Zip, [string]$Destination) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($Zip, $Destination)
+}
+
 function Get-TraceQAExpectedHash([string]$SumsFile, [string]$Name) {
     foreach ($line in Get-Content -LiteralPath $SumsFile) {
         $parts = $line.Trim() -split '\s+', 2
@@ -145,14 +164,14 @@ function Install-TraceQA([string]$Version, [string]$InstallDir, [bool]$NoModifyP
         Get-TraceQAFile "$base/$archive" $zip
         Get-TraceQAFile "$base/SHA256SUMS.txt" $sums
         $expected = Get-TraceQAExpectedHash $sums $archive
-        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
+        $actual = Get-TraceQASha256 $zip
         if ($actual -ne $expected) {
             throw "checksum mismatch for $archive (expected $expected, got $actual); nothing was installed"
         }
         Write-TraceQAStep 'checksum verified'
 
         $unpacked = Join-Path $tmp 'unpacked'
-        Expand-Archive -LiteralPath $zip -DestinationPath $unpacked -Force
+        Expand-TraceQAZip $zip $unpacked
         $exe = Join-Path $unpacked 'traceqa.exe'
         if (-not (Test-Path -LiteralPath $exe)) { throw "$archive holds no traceqa.exe" }
 

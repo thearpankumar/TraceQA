@@ -375,6 +375,29 @@ def test_ps1_a_wrong_checksum_installs_nothing(tmp_path: Path, github: FakeGitHu
     assert not (tmp_path / "bin").exists()
 
 
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="needs PowerShell 7 to take its module path from")
+@windows_only
+def test_ps1_works_in_windows_powershell_started_from_powershell_7(tmp_path: Path, github: FakeGitHub) -> None:
+    # Windows PowerShell started from PowerShell 7 (or from a shell PowerShell 7 started) inherits PowerShell 7's
+    # PSModulePath, loads the wrong Utility module and has no Get-FileHash; CI's test step is such a shell.
+    pwsh_modules = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", "$env:PSModulePath"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    github.publish(f"traceqa-{TAG}-windows-x86_64.zip", zip_release())
+    target = tmp_path / "bin"
+    run = run_ps1(
+        "powershell",
+        PSModulePath=pwsh_modules,
+        TRACEQA_VERSION=TAG,
+        TRACEQA_DOWNLOAD_BASE=github.download_base,
+        TRACEQA_INSTALL_DIR=str(target),
+        TRACEQA_NO_MODIFY_PATH="1",
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "checksum verified" in run.stdout
+    assert (target / "traceqa.exe").is_file()
+
+
 @windows_only
 @pytest.mark.parametrize("shell", POWERSHELLS)
 def test_ps1_through_iex_reports_a_failure_without_closing_the_session(tmp_path: Path, shell: str) -> None:
