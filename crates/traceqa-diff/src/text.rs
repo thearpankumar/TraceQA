@@ -29,6 +29,17 @@ pub fn clean(text: &str) -> String {
         .collect()
 }
 
+/// Cleans `text` and cuts it to [`MAX_CHARS`] characters, for a line of plain text (a GitHub
+/// annotation, a SARIF message). Nothing is quoted: the caller escapes for its own format.
+pub fn plain(text: &str) -> String {
+    let shown = clean(text);
+    if shown.chars().count() > MAX_CHARS {
+        shown.chars().take(MAX_CHARS - 1).collect::<String>() + "\u{2026}"
+    } else {
+        shown
+    }
+}
+
 /// Cleans `text`, cuts it to [`MAX_CHARS`] characters and returns it as a Markdown code span that
 /// cannot end early: the fence is one backtick longer than the longest run inside. A pipe becomes
 /// U+2223 (a look-alike), because a pipe would split a table cell whatever its escaping.

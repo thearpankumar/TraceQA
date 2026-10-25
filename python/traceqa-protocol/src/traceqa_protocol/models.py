@@ -7,6 +7,70 @@ from typing import Any
 from enum import Enum
 
 
+class BaselineSource(BaseModel):
+    """
+    The run a baseline was made from.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    engine_version: str = Field(
+        ...,
+        validation_alias="engineVersion", serialization_alias="engineVersion",
+        description="Or 'unknown' when the run had no run.json.",
+    )
+
+
+class BaselineAlias(BaseModel):
+    """
+    Says that the removed component `from` is the added component `to`. A diff then reports one renamed pair (a pairedWith link with reason 'aliased') and the removed, added and paired gates ignore it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    from_: str = Field(..., validation_alias="from", serialization_alias="from", description="A component id in the baseline.")
+    to: str = Field(..., description="A component id in the new run.")
+    reason: str = Field(..., description="Known values: rename, heal, manual.")
+    evidence: str | None = Field(
+        default=None, description="Free text: why they are the same."
+    )
+    added_at: str = Field(
+        ..., validation_alias="addedAt", serialization_alias="addedAt", description="RFC 3339 timestamp in UTC."
+    )
+
+
+class BaselinePromotion(BaseModel):
+    """
+    One save or promote.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    at: str
+    summary: str = Field(
+        ...,
+        description="What changed against the baseline it replaced, for example '2 removed, 1 added, 0 changed', or 'first save'.",
+    )
+
+
+class BaselineRef(BaseModel):
+    """
+    Which baseline was compared.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    key: str
+    url: str
+    promoted_at: str = Field(..., validation_alias="promotedAt", serialization_alias="promotedAt")
+
+
 class EngineHelloParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -945,6 +1009,58 @@ class FindingsFile(BaseModel):
     )
 
 
+class ManifestAbsent(BaseModel):
+    """
+    A component that must not be found.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: str
+    name: str
+
+
+class ManifestComponent(BaseModel):
+    """
+    One expected component.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    case: str | None = Field(
+        default=None, description="Which hard case it covers (free text, for reports)."
+    )
+    role: str
+    name: str | None = Field(
+        default=None,
+        description="The accessible name. Absent means an empty name unless template is true.",
+    )
+    template: bool | None = Field(
+        default=None, description="True when the instances have different names."
+    )
+    instances: int | None = Field(
+        default=None, description="How many copies exist. Default 1.", ge=0
+    )
+    confidence: Confidence | None = Field(
+        default=None, description="high (default) or low."
+    )
+    frame: str | None = Field(
+        default=None,
+        description="Name of the iframe it lives in. Default: the main page.",
+    )
+    shadow: bool | None = Field(
+        default=None, description="True when it is inside shadow DOM."
+    )
+    hidden: list[str] | None = Field(
+        default=None, description="Names of the viewports where it is not visible."
+    )
+    disabled: int | None = Field(
+        default=None, description="How many instances are disabled. Default 0.", ge=0
+    )
+
+
 class Timings(BaseModel):
     """
     Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.
@@ -1043,6 +1159,20 @@ class Instance(BaseModel):
     state: ElementState
     frame_id: str = Field(..., validation_alias="frameId", serialization_alias="frameId")
     in_shadow_dom: bool = Field(..., validation_alias="inShadowDom", serialization_alias="inShadowDom")
+
+
+class BaselineTarget(BaseModel):
+    """
+    One saved browser-and-viewport folder.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    dir: str = Field(..., description="Folder name, for example chromium-1280x800.")
+    browser: BrowserInfo
+    viewport: Viewport
+    has_crops: bool = Field(..., validation_alias="hasCrops", serialization_alias="hasCrops")
 
 
 class RunEventParams(BaseModel):
@@ -1149,6 +1279,34 @@ class PageEvalResult(BaseModel):
     requests_failed: RequestsFailed | None = Field(default=None, validation_alias="requestsFailed", serialization_alias="requestsFailed")
 
 
+class ManifestFile(BaseModel):
+    """
+    The whole manifest.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int | None = Field(
+        default=None,
+        validation_alias="formatVersion", serialization_alias="formatVersion",
+        description="Absent in older files, which are version 1.",
+        ge=0,
+    )
+    viewports: dict[str, Viewport] = Field(
+        ...,
+        description="Named viewports, for example desktop and mobile. `hidden` lists these names.",
+    )
+    absent: list[ManifestAbsent] | None = Field(
+        default=None,
+        description="Components that must NOT be reported, for example content that only exists after a click.",
+    )
+    warnings: list[str] | None = Field(
+        default=None, description="Warning codes the page is expected to raise."
+    )
+    components: list[ManifestComponent]
+
+
 class TargetSummary(BaseModel):
     """
     One browser at one viewport.
@@ -1213,6 +1371,49 @@ class Component(BaseModel):
         description="How to find the component again with a Playwright-style locator. Uniqueness is within this file (one page, one browser); `traceqa codegen` combines the files of every browser.",
     )
     instances: list[Instance]
+
+
+class BaselineFile(BaseModel):
+    """
+    baseline.json. Holds no storage state, no run.json and no error text, so the folder is safe to commit.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    key: str = Field(
+        ...,
+        description="The folder name: the host of the page (made safe for file names) and 8 hex characters of the SHA-256 of the page address, or the name the person gave.",
+    )
+    url: str = Field(
+        ...,
+        description="The page address with secrets replaced, as in components.json.",
+    )
+    fingerprint_version: int = Field(
+        ...,
+        validation_alias="fingerprintVersion", serialization_alias="fingerprintVersion",
+        description="Ids of a run with another fingerprintVersion cannot be compared; save the baseline again.",
+        ge=0,
+    )
+    promoted_at: str = Field(
+        ...,
+        validation_alias="promotedAt", serialization_alias="promotedAt",
+        description="RFC 3339 timestamp in UTC of the last save or promote.",
+    )
+    promoted_from: BaselineSource = Field(..., validation_alias="promotedFrom", serialization_alias="promotedFrom")
+    targets: list[BaselineTarget] = Field(
+        ...,
+        description="One entry per saved target folder. Targets pair with a run's by dir.",
+    )
+    aliases: list[BaselineAlias] = Field(
+        ...,
+        description="Rename links: a component that was removed from the page under one id and added under another is the same component.",
+    )
+    promotions: list[BaselinePromotion] = Field(
+        ...,
+        description="What each save or promote replaced, oldest first. At most the last 20 are kept.",
+    )
 
 
 class RawElement(BaseModel):
@@ -1362,6 +1563,22 @@ class ComponentsFile(BaseModel):
     warnings: list[Warning]
 
 
+class BaselineTargetReport(BaseModel):
+    """
+    The comparison of one baseline target. Exactly one of diff and error is set.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    dir: str
+    diff: DiffFile | None = None
+    error: str | None = Field(
+        default=None,
+        description="Why the target could not be compared, for example that the run has no such target.",
+    )
+
+
 class RunStartParams(BaseModel):
     """
     The engine runs every target at every viewport.
@@ -1417,3 +1634,26 @@ class CollectorResult(BaseModel):
         ..., description="Interactive elements in document order."
     )
     warnings: list[Warning]
+
+
+class BaselineReport(BaseModel):
+    """
+    Output of `traceqa diff --against ... --format json`: one entry per baseline target, with a DiffFile whose side A is the baseline and side B the run, and the result of the gate.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    baseline: BaselineRef
+    fail_on: list[str] = Field(
+        ...,
+        validation_alias="failOn", serialization_alias="failOn",
+        description="The --fail-on tokens in effect, sorted. Known values: removed, added, changed, disabled, hidden, covered, paired.",
+    )
+    failed: bool = Field(
+        ...,
+        description="True when at least one entry matched a token (the exit code is then 1).",
+    )
+    matched: int = Field(..., description="How many entries matched.", ge=0)
+    targets: list[BaselineTargetReport]

@@ -7,6 +7,7 @@
 //! the variant order, which is the order `traceqa --help` lists commands in.
 
 mod args;
+mod baseline;
 mod codegen;
 mod diff;
 mod doctor;
@@ -15,6 +16,7 @@ mod findings;
 mod install;
 mod interrupt;
 mod login;
+mod manifest;
 mod mcp;
 mod serve;
 
@@ -35,13 +37,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Keep a reference run: save, promote or init a manifest from one.
+    ///
+    /// Then: traceqa diff --against NAME RUN --fail-on removed,disabled
+    Baseline(baseline::BaselineArgs),
     /// Write a Playwright page object (TypeScript or Python) for the components of a run.
     ///
     /// Then: traceqa codegen runs/RUN --lang ts
     Codegen(codegen::CodegenArgs),
     /// Compare two runs (browsers, viewports, or builds) by component.
     ///
-    /// Prints Markdown, or the DiffFile JSON with --format json. Exit 0 when the diff ran.
+    /// Prints Markdown, or json, github (workflow commands) or sarif with --format. With --against
+    /// NAME a baseline is side A. Exit 0 when the diff ran, 1 when --fail-on matched, 2 on bad input.
     Diff(diff::DiffArgs),
     /// List every interactive component on a page.
     Extract(extract::ExtractArgs),
@@ -69,6 +76,7 @@ enum Command {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
+        Command::Baseline(args) => baseline::run(&args),
         Command::Codegen(args) => codegen::run(&args),
         Command::Diff(args) => diff::run(&args),
         Command::Doctor(args) => doctor::run(&args),

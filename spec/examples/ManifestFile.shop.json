@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "viewports": { "desktop": { "width": 1280, "height": 800 }, "mobile": { "width": 390, "height": 844 } },
+  "absent": [{ "role": "button", "name": "Close size guide" }],
+  "warnings": ["unnamed_interactive_element"],
+  "components": [
+    { "role": "link", "name": "Buggy Shop" },
+    { "role": "button", "name": "Open menu", "hidden": ["desktop"] },
+    { "role": "link", "template": true, "instances": 12 },
+    { "role": "button", "name": "Add to cart", "instances": 12, "disabled": 1 },
+    { "role": "generic", "name": "Dismiss", "confidence": "low" },
+    { "role": "textbox", "name": "Email address", "frame": "newsletter" },
+    { "role": "spinbutton", "name": "Quantity", "shadow": true }
+  ]
+}

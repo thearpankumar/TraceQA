@@ -23,5 +23,8 @@ traceqa-mcp.workspace = true
 traceqa-protocol.workspace = true
 traceqa-recorder.workspace = true
 
+[dev-dependencies]
+serde_norway.workspace = true
+
 [lints]
 workspace = true

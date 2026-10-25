@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "baseline.schema.json",
+  "title": "TraceQA baseline",
+  "description": "A baseline is a saved copy of the components.json files (and crops) of one run, kept in a folder that may be committed. `traceqa diff --against` compares a new run with it. It is only ever written by `traceqa baseline save|promote|alias`, never by extract or diff. Layout: <dir>/<key>/baseline.json (BaselineFile), <dir>/<key>/<target dir>/components.json and, when the saved run had them, crops/.",
+  "x-traceqa": { "contract": "baseline", "version": 1 },
+  "$defs": {
+    "BaselineFile": {
+      "description": "baseline.json. Holds no storage state, no run.json and no error text, so the folder is safe to commit.",
+      "type": "object",
+      "required": ["formatVersion", "key", "url", "fingerprintVersion", "promotedAt", "promotedFrom", "targets", "aliases", "promotions"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "key": { "description": "The folder name: the host of the page (made safe for file names) and 8 hex characters of the SHA-256 of the page address, or the name the person gave.", "type": "string" },
+        "url": { "description": "The page address with secrets replaced, as in components.json.", "type": "string" },
+        "fingerprintVersion": { "description": "Ids of a run with another fingerprintVersion cannot be compared; save the baseline again.", "type": "integer", "minimum": 0 },
+        "promotedAt": { "description": "RFC 3339 timestamp in UTC of the last save or promote.", "type": "string" },
+        "promotedFrom": { "$ref": "#/$defs/BaselineSource" },
+        "targets": { "description": "One entry per saved target folder. Targets pair with a run's by dir.", "type": "array", "items": { "$ref": "#/$defs/BaselineTarget" } },
+        "aliases": { "description": "Rename links: a component that was removed from the page under one id and added under another is the same component.", "type": "array", "items": { "$ref": "#/$defs/BaselineAlias" } },
+        "promotions": { "description": "What each save or promote replaced, oldest first. At most the last 20 are kept.", "type": "array", "items": { "$ref": "#/$defs/BaselinePromotion" } }
+      }
+    },
+    "BaselineSource": {
+      "description": "The run a baseline was made from.",
+      "type": "object",
+      "required": ["runId", "engineVersion"],
+      "properties": {
+        "runId": { "type": "string" },
+        "engineVersion": { "description": "Or 'unknown' when the run had no run.json.", "type": "string" }
+      }
+    },
+    "BaselineTarget": {
+      "description": "One saved browser-and-viewport folder.",
+      "type": "object",
+      "required": ["dir", "browser", "viewport", "hasCrops"],
+      "properties": {
+        "dir": { "description": "Folder name, for example chromium-1280x800.", "type": "string" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "hasCrops": { "type": "boolean" }
+      }
+    },
+    "BaselineAlias": {
+      "description": "Says that the removed component `from` is the added component `to`. A diff then reports one renamed pair (a pairedWith link with reason 'aliased') and the removed, added and paired gates ignore it.",
+      "type": "object",
+      "required": ["from", "to", "reason", "addedAt"],
+      "properties": {
+        "from": { "description": "A component id in the baseline.", "type": "string" },
+        "to": { "description": "A component id in the new run.", "type": "string" },
+        "reason": { "description": "Known values: rename, heal, manual.", "type": "string" },
+        "evidence": { "description": "Free text: why they are the same.", "type": "string" },
+        "addedAt": { "description": "RFC 3339 timestamp in UTC.", "type": "string" }
+      }
+    },
+    "BaselinePromotion": {
+      "description": "One save or promote.",
+      "type": "object",
+      "required": ["runId", "at", "summary"],
+      "properties": {
+        "runId": { "type": "string" },
+        "at": { "type": "string" },
+        "summary": { "description": "What changed against the baseline it replaced, for example '2 removed, 1 added, 0 changed', or 'first save'.", "type": "string" }
+      }
+    },
+    "BaselineReport": {
+      "description": "Output of `traceqa diff --against ... --format json`: one entry per baseline target, with a DiffFile whose side A is the baseline and side B the run, and the result of the gate.",
+      "type": "object",
+      "required": ["formatVersion", "baseline", "failOn", "failed", "matched", "targets"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "baseline": { "$ref": "#/$defs/BaselineRef" },
+        "failOn": { "description": "The --fail-on tokens in effect, sorted. Known values: removed, added, changed, disabled, hidden, covered, paired.", "type": "array", "items": { "type": "string" } },
+        "failed": { "description": "True when at least one entry matched a token (the exit code is then 1).", "type": "boolean" },
+        "matched": { "description": "How many entries matched.", "type": "integer", "minimum": 0 },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/BaselineTargetReport" } }
+      }
+    },
+    "BaselineRef": {
+      "description": "Which baseline was compared.",
+      "type": "object",
+      "required": ["key", "url", "promotedAt"],
+      "properties": {
+        "key": { "type": "string" },
+        "url": { "type": "string" },
+        "promotedAt": { "type": "string" }
+      }
+    },
+    "BaselineTargetReport": {
+      "description": "The comparison of one baseline target. Exactly one of diff and error is set.",
+      "type": "object",
+      "required": ["dir"],
+      "properties": {
+        "dir": { "type": "string" },
+        "diff": { "$ref": "diff.schema.json#/$defs/DiffFile" },
+        "error": { "description": "Why the target could not be compared, for example that the run has no such target.", "type": "string" }
+      }
+    }
+  }
+}

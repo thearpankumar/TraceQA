@@ -210,7 +210,10 @@ pick one each. A run with a single target needs no flag.
 
 | Flag | Meaning |
 |---|---|
-| `--format markdown\|json` | Markdown (the default) is for people. `json` is the `DiffFile` contract (`spec/diff.schema.json`). |
+| `--format markdown\|json\|github\|sarif` | Markdown (the default) is for people. `json` is the `DiffFile` contract (`spec/diff.schema.json`; with `--against` it is a `BaselineReport`). `github` and `sarif` are described under [Baselines and the CI gate](#baselines-and-the-ci-gate). |
+| `--against NAME\|DIR` | Compare one run with a saved baseline instead of two runs. |
+| `--baseline-dir DIR` | Where `--against NAME` looks (default `.traceqa/baselines`). |
+| `--fail-on TOKENS` | Exit 1 when an entry matches: `removed`, `added`, `changed`, `disabled`, `hidden`, `covered`, `paired`. |
 | `--out FILE` | Write the report to a file instead of standard output. |
 | `--target`, `--target-a`, `--target-b` | Which target folder of a run to compare. |
 | `--runs-dir DIR` | Where bare run ids are looked up. |
@@ -242,9 +245,83 @@ U+2223. Each of the Removed, Added and Changed tables shows 50 rows and then `an
 **Exit codes.** `0` whenever the diff ran, whether or not it found differences. `2` for input that
 cannot be compared: a path that does not exist, a run with several targets and no `--target`, or two
 files with different `fingerprintVersion`s (their ids mean different things; extract both again with
-the same TraceQA). `1` is kept for gates that fail on a difference.
+the same TraceQA). `1` when `--fail-on` matched an entry. An unknown `--fail-on` token is `2`, so a
+typo cannot switch the gate off.
 
 The report is the same bytes every time for the same inputs.
+
+## Baselines and the CI gate
+
+A baseline is a saved copy of a run (its `components.json` files and, if the run had them, its
+crops) that later runs are compared with. It lives in `.traceqa/baselines/NAME/` by default, is
+meant to be committed, and holds no `run.json`, no storage state and no error text. It is changed
+only by `traceqa baseline`, never by `extract` or `diff`, and never silently.
+
+```sh
+traceqa extract https://staging.example.com --browser chromium,firefox --viewport 1280x800
+traceqa baseline save runs/RUN --name main              # refuses when "main" exists
+traceqa diff runs/NEW --against main --fail-on removed,disabled
+traceqa baseline promote runs/NEW --name main           # shows the diff and exits 2
+traceqa baseline promote runs/NEW --name main --yes     # now it replaces
+```
+
+| Command | What it does |
+|---|---|
+| `baseline save RUN [--name NAME] [--dir DIR]` | Makes a baseline. The default name is the page's host and 8 hex characters of the SHA-256 of its (redacted) address. Fails when it exists. |
+| `baseline promote RUN [--name NAME] [--dir DIR] --yes` | Replaces the baseline with the run and records it in `promotions`. Without `--yes` it prints the difference and exits 2: there is no prompt, so CI cannot move the reference by accident. Aliases whose old component is gone are dropped. |
+| `baseline alias FROM TO --name NAME [--evidence TEXT]` | Says that baseline component `FROM` is run component `TO` (a rename). |
+| `baseline init RUN --out manifest.yaml [--viewport-name 1280x800=desktop]...` | Writes a manifest in the format of `fixtures/buggy-shop/manifest.yaml` (`spec/manifest.schema.json`) from what the run found: role, name or `template: true`, `instances`, `confidence`, `frame`, `shadow`, `hidden` (viewports where no instance is visible) and `disabled`, plus the warning codes seen. It records what was found, not what should be there, so review it. Refuses to overwrite without `--force`. |
+
+`diff --against` compares every target of the baseline with the run's target of the same folder
+name (`chromium-1280x800`), with the baseline as side A. A target the run lacks is reported as an
+error entry and the exit code is 2. Ids of another `fingerprintVersion` cannot be compared: the
+command exits 2 and tells you to re-save with `baseline promote --yes`.
+
+**The gate.** `--fail-on` takes a comma-separated list. An entry matches `removed` or `added` by
+its kind, `changed` when it is on both sides and differs, `disabled`, `hidden` and `covered` by the
+flags `became_disabled`, `became_hidden` and `became_covered`, and `paired` when a removed or added
+entry names the other side's by heuristic (a changed role or name). The exit code is 1 when any entry
+matches. A rename that an alias covers (`pairedWith.reason` is `aliased`) is shown as renamed and
+matches nothing.
+
+**Formats.**
+
+- `github` prints one workflow command per entry, at most 50 lines, most serious first
+  (`::error title=TraceQA removed::button "Add to cart" (c_...) is in the baseline but not in the
+  run`). Removed, disabled, hidden and covered are errors; added and changed are warnings; renamed is
+  a notice. Page text is cleaned and escaped as the Actions toolkit does, so a name with a newline
+  cannot start another command. When `$GITHUB_STEP_SUMMARY` is set the Markdown report is appended
+  to it, which has no 50 line limit. `traceqa findings --format github` does the same for findings.
+- `sarif` writes SARIF 2.1.0 (`traceqa.diff.removed` and the like as stable rule ids, one result per
+  entry, `baselineState` new or absent, a versioned `partialFingerprints` entry). A web component has
+  no source file, so a result's location is the page address and a logical location naming the
+  component. GitHub code scanning wants repo-relative source files with regions, so this output is for
+  SARIF viewers and other tools; use `--format github` for GitHub. Mapping components to source files
+  is on the backlog. `traceqa findings --format sarif` is the same for findings.
+
+A workflow (every action is pinned to a full commit SHA, as `docs/releasing.md` requires; install
+TraceQA in the way that suits you before the first `traceqa` step):
+
+```yaml
+name: components
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: traceqa extract "$STAGING_URL" --browser chromium --viewport 1280x800
+        env:
+          STAGING_URL: ${{ vars.STAGING_URL }}
+      - run: traceqa diff "$(ls -d runs/* | tail -n 1)" --against main --fail-on removed,disabled,hidden --format github
+```
+
+When the change is meant, run `traceqa baseline promote RUN --name main --yes` locally and commit
+the baseline folder, so the new reference is reviewed like code.
 
 ## `traceqa serve`
 
@@ -554,7 +631,7 @@ finding says how sure its rule is.
 | `--suppressions FILE` | `.traceqa/suppressions.yaml` if it exists | Findings the team has decided to live with. See [Suppressions](#suppressions). |
 | `--min-severity LEVEL` | `info` | Leave out findings below `info`, `warning` or `error`. |
 | `--fail-on LEVEL` | `never` | Exit with 1 when a finding of this severity or worse is left: `error`, `warning`, `info` or `never`. |
-| `--format FORMAT` | `table` | `table`, `json` (an array of `FindingsFile`, one per target) or `markdown`. |
+| `--format FORMAT` | `table` | `table`, `json` (an array of `FindingsFile`, one per target), `markdown`, `github` (workflow commands, and the Markdown appended to `$GITHUB_STEP_SUMMARY`) or `sarif` (SARIF 2.1.0 for SARIF viewers; see [Baselines and the CI gate](#baselines-and-the-ci-gate)). |
 | `--no-write` | off | Only print. |
 
 Exit codes: 0 when nothing is left at or above `--fail-on`, 1 when something is,
