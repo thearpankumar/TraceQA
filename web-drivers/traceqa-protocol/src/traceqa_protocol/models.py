@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 from typing import Any
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class BaselineSource(BaseModel):
@@ -382,7 +382,7 @@ class ElementState(BaseModel):
     )
 
 
-class Confidence(str, Enum):
+class Confidence(StrEnum):
     """
     How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).
     """
@@ -391,7 +391,7 @@ class Confidence(str, Enum):
     low = "low"
 
 
-class LocatorStrategy(str, Enum):
+class LocatorStrategy(StrEnum):
     """
     How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.
     """
@@ -480,7 +480,7 @@ class Locator(BaseModel):
     )
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     running = "running"
     completed = "completed"
     failed = "failed"
@@ -532,7 +532,7 @@ class DiffSummary(BaseModel):
     )
 
 
-class Kind(str, Enum):
+class Kind(StrEnum):
     """
     One of added, removed, changed. An added component is in B only, a removed one in A only.
     """
@@ -690,7 +690,7 @@ class SessionCloseParams(BaseModel):
     session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
 
 
-class WaitUntil(str, Enum):
+class WaitUntil(StrEnum):
     """
     load: the load event fired. settled: load fired and the network and DOM have been quiet for a short time.
     """
@@ -800,12 +800,12 @@ class RequestsFailed(BaseModel):
     )
 
 
-class ScrollTo(str, Enum):
+class ScrollTo(StrEnum):
     top = "top"
     bottom = "bottom"
 
 
-class ScrollWait(str, Enum):
+class ScrollWait(StrEnum):
     """
     What to wait for after scrolling. animations: the page height is stable and animations that end have ended. height: only that the page height is stable, which is quicker and enough when no picture is taken.
     """
@@ -870,7 +870,7 @@ class PageScreenshotResult(BaseModel):
     height: int = Field(..., ge=0)
 
 
-class ActionKind(str, Enum):
+class ActionKind(StrEnum):
     click = "click"
     hover = "hover"
     type = "type"
@@ -911,7 +911,7 @@ class PageActResult(BaseModel):
     ok: bool
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     debug = "debug"
     info = "info"
     warn = "warn"
@@ -941,7 +941,7 @@ class RpcErrorData(BaseModel):
     retryable: bool
 
 
-class FindingSeverity(str, Enum):
+class FindingSeverity(StrEnum):
     """
     error: very likely a real problem. warning: probably a problem, check it. info: worth a look.
     """
@@ -951,7 +951,7 @@ class FindingSeverity(str, Enum):
     info = "info"
 
 
-class FindingConfidence(str, Enum):
+class FindingConfidence(StrEnum):
     """
     How sure the rule is that this is a real problem, apart from its severity.
     """
@@ -961,7 +961,7 @@ class FindingConfidence(str, Enum):
     low = "low"
 
 
-class FindingScope(str, Enum):
+class FindingScope(StrEnum):
     """
     target: one browser at one viewport, written next to its components.json. run: findings about the run as a whole, written in the run folder.
     """
@@ -1085,7 +1085,7 @@ class FindingsFile(BaseModel):
     )
 
 
-class HealKind(str, Enum):
+class HealKind(StrEnum):
     """
     locator_fix: same id, another locator. rename_proposal: removed here, one probable new id. removed: gone, no candidate. ambiguous: more than one candidate on a side. session_not_accepted: the run was signed out. unchanged: present as it was (only in library results, never listed in a report).
     """
@@ -1098,7 +1098,7 @@ class HealKind(str, Enum):
     unchanged = "unchanged"
 
 
-class HealAction(str, Enum):
+class HealAction(StrEnum):
     """
     fix: a mechanical change that is safe to apply. propose: a person has to decide. fail: a failure to fix in the product or the baseline. refuse: not enough to decide. none: nothing to do.
     """
@@ -1110,7 +1110,7 @@ class HealAction(str, Enum):
     none = "none"
 
 
-class HealConfidence(str, Enum):
+class HealConfidence(StrEnum):
     high = "high"
     medium = "medium"
 
@@ -1190,7 +1190,7 @@ class ManifestComponent(BaseModel):
     )
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     """
     fail, warning or note. An extra is a warning, or a fail with --strict.
     """
@@ -1554,7 +1554,7 @@ class VisualThresholds(BaseModel):
     )
 
 
-class Status(str, Enum):
+class Status(StrEnum):
     """
     same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.
     """

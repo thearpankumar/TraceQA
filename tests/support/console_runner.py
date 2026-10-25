@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-WINDOWS = os.name == "nt"
+WINDOWS = sys.platform == "win32"
 CTRL_BREAK_EVENT = 1
 
 
@@ -44,6 +44,7 @@ def _creation_time(pid: int) -> int | None:
 
     A (pid, creation time) pair names one process for good; a pid alone may be reused.
     """
+    assert sys.platform == "win32"
     import ctypes
     from ctypes import wintypes
 
@@ -67,6 +68,7 @@ def _creation_time(pid: int) -> int | None:
 
 def _snapshot() -> dict[int, tuple[int, str, int | None]]:
     """Windows: every process with its parent, executable name and creation time (toolhelp)."""
+    assert sys.platform == "win32"
     import ctypes
     from ctypes import wintypes
 
@@ -104,6 +106,7 @@ def _snapshot() -> dict[int, tuple[int, str, int | None]]:
 
 
 def _windows_alive(pid: int) -> bool:
+    assert sys.platform == "win32"
     import ctypes
     from ctypes import wintypes
 
@@ -193,7 +196,7 @@ def _still_running(pid: int, group: dict[int, tuple[str, int | None]]) -> list[s
 def _send(process: subprocess.Popen, name: str = "SIGINT", target: str = "group") -> None:
     """Sends a signal: to the command's whole group (what a terminal does) or to its process alone
     (what `timeout` or `docker stop` do). Windows only knows the console break event."""
-    if WINDOWS:
+    if sys.platform == "win32":
         import ctypes
 
         if name != "SIGINT":
@@ -208,8 +211,7 @@ def _send(process: subprocess.Popen, name: str = "SIGINT", target: str = "group"
             if target == "process":
                 os.kill(process.pid, number)
             else:
-                # os.killpg exists only off Windows, and the Windows case returned above; pyright checks for Windows.
-                os.killpg(process.pid, number)  # pyright: ignore[reportAttributeAccessIssue]
+                os.killpg(process.pid, number)
         except (ProcessLookupError, PermissionError):
             # The command has already exited; macOS answers EPERM when only zombies are left in
             # the group, Linux ESRCH when nothing is.
@@ -225,7 +227,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     to the exit, both streams, and what was still running after the exit.
     """
     kwargs: dict[str, Any] = {}
-    if WINDOWS:
+    if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True

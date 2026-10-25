@@ -77,7 +77,7 @@ def render_models(definitions: dict) -> str:
                 "--input-file-type", "jsonschema",
                 "--output", str(target),
                 "--output-model-type", "pydantic_v2.BaseModel",
-                "--target-python-version", "3.10",
+                "--target-python-version", "3.12",
                 "--snake-case-field",
                 "--allow-population-by-field-name",
                 "--use-default-kwarg",
