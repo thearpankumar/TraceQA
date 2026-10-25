@@ -475,7 +475,7 @@ traceqa findings runs/<runId>
 
 - Off by default. axe-core (MPL-2.0) is never bundled: `traceqa install --axe` downloads version 4.14.0, checks its
   SHA-512 and writes it to `~/.traceqa/axe/4.14.0/`. `TRACEQA_AXE_TARBALL_URL` uses a mirror (the hash is still
-  checked). See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+  checked). See [third-party-notices.md](third-party-notices.md).
 - `--axe-file PATH` or `TRACEQA_AXE_FILE` uses another copy. `--axe` with no copy exits 2 before anything runs.
 - Rule tags: `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa`, `best-practice`. It runs in every reachable frame,
   and a page's Content-Security-Policy does not block it. If it cannot run, the target gets `axe_failed` and the run
