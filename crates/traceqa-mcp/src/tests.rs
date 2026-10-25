@@ -1269,7 +1269,7 @@ fn a_panicking_call_frees_its_slot() {
 #[test]
 fn tool_errors_read_as_the_strings_they_replaced() {
     use crate::tools::ToolError;
-    use traceqa_protocol::types::Viewport;
+    use traceqa_common::types::Viewport;
     assert_eq!(
         ToolError::NoRun("r_1".into()).to_string(),
         "no run r_1. list_runs shows the runs."

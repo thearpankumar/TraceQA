@@ -16,11 +16,11 @@ use std::fs;
 use std::io::Read as _;
 use std::path::{Component as PathPart, Path, PathBuf};
 
-use traceqa_diff::text::code_span;
-use traceqa_diff::{compare, Options};
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     ComponentsFile, VisualReport, VisualResult, VisualResultStatus, VisualSide, VisualSummary, VisualThresholds,
 };
+use traceqa_diff::text::code_span;
+use traceqa_diff::{compare, Options};
 
 use plan::{Planned, Verdict};
 

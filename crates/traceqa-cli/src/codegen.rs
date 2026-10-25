@@ -7,7 +7,7 @@
 //! thin consumer of the identity layer.
 //!
 //! Page text (names, test ids, frame labels, CSS) ends up inside source code. It is written only
-//! through `traceqa_protocol::locator::{ts_string, py_string}`, even inside comments, and
+//! through `traceqa_common::locator::{ts_string, py_string}`, even inside comments, and
 //! names that become identifiers are cut down to ASCII letters and digits.
 
 mod py;
@@ -19,7 +19,7 @@ use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
 use serde_json::{json, Value};
-use traceqa_protocol::types::{Component, ComponentsFile, Locator, LocatorStrategy, RunManifest, RunStatus};
+use traceqa_common::types::{Component, ComponentsFile, Locator, LocatorStrategy, RunManifest, RunStatus};
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Lang {
@@ -557,7 +557,7 @@ mod tests {
             name: name.into(),
             name_is_template: false,
             name_changes: None,
-            confidence: traceqa_protocol::types::Confidence::High,
+            confidence: traceqa_common::types::Confidence::High,
             signals: Vec::new(),
             path: String::new(),
             crop: None,
@@ -686,7 +686,7 @@ mod tests {
     fn differing_descriptors_take_the_one_with_more_scope() {
         let plain = locator(LocatorStrategy::Role);
         let mut scoped = locator(LocatorStrategy::Role);
-        scoped.scope = vec![traceqa_protocol::types::LocatorScope {
+        scoped.scope = vec![traceqa_common::types::LocatorScope {
             role: "navigation".into(),
             name: None,
         }];

@@ -3,7 +3,7 @@
 //     npm run gen           rewrite the generated file
 //     npm run gen:check     fail if it is out of date
 //
-// Mirrors crates/traceqa-protocol/build.rs and scripts/gen_python_protocol.py: every
+// Mirrors crates/traceqa-common/build.rs and scripts/gen_python_protocol.py: every
 // spec/*.schema.json file contributes its $defs to one shared namespace.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";

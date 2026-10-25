@@ -14,7 +14,7 @@ publish = false
 repository = "https://github.com/thearpankumar/TraceQA"
 
 [workspace.dependencies]
-traceqa-protocol = { path = "crates/traceqa-protocol" }
+traceqa-common = { path = "crates/traceqa-common" }
 traceqa-engine = { path = "crates/traceqa-engine" }
 traceqa-recorder = { path = "crates/traceqa-recorder" }
 traceqa-mcp = { path = "crates/traceqa-mcp" }

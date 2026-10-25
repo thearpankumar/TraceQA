@@ -19,7 +19,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     BrowserInfo, BrowserTarget, Component, ComponentsFile, PageGotoParams, PageScrollParams, ScrollTo, ScrollWait,
     SessionOpenParams, SessionOpenResult, StorageState, Timings, Viewport, WaitUntil, Warning,
 };

@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use serde_json::Value;
-use traceqa_protocol::jsonrpc::{self, Message};
+use traceqa_common::jsonrpc::{self, Message};
 
 include!(concat!(env!("OUT_DIR"), "/spec_parse_as.rs"));
 

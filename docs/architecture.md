@@ -218,7 +218,7 @@ on, and the run still writes `run.finished`, a `failed` `run.json` and sends `ru
 The MCP server answers a tool call that panicked with an `isError` result that only names
 the tool; the panic text goes to stderr.
 
-Errors are typed inside the engine. `ErrorKind` (in `traceqa-protocol`) names the
+Errors are typed inside the engine. `ErrorKind` (in `traceqa-common`) names the
 `RpcErrorData.kind` values and keeps an unknown kind as it came, so a driver
 that reports a new kind never breaks the engine; on the wire it is still the same
 string. `DriverError` carries a kind and a message, and `EngineError` says whether a

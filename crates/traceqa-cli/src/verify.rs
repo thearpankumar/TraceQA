@@ -17,13 +17,13 @@ use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
 use serde_json::{json, Value};
-use traceqa_diff::gate::Severity;
-use traceqa_diff::github::{self, Annotation};
-use traceqa_diff::text::plain;
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     Component, ComponentsFile, Confidence, ManifestAbsent, ManifestComponent, ManifestFile, RunStatus, VerifyIssue,
     VerifyIssueSeverity, VerifyReport, VerifySkipped, VerifyTarget,
 };
+use traceqa_diff::gate::Severity;
+use traceqa_diff::github::{self, Annotation};
+use traceqa_diff::text::plain;
 use traceqa_recorder::{open_run, read_components};
 
 use crate::manifest;

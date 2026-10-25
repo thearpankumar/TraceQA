@@ -13,9 +13,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, Subcommand};
+use traceqa_common::types::{ComponentsFile, RunStatus};
 use traceqa_diff::baseline::{key_for, AliasInput, Loaded, SaveInput, TargetSource};
 use traceqa_diff::{render_markdown, BaselineStore};
-use traceqa_protocol::types::{ComponentsFile, RunStatus};
 use traceqa_recorder::{now_rfc3339, open_run, read_components, RunFolder};
 
 use crate::diff::{against, CompareError, DEFAULT_BASELINE_DIR};

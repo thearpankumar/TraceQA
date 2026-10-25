@@ -1,7 +1,7 @@
 //! The component id. The recipe is specified in `spec/fingerprint.md`; change them together.
 
 use sha2::{Digest, Sha256};
-use traceqa_protocol::types::PathStep;
+use traceqa_common::types::PathStep;
 use unicode_normalization::UnicodeNormalization;
 
 pub const VERSION: u64 = 2;

@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use traceqa_protocol::types::{BaselineAlias, ComponentsFile};
+use traceqa_common::types::{BaselineAlias, ComponentsFile};
 
 use crate::*;
 
@@ -223,7 +223,7 @@ fn a_baseline_alias_accounts_for_a_rename() {
 #[test]
 fn a_signed_out_run_short_circuits_everything() {
     let mut run = file(&[]);
-    run.warnings.push(traceqa_protocol::types::Warning {
+    run.warnings.push(traceqa_common::types::Warning {
         code: SESSION_NOT_ACCEPTED.into(),
         message: "sign in again".into(),
     });
@@ -253,8 +253,8 @@ fn the_landmark_is_the_first_landmark_step() {
     assert_eq!(landmark("div > list"), "");
 }
 
-fn baseline_ref() -> traceqa_protocol::types::BaselineRef {
-    traceqa_protocol::types::BaselineRef {
+fn baseline_ref() -> traceqa_common::types::BaselineRef {
+    traceqa_common::types::BaselineRef {
         key: "shop".into(),
         url: "http://x/".into(),
         promoted_at: "2026-01-01T00:00:00Z".into(),

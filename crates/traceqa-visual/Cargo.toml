@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 image.workspace = true
 traceqa-diff.workspace = true
-traceqa-protocol.workspace = true
+traceqa-common.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

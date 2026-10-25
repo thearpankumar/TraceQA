@@ -6,7 +6,7 @@
 
 use std::fmt::Write as _;
 
-use traceqa_protocol::types::{ComponentSummary, DiffEntry, DiffEntryKind, DiffFile, DiffSide};
+use traceqa_common::types::{ComponentSummary, DiffEntry, DiffEntryKind, DiffFile, DiffSide};
 
 use crate::text::{clean, code_span};
 

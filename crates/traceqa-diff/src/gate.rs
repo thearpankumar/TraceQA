@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use traceqa_protocol::types::{DiffEntry, DiffEntryKind, DiffFile};
+use traceqa_common::types::{DiffEntry, DiffEntryKind, DiffFile};
 
 /// `PairLink.reason` of a pair that a baseline alias made.
 pub const ALIASED: &str = "aliased";
@@ -226,7 +226,7 @@ pub fn reportable(diff: &DiffFile) -> impl Iterator<Item = &DiffEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use traceqa_protocol::types::PairLink;
+    use traceqa_common::types::PairLink;
 
     fn entry(kind: DiffEntryKind, flags: &[&str]) -> DiffEntry {
         DiffEntry {
@@ -273,7 +273,7 @@ mod tests {
         removed.paired_with = Some(PairLink {
             id: "c_000000000002".into(),
             reason: ALIASED.into(),
-            confidence: traceqa_protocol::types::Confidence::High,
+            confidence: traceqa_common::types::Confidence::High,
         });
         assert!(!all.matches(&removed));
         assert_eq!(classify(&removed), Class::Renamed);

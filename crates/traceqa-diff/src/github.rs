@@ -9,7 +9,7 @@
 
 use std::fmt::Write as _;
 
-use traceqa_protocol::types::{DiffEntry, DiffEntryKind, DiffFile, FindingSeverity, FindingsFile};
+use traceqa_common::types::{DiffEntry, DiffEntryKind, DiffFile, FindingSeverity, FindingsFile};
 
 use crate::gate::{classify, reportable, Class, Severity};
 use crate::text::plain;

@@ -1,7 +1,7 @@
 //! Tests built from small synthetic files, so each case shows one rule.
 
 use serde_json::{json, Value};
-use traceqa_protocol::types::ComponentsFile;
+use traceqa_common::types::ComponentsFile;
 
 use crate::*;
 

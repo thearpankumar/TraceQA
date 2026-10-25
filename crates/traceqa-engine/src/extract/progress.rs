@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use traceqa_protocol::sync::LockExt;
-use traceqa_protocol::types::{Event, Timings};
+use traceqa_common::sync::LockExt;
+use traceqa_common::types::{Event, Timings};
 use traceqa_recorder::RunWriter;
 
 /// The run folder's writer and the live listener. Every target of a run shares them.

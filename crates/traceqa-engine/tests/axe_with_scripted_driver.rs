@@ -11,11 +11,11 @@ use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use traceqa_engine::driver::{Driver, DriverError, Drivers, ErrorKind, Transport};
-use traceqa_engine::{axe, Execution, Run};
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     AxeResults, BrowserTarget, ComponentsFile, ExtractOptions, RunManifest, RunStartParams, RunStatus, Viewport,
 };
+use traceqa_engine::driver::{Driver, DriverError, Drivers, ErrorKind, Transport};
+use traceqa_engine::{axe, Execution, Run};
 
 const COLLECTED: &str = include_str!("../../../spec/examples/CollectorResult.shop.json");
 

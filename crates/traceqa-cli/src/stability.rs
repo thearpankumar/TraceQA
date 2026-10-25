@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use traceqa_protocol::types::{ComponentStability, InstanceRange, StabilityFile, TargetStability};
+use traceqa_common::types::{ComponentStability, InstanceRange, StabilityFile, TargetStability};
 
 /// The version of `stability.json` this code writes.
 pub const FORMAT_VERSION: u64 = 1;

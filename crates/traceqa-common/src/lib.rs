@@ -1,4 +1,5 @@
-//! The contracts every part of TraceQA agrees on.
+//! The shared base of every TraceQA crate: the contracts every part agrees on, and the helpers
+//! they share ([`locator`], [`supervise`], [`sync`]).
 //!
 //! [`types`] and [`contracts`] are generated at build time from the JSON
 //! Schemas in `spec/`, which are the single source of truth. [`jsonrpc`] is

@@ -11,14 +11,14 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
-use traceqa_engine::url_policy::Blocked;
-use traceqa_engine::{EngineError, Execution, Run};
-use traceqa_protocol::jsonrpc::{code, RpcError};
-use traceqa_protocol::types::{
+use traceqa_common::jsonrpc::{code, RpcError};
+use traceqa_common::types::{
     BrowserTarget, Component, ComponentsFile, ElementState, Event, ExtractOptions, FindingSeverity, RunManifest,
     RunStartParams, StorageState, Viewport,
 };
-use traceqa_protocol::ParseError;
+use traceqa_common::ParseError;
+use traceqa_engine::url_policy::Blocked;
+use traceqa_engine::{EngineError, Execution, Run};
 
 use crate::outline::{self, add_detail, concise_row};
 use crate::resources;

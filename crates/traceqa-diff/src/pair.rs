@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use traceqa_protocol::types::Confidence;
+use traceqa_common::types::Confidence;
 
 use crate::ComponentSummary;
 

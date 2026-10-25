@@ -6,7 +6,7 @@
 //! about quotes and not with a plain `split`.
 
 use serde_json::{json, Map, Value};
-use traceqa_protocol::types::{Component, ComponentsFile, DiffEntry, Finding};
+use traceqa_common::types::{Component, ComponentsFile, DiffEntry, Finding};
 
 /// Roles that start a region of the page. The first of these on a path names its group.
 const LANDMARKS: [&str; 9] = [

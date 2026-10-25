@@ -15,11 +15,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
-use traceqa_protocol::contracts::client_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
-use traceqa_protocol::jsonrpc::{code, serve_lines, Message, Output, RpcError};
-use traceqa_protocol::supervise::guard;
-use traceqa_protocol::sync::LockExt;
-use traceqa_protocol::types::{
+use traceqa_common::contracts::client_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
+use traceqa_common::jsonrpc::{code, serve_lines, Message, Output, RpcError};
+use traceqa_common::supervise::guard;
+use traceqa_common::sync::LockExt;
+use traceqa_common::types::{
     ComponentsFile, DiffCompareParams, EngineHelloParams, EngineHelloResult, Event, FindingsAnalyseParams,
     FindingsFile, FindingsResult, RpcErrorData, RunCancelParams, RunDoneParams, RunEventParams, RunManifest,
     RunStartParams, RunStartResult, RunStatus,
@@ -367,7 +367,7 @@ fn read_components(folder: &Path, dir: &str, name: &str) -> Result<ComponentsFil
 }
 
 /// The target's `axe.json`, when the run was made with `--axe`. Its absence is normal.
-fn read_axe(folder: &Path, dir: &str) -> Result<Option<traceqa_protocol::types::AxeResults>, RpcError> {
+fn read_axe(folder: &Path, dir: &str) -> Result<Option<traceqa_common::types::AxeResults>, RpcError> {
     let path = folder.join(dir).join("axe.json");
     if !path.is_file() {
         return Ok(None);

@@ -22,9 +22,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Map, Value};
+use traceqa_common::types::{Component, Finding, FindingConfidence, FindingSeverity};
 use traceqa_diff::pair::{pair, Candidate};
 use traceqa_diff::{changed_fields, summarise, ComponentSummary};
-use traceqa_protocol::types::{Component, Finding, FindingConfidence, FindingSeverity};
 
 use crate::rules::sanitise_map;
 use crate::{clean, RunInput, TargetInput};
@@ -227,7 +227,7 @@ fn similar_pairs<'a>(
 mod tests {
     use super::*;
     use serde_json::json;
-    use traceqa_protocol::types::ComponentsFile;
+    use traceqa_common::types::ComponentsFile;
 
     fn component(id: &str, role: &str, name: &str, instances: &[(bool, bool)]) -> Value {
         let list: Vec<Value> = instances

@@ -11,8 +11,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Args, ValueEnum};
+use traceqa_common::types::{ComponentsFile, FindingScope, FindingSeverity, FindingsFile, RunManifest, RunStatus};
 use traceqa_findings::{analyse_run, severity_rank, Options, RunInput, Suppressions, TargetInput};
-use traceqa_protocol::types::{ComponentsFile, FindingScope, FindingSeverity, FindingsFile, RunManifest, RunStatus};
 
 /// Where the suppression file is looked for when `--suppressions` is not given.
 const DEFAULT_SUPPRESSIONS: &str = ".traceqa/suppressions.yaml";

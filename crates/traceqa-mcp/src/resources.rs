@@ -10,8 +10,8 @@ use std::fs;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
-use traceqa_protocol::jsonrpc::{code, RpcError};
-use traceqa_protocol::types::RunManifest;
+use traceqa_common::jsonrpc::{code, RpcError};
+use traceqa_common::types::RunManifest;
 
 use crate::tools::{clean, plain_name, public_message, read_json, render, Cut, ToolError};
 use crate::Config;

@@ -2,11 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use traceqa_diff::baseline::apply_aliases;
-use traceqa_diff::{compare, DiffEntryKind, DiffError, Options};
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     BaselineAlias, Component, ComponentsFile, HealAction, HealConfidence, HealItem, HealKind, Locator,
 };
+use traceqa_diff::baseline::apply_aliases;
+use traceqa_diff::{compare, DiffEntryKind, DiffError, Options};
 
 use crate::similarity::{name_similarity, NAME_THRESHOLD};
 

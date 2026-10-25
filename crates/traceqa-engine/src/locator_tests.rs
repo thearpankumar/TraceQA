@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use traceqa_protocol::types::{Component, Confidence, ElementState, InteractiveEvidence, PathStep, RawElement, Rect};
+use traceqa_common::types::{Component, Confidence, ElementState, InteractiveEvidence, PathStep, RawElement, Rect};
 
 use super::*;
 use crate::group::{group, Located};

@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use clap::Args;
+use traceqa_common::types::{BrowserTarget, SessionOpenParams, Viewport};
 use traceqa_engine::driver::{Driver, DriverCommand, DriverError, ErrorKind, ProcessTransport};
 use traceqa_engine::{driver_commands, home};
-use traceqa_protocol::types::{BrowserTarget, SessionOpenParams, Viewport};
 
 /// The Python packages that make up the drivers, and where they sit in the repository.
 const PACKAGES: [(&str, &str); 3] = [

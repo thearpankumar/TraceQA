@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::json;
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     AxeNode, AxeResults, AxeViolation, Component, Instance, PageEvalParams, Rect, SessionOpenResult, Warning,
 };
 

@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
-use traceqa_protocol::types::{AxeResults, ComponentsFile, Event, Rect, RunManifest};
+use traceqa_common::types::{AxeResults, ComponentsFile, Event, Rect, RunManifest};
 
 mod clock;
 mod crops;

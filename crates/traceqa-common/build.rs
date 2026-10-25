@@ -142,7 +142,7 @@ fn parse_as_source<'a>(names: impl Iterator<Item = &'a String>) -> String {
     for name in names {
         writeln!(
             out,
-            "        {name:?} => serde_json::from_str::<traceqa_protocol::types::{name}>(json).and_then(serde_json::to_value),"
+            "        {name:?} => serde_json::from_str::<traceqa_common::types::{name}>(json).and_then(serde_json::to_value),"
         )
         .unwrap();
     }

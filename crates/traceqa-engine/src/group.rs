@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use traceqa_protocol::types::{Component, Confidence, Instance, RawElement, Rect};
+use traceqa_common::types::{Component, Confidence, Instance, RawElement, Rect};
 
 use crate::fingerprint::{self, CHANGING, REPEAT_THRESHOLD, TEMPLATE};
 use crate::locator::{self, Place};
@@ -242,7 +242,7 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use traceqa_protocol::types::{ElementState, InteractiveEvidence, PathStep};
+    use traceqa_common::types::{ElementState, InteractiveEvidence, PathStep};
 
     fn step(role: &str, tag: &str, repeat: Option<(u64, u64)>) -> PathStep {
         PathStep {

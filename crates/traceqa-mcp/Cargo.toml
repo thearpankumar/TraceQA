@@ -16,7 +16,7 @@ thiserror.workspace = true
 traceqa-diff.workspace = true
 traceqa-engine.workspace = true
 traceqa-findings.workspace = true
-traceqa-protocol.workspace = true
+traceqa-common.workspace = true
 
 [dev-dependencies]
 traceqa-engine = { workspace = true, features = ["test-support"] }

@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
-use traceqa_protocol::types::{DiffEntryKind, DiffFile, FindingSeverity, FindingsFile};
+use traceqa_common::types::{DiffEntryKind, DiffFile, FindingSeverity, FindingsFile};
 
 use crate::gate::{classify, reportable, Class, Severity};
 use crate::github::entry_message;

@@ -13,7 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_norway.workspace = true
 traceqa-diff.workspace = true
-traceqa-protocol.workspace = true
+traceqa-common.workspace = true
 
 [lints]
 workspace = true

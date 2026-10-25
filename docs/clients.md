@@ -68,7 +68,7 @@ not write the types by hand: generate them, so they cannot drift from the spec.
 
 | Language | Generator used |
 |---|---|
-| Rust | `typify`, in `crates/traceqa-protocol/build.rs` |
+| Rust | `typify`, in `crates/traceqa-common/build.rs` |
 | Python | `datamodel-code-generator`, in `scripts/gen_python_protocol.py` |
 | TypeScript | `json-schema-to-typescript`, in `sdks/typescript/scripts/gen-protocol.mjs` |
 
