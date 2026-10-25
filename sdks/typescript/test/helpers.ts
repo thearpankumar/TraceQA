@@ -44,9 +44,17 @@ useWorkspaceTools();
 /** A fresh folder that is removed when the process exits. */
 export function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "traceqa-ts-"));
-  process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+  if (tempDirs.length === 0) {
+    // One listener for all folders: one per folder trips Node's warning at 11 listeners.
+    process.on("exit", () => {
+      for (const folder of tempDirs) rmSync(folder, { recursive: true, force: true });
+    });
+  }
+  tempDirs.push(dir);
   return dir;
 }
+
+const tempDirs: string[] = [];
 
 export interface Shop {
   url: string;

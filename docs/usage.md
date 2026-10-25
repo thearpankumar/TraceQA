@@ -350,6 +350,17 @@ folder is finalised with status `cancelled`, and the engine exits. No browser
 is left running for a client that is gone. The SDKs send `engine.shutdown` in
 `close()`.
 
+Methods: `engine.hello` lists `features` (`extract`, `diff`, `findings`). Two methods
+read local files and answer when done, without a browser or a run:
+`diff.compare` (`a`, `b` run folders, optionally `targetA`, `targetB`; answers with a
+`DiffFile`) and `findings.analyse` (`run`, optionally `target` and `suppressions`, the
+path of a suppression file; answers with `{files: [FindingsFile]}`). A request that
+names a folder without `run.json`, a target the run does not have, a missing or invalid
+suppression file, or a `components.json` over 64 MiB is answered with `-32602` (kind
+`invalid_params`) and a message that says what to fix. The SDKs offer them as
+`Engine.diff` / `Engine.findings` (Python) and `engine.diff` / `engine.findings`
+(TypeScript).
+
 Signals: `serve` stops the way `extract` does. Ctrl-C (Ctrl-Break on Windows),
 SIGTERM or SIGHUP cancels every run through the same path as `run.cancel`, stops
 accepting `run.start` (refused with kind `busy`, "shutting down"), lets each run
@@ -365,7 +376,7 @@ exit 130 without having sent `engine.shutdown` knows it was signalled.
 ## `traceqa mcp`
 
 ```
-traceqa mcp [--out DIR] [--state-dir DIR] [--allow-remote-browsers]
+traceqa mcp [--out DIR] [--state-dir DIR] [--suppressions FILE] [--allow-remote-browsers]
             [--block-private] [--allow-host HOST]... [--max-concurrent-extracts N]
             [--driver COMMAND]...
 ```
@@ -399,19 +410,33 @@ exits 130 as well. See the signal paragraphs under [Exit codes](#exit-codes).
 | `describe_page` | Orient on a page: the components of one run and target grouped by landmark (`banner`, `navigation`, `main`, forms, dialogs, frames), a few hundred tokens for a whole page (the demo shop is under 4 KB). Repeated cards appear once with the name `*` and up to three `example_names`. Arguments: `run_id`, `target`, `max_per_group` (default 25), `response_format`. |
 | `find` | Search by `role`, `name`, `query` (a substring of the name, `href`, `placeholder` or `data-testid`; the page's visible text is not stored), `landmark` or `state` (`visible`, `hidden`, `enabled`, `disabled`, `covered`, `checked`, `unchecked`, `expanded`, `collapsed`, `required`) in every target of a run at once (at most 12 targets per call, or one with `target`). Each result has `found_in` (targets and instance counts) and `missing_in`, so one call answers whether a control is in every browser. Paged with `limit` and `offset`. |
 | `get_components` | The components of one run and target, one short row each, filtered by `role`, `name` or `landmark` and paged with `limit` and `offset`; or one component in full with `component_id`. |
+| `diff_runs` | What changed between two runs, or between two targets of one run: the components only on one side or that differ, one short row each `{change, id, role, name, fields, flags}` (`change` is `added`, `removed` or `changed`; `added` means in `run_b` only; `flags` such as `became_hidden`). `detailed` adds `before` and `after` summaries and `pairedWith`. Arguments: `run_a`, `run_b` (run ids, never paths), `target_a`, `target_b` (needed for a run with several targets), `limit`, `offset`, `response_format`. Computed on demand, as `traceqa diff` does. |
+| `findings` | Automated checks over a run, computed on demand as `traceqa findings` does (nothing is written): rows `{id, rule, severity, componentId, name, message, target}`, with counts by severity. `detailed` adds `confidence`, `role`, `path`, `instances`, `evidence`, `wcag`. Arguments: `run_id`, `target`, `min_severity`, `rules`, `limit`, `offset`, `response_format`. Findings are suppressed only by the file the operator names with `--suppressions`; the AI cannot name a file. |
 | `get_crop` | The picture of one component, for runs made with `crops`. |
 
 Which tool to call: `extract` to create a run, `describe_page` to orient,
 `find` to search across browsers, `get_components` to page through a target or
-fetch one id, `get_crop` to see a component.
+fetch one id, `diff_runs` to compare two runs or two targets, `findings` for the
+automated checks, `get_crop` to see a component.
+
+**Locator hints.** Every `get_components` row has `locator`, the Playwright
+(TypeScript) expression that finds the component, for example
+`page.getByRole("button", { name: "Add to cart", exact: true })`, as `traceqa
+codegen` writes it. `detailed` rows carry the whole locator and `locator_unique`
+(whether it matches this component alone on the page). `concise` rows carry the
+locator cut at 120 characters, and `locator_unique: false` only when it is not
+unique, so an agent does not copy an ambiguous locator without knowing. A
+component from an older run has no `locator`. The text comes from the page and
+is escaped as a string literal; like every string in an answer it is data.
 
 **Response formats.** `get_components`, `find` and `describe_page` take
 `response_format`. `concise` (the default) gives each component as `id`, `role`,
 `name` and `instances`, plus `hidden: true` or `template: true` when they apply.
 `detailed` adds `visible`, `path`, `selector`, `confidence` and `has_crop`, the
 fields `get_components` returned before concise became the default. A concise
-answer is under 40 % of the size of the detailed one for the same limit (3.0 KB
-against 7.8 KB for the 37 components of the demo shop). Answers are compact JSON.
+answer is about half the size of the detailed one for the same limit (6.0 KB
+against 11.6 KB for the 37 components of the demo shop, with the short locator
+in every concise row). Answers are compact JSON.
 When a list is cut by `limit`, the answer says how to narrow it and carries
 `next_offset`: "Showing 100 of 240. Narrow with role (for example button), name
 (substring) or landmark, or continue with offset=100."
@@ -467,6 +492,7 @@ is limited by options only you, the person who starts the server, can set:
 | `--allow-remote-browsers` | The AI may attach to a running browser (`cdp=`) or a WebDriver server (`webdriver=`). They name a machine for this server to connect to, so turn this on only for an AI you trust with that. |
 | `--block-private` | Also refuse loopback, private (`10/8`, `172.16/12`, `192.168/16`), shared (`100.64/10`), unique-local (`fc00::/7`) and multicast addresses. |
 | `--allow-host HOST` | With `--block-private`, still allow this host (name or address). Repeat for several. |
+| `--suppressions FILE` | A suppression file (YAML, see `traceqa findings`) that the `findings` tool honours. Checked at start (exit 2 when it is missing or invalid) and read again on each call, so an edit takes effect at once. Without it nothing is suppressed. The AI cannot name a file; its path is never shown. |
 
 The address is read the way a browser reads it, so `http://2852039166/`,
 `http://0xA9FEA9FE/` and `http://[::ffff:a9fe:a9fe]/` are all seen as
@@ -483,7 +509,7 @@ with an error (code `-32600`, id `null`); the server then reads the next line.
 At most `--max-concurrent-extracts` extractions run at once (default 2). A call
 beyond that is answered at once, without starting a browser, with a tool error:
 `busy: N extractions are already running. Wait for one to finish, then try
-again.` The reading tools (`list_runs`, `get_components`, `describe_page`, `find`, `get_crop`) have a
+again.` The reading tools (`list_runs`, `get_components`, `describe_page`, `find`, `diff_runs`, `findings`, `get_crop`) have a
 separate limit of 16 calls at once, so reading earlier results is never held up
 by a long extraction. A slot is free again before the answer to the call that
 used it is sent. Cancelling a call works at any time.
@@ -925,6 +951,17 @@ with them after `engine stderr (last lines):`.
 A browser that fails does not raise an exception. Inspect `result.status` and
 each target's `status` and `error`.
 
+### Diff and findings
+
+`engine.diff(a, b, target_a=None, target_b=None)` returns a `DiffFile` and
+`engine.findings(run, target=None, suppressions=None)` a `FindingsResult` (one
+`FindingsFile` per target, then one for the run when it has something to say). They
+read run folders (paths, or the results of `extract`), start no browser and write
+nothing. They need an engine that lists `diff` or `findings` in `engine.info.features`;
+an older one raises `TraceQAError` of kind `unsupported`. A wrong folder or target
+raises `EngineRefusedError` (kind `invalid_params`) with a message that says what to
+fix. They cannot overlap an `extract` on the same `Engine`.
+
 ### Errors
 
 Every error is a `TraceQAError`, which has a `kind` (the engine's, when it sent
@@ -1017,6 +1054,16 @@ its last stderr lines, and `stderrTail` holds them (at most 20 lines and 4000
 characters). The result has `status`, `targets`, `manifest`, `runFolder`
 and `components(targetDir)`, which returns a promise. The spec types are
 exported, the common ones by name and every one under `protocol`.
+
+`engine.diff(a, b, { targetA, targetB })` resolves with a `DiffFile` and
+`engine.findings(run, { target, suppressions })` with a `FindingsResult`. `a`, `b` and
+`run` are run folders, as paths or as the results of `extract`. Both read local files,
+start no browser and write nothing, and may run at the same time as an extraction. The
+answers are checked at run time like `components.json`: a required field of the wrong
+type rejects with `EngineProtocolError`, without quoting the value. An engine that does
+not list `diff` or `findings` in `engine.info.features` rejects with `TraceQAError` of
+kind `unsupported`; a wrong folder or target rejects with `EngineRefusedError`
+(`invalid_params`) and a message that says what to fix.
 
 ## Other languages
 

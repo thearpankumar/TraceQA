@@ -1,6 +1,6 @@
 {"note": "The engine refuses a run whose URL cannot be loaded."}
 {"client": {"jsonrpc": "2.0", "id": 1, "method": "engine.hello", "params": {"protocolVersion": 1, "clientName": "<any>", "clientVersion": "<any>"}}}
-{"engine": {"jsonrpc": "2.0", "id": 1, "result": {"engineVersion": "0.1.0", "features": ["extract"], "protocolVersion": 1}}}
+{"engine": {"jsonrpc": "2.0", "id": 1, "result": {"engineVersion": "0.1.0", "features": ["extract", "diff", "findings"], "protocolVersion": 1}}}
 {"client": {"jsonrpc": "2.0", "id": 2, "method": "run.start", "params": {"feature": "extract", "url": "not-a-url", "targets": [{"browser": "chromium", "headless": true}], "viewports": [{"width": 1280, "height": 800}], "outDir": "<any>", "options": {"crops": false, "includeHidden": true}}}}
 {"engine": {"jsonrpc": "2.0", "id": 2, "error": {"code": -32602, "message": "url must start with http:// or https://, got \"not-a-url\"", "data": {"kind": "invalid_params", "retryable": false}}}}
 {"client": {"jsonrpc": "2.0", "id": 4, "method": "engine.shutdown", "params": {}}}

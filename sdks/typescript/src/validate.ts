@@ -5,7 +5,9 @@
 import { EngineProtocolError } from "./errors.js";
 import type {
   ComponentsFile,
+  DiffFile,
   EngineHelloResult,
+  FindingsResult,
   RunDoneParams,
   RunEventParams,
   RunStartResult,
@@ -104,4 +106,72 @@ export function parseRunDone(value: unknown): RunDoneParams {
   string(manifest, "status", what, "manifest.");
   array(manifest, "targets", what, "manifest.");
   return params as unknown as RunDoneParams;
+}
+
+const DIFF_KINDS = ["added", "removed", "changed"];
+
+function stringArray(parent: Obj, key: string, what: string, path: string): void {
+  array(parent, key, what, path).forEach((item, index) => {
+    if (typeof item !== "string") fail(what, `${path}${key}[${index}] is not a string`);
+  });
+}
+
+function diffSide(parent: Obj, key: string, what: string): void {
+  const side = object(parent[key], what, key);
+  const path = `${key}.`;
+  string(side, "label", what, path);
+  string(side, "runId", what, path);
+  string(side, "url", what, path);
+  number(side, "componentCount", what, path);
+  object(side["browser"], what, `${path}browser`);
+  object(side["viewport"], what, `${path}viewport`);
+}
+
+/** The result of a diff.compare request. */
+export function parseDiffFile(value: unknown): DiffFile {
+  const what = "the diff.compare answer";
+  const file = object(value, what, "the result");
+  number(file, "formatVersion", what, "");
+  string(file, "mode", what, "");
+  diffSide(file, "a", what);
+  diffSide(file, "b", what);
+  const summary = object(file["summary"], what, "summary");
+  for (const key of ["added", "removed", "changed", "unchanged", "paired"]) number(summary, key, what, "summary.");
+  array(file, "entries", what, "").forEach((entry, index) => {
+    const path = `entries[${index}].`;
+    const item = object(entry, what, `entries[${index}]`);
+    if (!DIFF_KINDS.includes(string(item, "kind", what, path))) fail(what, `${path}kind is not added, removed or changed`);
+    string(item, "id", what, path);
+    stringArray(item, "fields", what, path);
+    stringArray(item, "flags", what, path);
+    for (const side of ["a", "b"]) {
+      if (item[side] !== undefined) object(item[side], what, `${path}${side}`);
+    }
+  });
+  array(file, "warnings", what, "");
+  return file as unknown as DiffFile;
+}
+
+/** The result of a findings.analyse request. */
+export function parseFindingsResult(value: unknown): FindingsResult {
+  const what = "the findings.analyse answer";
+  const result = object(value, what, "the result");
+  array(result, "files", what, "").forEach((entry, index) => {
+    const path = `files[${index}].`;
+    const file = object(entry, what, `files[${index}]`);
+    number(file, "formatVersion", what, path);
+    string(file, "scope", what, path);
+    string(file, "runId", what, path);
+    const counts = object(file["counts"], what, `${path}counts`);
+    for (const key of ["error", "warning", "info"]) number(counts, key, what, `${path}counts.`);
+    for (const list of ["findings", "suppressed"]) {
+      array(file, list, what, path).forEach((finding, at) => {
+        const row = object(finding, what, `${path}${list}[${at}]`);
+        const rowPath = `${path}${list}[${at}].`;
+        for (const key of ["id", "rule", "severity", "componentId", "message"]) string(row, key, what, rowPath);
+      });
+    }
+    array(file, "warnings", what, path);
+  });
+  return result as unknown as FindingsResult;
 }

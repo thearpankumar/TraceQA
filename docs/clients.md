@@ -19,7 +19,7 @@ can be a client.
 |---|---|---|
 | 1 | Client | Start `traceqa serve`. Add `--driver COMMAND` for each driver the caller names. |
 | 2 | Client | `{"jsonrpc":"2.0","id":1,"method":"engine.hello","params":{"protocolVersion":1,"clientName":"traceqa-go"}}` |
-| 3 | Engine | `{"jsonrpc":"2.0","id":1,"result":{"engineVersion":"0.1.0","protocolVersion":1,"features":["extract"]}}` |
+| 3 | Engine | `{"jsonrpc":"2.0","id":1,"result":{"engineVersion":"0.1.0","protocolVersion":1,"features":["extract","diff","findings"]}}` |
 | 4 | Client | `{"jsonrpc":"2.0","id":2,"method":"run.start","params":{"feature":"extract","url":"https://example.com","targets":[{"browser":"chromium","headless":true}],"viewports":[{"width":1280,"height":800}],"options":{"crops":false,"includeHidden":true}}}` |
 | 5 | Engine | `{"jsonrpc":"2.0","id":2,"result":{"runId":"r_20261014_065509_925a","runFolder":"/abs/path/runs/r_20261014_065509_925a"}}` |
 | 6 | Engine | `{"jsonrpc":"2.0","method":"run.event","params":{"runId":"r_...","event":{...}}}`, many times |
@@ -29,6 +29,20 @@ can be a client.
 
 To cancel, send `{"jsonrpc":"2.0","id":3,"method":"run.cancel","params":{"runId":"r_..."}}`.
 The run still ends with `run.done`, with status `cancelled`.
+
+Two more requests read local files and answer at once, with no run and no events.
+Send them after step 3, when `features` lists `diff` or `findings` (an older engine
+answers `-32601`; report that the engine is too old):
+
+- `{"jsonrpc":"2.0","id":5,"method":"diff.compare","params":{"a":"/abs/runs/r_1","b":"/abs/runs/r_2","targetA":"chromium-1280x800","targetB":"chromium-1280x800"}}`
+  answers with a `DiffFile`. `targetA` and `targetB` may be left out for a run with one target.
+- `{"jsonrpc":"2.0","id":6,"method":"findings.analyse","params":{"run":"/abs/runs/r_1","target":"chromium-1280x800","suppressions":"/abs/suppress.yaml"}}`
+  answers with `{"files":[FindingsFile]}`. `target` and `suppressions` may be left out.
+
+A folder that is not a run, a target the run lacks, an invalid suppression file or a
+`components.json` over 64 MiB is refused with kind `invalid_params`; the message says
+what to fix. Do not send either while you wait for a `run.start` answer on the same
+connection unless you match answers by `id`, as the rules below say.
 
 A full recorded example of each case is in [spec/transcripts/](../spec/transcripts/).
 

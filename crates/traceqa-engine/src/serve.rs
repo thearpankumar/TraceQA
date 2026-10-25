@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -19,8 +20,9 @@ use traceqa_protocol::jsonrpc::{code, serve_lines, Message, Output, RpcError};
 use traceqa_protocol::supervise::guard;
 use traceqa_protocol::sync::LockExt;
 use traceqa_protocol::types::{
-    EngineHelloParams, EngineHelloResult, Event, RpcErrorData, RunCancelParams, RunDoneParams, RunEventParams,
-    RunStartParams, RunStartResult,
+    ComponentsFile, DiffCompareParams, EngineHelloParams, EngineHelloResult, Event, FindingsAnalyseParams,
+    FindingsFile, FindingsResult, RpcErrorData, RunCancelParams, RunDoneParams, RunEventParams, RunManifest,
+    RunStartParams, RunStartResult, RunStatus,
 };
 
 use crate::driver::{DriverCommand, Drivers, ErrorKind};
@@ -194,6 +196,11 @@ fn serve_inner(
                     ))
                 }
                 method::RUN_START => parse(params).and_then(|request| start_run(request, &context, &mut runs)),
+                // Read local files and answer when done, inline: the size caps keep this short.
+                method::DIFF_COMPARE => parse(params).and_then(|request: DiffCompareParams| diff_compare(&request)),
+                method::FINDINGS_ANALYSE => {
+                    parse(params).and_then(|request: FindingsAnalyseParams| findings_analyse(&request))
+                }
                 method::ENGINE_SHUTDOWN => {
                     shutting_down = true;
                     answer(serde_json::json!({}))
@@ -264,8 +271,203 @@ fn hello(hello: &EngineHelloParams) -> Result<Value, RpcError> {
     answer(EngineHelloResult {
         engine_version: crate::VERSION.to_string(),
         protocol_version: PROTOCOL_VERSION,
-        features: FEATURES.iter().map(std::string::ToString::to_string).collect(),
+        features: HELLO_FEATURES.iter().map(std::string::ToString::to_string).collect(),
     })
+}
+
+/// What `engine.hello` lists: the features `run.start` takes, then the methods that read run
+/// folders. A client that needs `diff.compare` or `findings.analyse` looks for them here.
+const HELLO_FEATURES: [&str; 3] = [FEATURES[0], "diff", "findings"];
+
+/// The largest `components.json` that `diff.compare` and `findings.analyse` read. They run inline,
+/// so a huge file would stall `run.cancel` while it is read.
+pub const MAX_COMPONENTS_BYTES: u64 = 64 * 1024 * 1024;
+
+fn invalid(message: impl Into<String>) -> RpcError {
+    failure(code::INVALID_PARAMS, &ErrorKind::InvalidParams, message)
+}
+
+/// Today in UTC as `YYYY-MM-DD`, for suppression expiry.
+#[must_use]
+pub fn today_utc() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    civil_date(i64::try_from(seconds / 86_400).unwrap_or(0))
+}
+
+/// Days since 1970-01-01 to a date (Howard Hinnant's algorithm).
+fn civil_date(days: i64) -> String {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Reads a text file of at most `cap` bytes.
+fn read_capped(path: &Path, what: &str, cap: u64) -> Result<String, RpcError> {
+    let size = std::fs::metadata(path)
+        .map_err(|e| invalid(format!("could not read {what}: {e}")))?
+        .len();
+    if size > cap {
+        return Err(invalid(format!(
+            "{what} is {} MiB, over the limit of {} MiB",
+            size / (1024 * 1024),
+            cap / (1024 * 1024)
+        )));
+    }
+    std::fs::read_to_string(path).map_err(|e| invalid(format!("could not read {what}: {e}")))
+}
+
+/// A run folder's manifest. `name` is the parameter, for the message.
+fn open_run(folder: &str, name: &str) -> Result<(PathBuf, RunManifest), RpcError> {
+    let dir = PathBuf::from(folder);
+    let text = read_capped(
+        &dir.join("run.json"),
+        &format!("run.json of {name}"),
+        MAX_COMPONENTS_BYTES,
+    )
+    .map_err(|e| {
+        invalid(format!(
+            "{name} is not a run folder ({}). Pass the runFolder that run.start answered.",
+            e.message
+        ))
+    })?;
+    let manifest: RunManifest =
+        serde_json::from_str(&text).map_err(|e| invalid(format!("run.json of {name} is not a run manifest: {e}")))?;
+    Ok((dir, manifest))
+}
+
+/// A target folder name from run.json is data: it must be one plain name inside the run folder.
+fn plain_dir(dir: &str) -> bool {
+    !dir.is_empty() && dir != "." && dir != ".." && !dir.contains(['/', '\\', ':'])
+}
+
+fn read_components(folder: &Path, dir: &str, name: &str) -> Result<ComponentsFile, RpcError> {
+    if !plain_dir(dir) {
+        return Err(invalid(format!(
+            "run.json of {name} names a target folder that is not a plain name"
+        )));
+    }
+    let what = format!("{dir}/components.json of {name}");
+    let path = folder.join(dir).join("components.json");
+    if !path.is_file() {
+        return Err(invalid(format!(
+            "{dir} of {name} has no components.json. Check the target's status and error in run.json."
+        )));
+    }
+    let text = read_capped(&path, &what, MAX_COMPONENTS_BYTES)?;
+    serde_json::from_str(&text).map_err(|e| invalid(format!("{what} is not a components file: {e}")))
+}
+
+fn target_names(manifest: &RunManifest) -> String {
+    manifest
+        .targets
+        .iter()
+        .map(|t| t.dir.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The target of a side: the one named, or the only one the run has.
+fn pick_target<'m>(manifest: &'m RunManifest, wanted: Option<&str>, name: &str) -> Result<&'m str, RpcError> {
+    match (wanted, manifest.targets.as_slice()) {
+        (Some(wanted), targets) => targets
+            .iter()
+            .find(|t| t.dir == wanted)
+            .map(|t| t.dir.as_str())
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{name} has no target {wanted}. It has: {}",
+                    target_names(manifest)
+                ))
+            }),
+        (None, [only]) => Ok(only.dir.as_str()),
+        (None, []) => Err(invalid(format!("{name} has no targets"))),
+        (None, _) => Err(invalid(format!(
+            "{name} has several targets. Pass {} with one of: {}",
+            if name == "a" { "targetA" } else { "targetB" },
+            target_names(manifest)
+        ))),
+    }
+}
+
+fn diff_compare(request: &DiffCompareParams) -> Result<Value, RpcError> {
+    let (dir_a, manifest_a) = open_run(&request.a, "a")?;
+    let (dir_b, manifest_b) = open_run(&request.b, "b")?;
+    let target_a = pick_target(&manifest_a, request.target_a.as_deref(), "a")?;
+    let target_b = pick_target(&manifest_b, request.target_b.as_deref(), "b")?;
+    let file_a = read_components(&dir_a, target_a, "a")?;
+    let file_b = read_components(&dir_b, target_b, "b")?;
+    let options = traceqa_diff::Options {
+        label_a: request.a.clone(),
+        label_b: request.b.clone(),
+        target_a: Some(target_a.to_string()),
+        target_b: Some(target_b.to_string()),
+    };
+    let result = traceqa_diff::compare(&file_a, &file_b, &options).map_err(|e| invalid(e.to_string()))?;
+    answer(result)
+}
+
+fn findings_analyse(request: &FindingsAnalyseParams) -> Result<Value, RpcError> {
+    let (dir, manifest) = open_run(&request.run, "run")?;
+    let suppressions = match &request.suppressions {
+        None => None,
+        Some(path) => {
+            let text = read_capped(
+                Path::new(path),
+                "the suppression file",
+                traceqa_findings::suppress::MAX_FILE_BYTES as u64,
+            )?;
+            Some(traceqa_findings::suppress::parse(&text).map_err(|e| invalid(format!("the suppression file: {e}")))?)
+        }
+    };
+    if let Some(wanted) = &request.target {
+        let target = manifest.targets.iter().find(|t| &t.dir == wanted).ok_or_else(|| {
+            invalid(format!(
+                "run has no target {wanted}. It has: {}",
+                target_names(&manifest)
+            ))
+        })?;
+        if target.status != RunStatus::Completed {
+            return Err(invalid(format!(
+                "{wanted} did not complete, so there is nothing to analyse"
+            )));
+        }
+    }
+    let mut targets = Vec::new();
+    for target in manifest.targets.iter().filter(|t| t.status == RunStatus::Completed) {
+        targets.push(traceqa_findings::TargetInput {
+            dir: target.dir.clone(),
+            file: read_components(&dir, &target.dir, "run")?,
+        });
+    }
+    let options = traceqa_findings::Options {
+        min_severity: None,
+        suppressions,
+        today: Some(today_utc()),
+    };
+    let input = traceqa_findings::RunInput {
+        run_id: manifest.run_id.clone(),
+        targets,
+    };
+    // Every target is analysed so a suppression used in another browser is not reported unused;
+    // only the chosen one is returned.
+    let files: Vec<FindingsFile> = traceqa_findings::analyse_run(&input, &options)
+        .into_iter()
+        .filter(|f| match (&request.target, &f.target) {
+            (Some(wanted), Some(dir)) => wanted == dir,
+            (Some(_), None) => false,
+            (None, _) => true,
+        })
+        .collect();
+    answer(FindingsResult { files })
 }
 
 /// Accepts a run and executes it on its own thread. Progress and the result reach the
@@ -425,7 +627,10 @@ mod tests {
             request(6, "run.start", serde_json::json!({ "url": 7 })),
         ]);
         assert_eq!(replies.len(), 6);
-        assert_eq!(replies[0]["result"]["features"], serde_json::json!(["extract"]));
+        assert_eq!(
+            replies[0]["result"]["features"],
+            serde_json::json!(["extract", "diff", "findings"])
+        );
         let kinds: Vec<&str> = replies[1..]
             .iter()
             .map(|reply| reply["error"]["data"]["kind"].as_str().unwrap())
@@ -930,5 +1135,202 @@ mod tests {
             .contains("shutting down"));
         assert!(!out_dir.exists());
         assert!(replies[2]["result"]["engineVersion"].is_string());
+    }
+
+    // ---- diff.compare and findings.analyse ----
+
+    const EXAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../spec/examples");
+    const TARGET: &str = "firefox-1280x800";
+
+    /// A run folder made from the spec examples, in a folder of its own that is removed after.
+    struct Fixture(PathBuf);
+
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("traceqa-serve-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            let target = root.join(TARGET);
+            std::fs::create_dir_all(&target).unwrap();
+            std::fs::copy(
+                Path::new(EXAMPLES).join("RunManifest.completed.json"),
+                root.join("run.json"),
+            )
+            .unwrap();
+            std::fs::copy(
+                Path::new(EXAMPLES).join("ComponentsFile.shop.json"),
+                target.join("components.json"),
+            )
+            .unwrap();
+            Self(root)
+        }
+
+        fn path(&self) -> String {
+            self.0.display().to_string()
+        }
+
+        fn components(&self) -> PathBuf {
+            self.0.join(TARGET).join("components.json")
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn diff_compare_answers_with_a_diff_file() {
+        let a = Fixture::new("diff-a");
+        let b = Fixture::new("diff-b");
+        // B has no instance that can be seen, so the one shared component changed.
+        let mut file: Value = serde_json::from_str(&std::fs::read_to_string(b.components()).unwrap()).unwrap();
+        for instance in file["components"][0]["instances"].as_array_mut().unwrap() {
+            instance["state"]["visible"] = serde_json::json!(false);
+        }
+        std::fs::write(b.components(), file.to_string()).unwrap();
+
+        let replies = converse(&[
+            request(1, "diff.compare", serde_json::json!({ "a": a.path(), "b": b.path() })),
+            request(
+                2,
+                "diff.compare",
+                serde_json::json!({ "a": a.path(), "b": a.path(), "targetA": TARGET, "targetB": TARGET }),
+            ),
+        ]);
+        let diff = &replies[0]["result"];
+        assert_eq!(diff["summary"]["changed"], 1, "{replies:?}");
+        assert_eq!(diff["entries"][0]["flags"][0], "became_hidden");
+        assert_eq!(diff["a"]["target"], TARGET);
+        assert_eq!(diff["a"]["label"], a.path());
+        assert_eq!(replies[1]["result"]["summary"]["unchanged"], 1);
+        assert_eq!(replies[1]["result"]["entries"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn findings_analyse_answers_with_one_file_per_target_and_honours_a_suppression_file() {
+        let run = Fixture::new("findings");
+        let mut file: Value = serde_json::from_str(&std::fs::read_to_string(run.components()).unwrap()).unwrap();
+        let mut unnamed = file["components"][0].clone();
+        unnamed["id"] = serde_json::json!("c_00000000bb01");
+        unnamed["name"] = serde_json::json!("");
+        unnamed.as_object_mut().unwrap().remove("locator");
+        for instance in unnamed["instances"].as_array_mut().unwrap() {
+            instance["name"] = serde_json::json!("");
+        }
+        file["components"].as_array_mut().unwrap().push(unnamed);
+        std::fs::write(run.components(), file.to_string()).unwrap();
+        let suppressions = run.0.join("suppress.yaml");
+        std::fs::write(
+            &suppressions,
+            "suppressions:\n  - id: unnamed-control:c_00000000bb01\n    reason: Decorative.\n",
+        )
+        .unwrap();
+
+        let replies = converse(&[
+            request(1, "findings.analyse", serde_json::json!({ "run": run.path() })),
+            request(
+                2,
+                "findings.analyse",
+                serde_json::json!({ "run": run.path(), "target": TARGET, "suppressions": suppressions.display().to_string() }),
+            ),
+        ]);
+        let files = replies[0]["result"]["files"].as_array().unwrap();
+        assert_eq!(files[0]["scope"], "target", "{replies:?}");
+        assert_eq!(files[0]["target"], TARGET);
+        assert_eq!(files[0]["counts"]["error"], 1);
+        assert_eq!(files[0]["findings"][0]["id"], "unnamed-control:c_00000000bb01");
+        let suppressed = &replies[1]["result"]["files"][0];
+        assert_eq!(suppressed["counts"]["error"], 0);
+        assert_eq!(suppressed["suppressed"][0]["suppressed"]["reason"], "Decorative.");
+    }
+
+    #[test]
+    fn bad_folders_targets_and_files_answer_invalid_params_with_a_fix() {
+        let run = Fixture::new("bad");
+        let nowhere = std::env::temp_dir()
+            .join("traceqa-serve-no-such-run")
+            .display()
+            .to_string();
+        let replies = converse(&[
+            request(1, "diff.compare", serde_json::json!({ "a": nowhere, "b": run.path() })),
+            request(
+                2,
+                "diff.compare",
+                serde_json::json!({ "a": run.path(), "b": run.path(), "targetB": "webkit-1x1" }),
+            ),
+            request(3, "diff.compare", serde_json::json!({ "a": run.path() })),
+            request(4, "findings.analyse", serde_json::json!({ "run": nowhere })),
+            request(
+                5,
+                "findings.analyse",
+                serde_json::json!({ "run": run.path(), "suppressions": nowhere }),
+            ),
+            request(
+                6,
+                "findings.analyse",
+                serde_json::json!({ "run": run.path(), "target": "webkit-1x1" }),
+            ),
+        ]);
+        let expected = [
+            "is not a run folder",
+            "has no target webkit-1x1",
+            "missing field",
+            "is not a run folder",
+            "suppression file",
+            "has no target webkit-1x1",
+        ];
+        for (reply, expected) in replies.iter().zip(expected) {
+            assert_eq!(reply["error"]["code"], code::INVALID_PARAMS, "{reply}");
+            assert_eq!(reply["error"]["data"]["kind"], "invalid_params");
+            let message = reply["error"]["message"].as_str().unwrap();
+            assert!(message.contains(expected), "{message}");
+        }
+        assert!(replies[0]["error"]["message"].as_str().unwrap().contains("runFolder"));
+    }
+
+    #[test]
+    fn a_components_file_over_the_cap_is_refused_unread() {
+        let run = Fixture::new("huge");
+        // A sparse file: the size is claimed, nothing is written.
+        let file = std::fs::OpenOptions::new().write(true).open(run.components()).unwrap();
+        file.set_len(MAX_COMPONENTS_BYTES + 1).unwrap();
+        drop(file);
+        let replies = converse(&[
+            request(
+                1,
+                "diff.compare",
+                serde_json::json!({ "a": run.path(), "b": run.path() }),
+            ),
+            request(2, "findings.analyse", serde_json::json!({ "run": run.path() })),
+        ]);
+        for reply in &replies {
+            assert_eq!(reply["error"]["data"]["kind"], "invalid_params", "{reply}");
+            assert!(reply["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("over the limit of 64 MiB"));
+        }
+    }
+
+    #[test]
+    fn a_target_folder_that_is_not_a_plain_name_is_refused() {
+        let run = Fixture::new("plain");
+        let mut manifest: Value =
+            serde_json::from_str(&std::fs::read_to_string(run.0.join("run.json")).unwrap()).unwrap();
+        manifest["targets"][0]["dir"] = serde_json::json!("../elsewhere");
+        std::fs::write(run.0.join("run.json"), manifest.to_string()).unwrap();
+        let replies = converse(&[request(1, "findings.analyse", serde_json::json!({ "run": run.path() }))]);
+        assert!(replies[0]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not a plain name"));
+    }
+
+    #[test]
+    fn dates_are_civil() {
+        assert_eq!(civil_date(0), "1970-01-01");
+        assert_eq!(civil_date(11_016), "2000-02-29");
+        assert!(crate::serve::today_utc().starts_with("20"));
     }
 }

@@ -87,7 +87,8 @@ class EngineHelloResult(BaseModel):
     engine_version: str = Field(..., validation_alias="engineVersion", serialization_alias="engineVersion")
     protocol_version: int = Field(..., validation_alias="protocolVersion", serialization_alias="protocolVersion", ge=0)
     features: list[str] = Field(
-        ..., description="Features this engine can run. Known values: extract."
+        ...,
+        description="Features this engine can run. Known values: extract, diff, findings. diff and findings are the methods diff.compare and findings.analyse; a client that needs them checks this list.",
     )
 
 
@@ -131,6 +132,53 @@ class RunStartResult(BaseModel):
     )
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     run_folder: str = Field(..., validation_alias="runFolder", serialization_alias="runFolder", description="Absolute path.")
+
+
+class DiffCompareParams(BaseModel):
+    """
+    Compares one target of run folder a with one target of run folder b. Reads local files, at most 64 MiB per components.json, and answers when done; it does not start a browser.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    a: str = Field(
+        ...,
+        description="Path of a run folder made by run.start (side A, the older or reference side).",
+    )
+    b: str = Field(
+        ...,
+        description="Path of a run folder (side B, the newer or other side). May be the same folder as a, to compare two targets of one run.",
+    )
+    target_a: str | None = Field(
+        default=None,
+        validation_alias="targetA", serialization_alias="targetA",
+        description="Target folder name in a, for example chromium-1280x800. May be left out when the run has one target.",
+    )
+    target_b: str | None = Field(
+        default=None,
+        validation_alias="targetB", serialization_alias="targetB",
+        description="Target folder name in b. As targetA.",
+    )
+
+
+class FindingsAnalyseParams(BaseModel):
+    """
+    Runs the automated checks over a finished run folder. Reads local files, at most 64 MiB per components.json; writes nothing.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run: str = Field(..., description="Path of a run folder.")
+    target: str | None = Field(
+        default=None,
+        description="Only this target's findings are returned (every target is still analysed, so a suppression used in another browser is not reported unused). Default: all targets, then the run-level findings.",
+    )
+    suppressions: str | None = Field(
+        default=None,
+        description="Path of a suppression file (YAML, at most 256 KiB), as `traceqa findings --suppressions` takes it. Default: none.",
+    )
 
 
 class RunCancelParams(BaseModel):
@@ -1173,6 +1221,17 @@ class BaselineTarget(BaseModel):
     browser: BrowserInfo
     viewport: Viewport
     has_crops: bool = Field(..., validation_alias="hasCrops", serialization_alias="hasCrops")
+
+
+class FindingsResult(BaseModel):
+    """
+    One FindingsFile per target, in the run's order, then a run-scope file when there is something for it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    files: list[FindingsFile]
 
 
 class RunEventParams(BaseModel):

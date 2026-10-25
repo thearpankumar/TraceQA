@@ -4,6 +4,18 @@
  * How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).
  */
 export type Confidence = ("high" | "low")
+/**
+ * target: one browser at one viewport, written next to its components.json. run: findings about the run as a whole, written in the run folder.
+ */
+export type FindingScope = ("target" | "run")
+/**
+ * error: very likely a real problem. warning: probably a problem, check it. info: worth a look.
+ */
+export type FindingSeverity = ("error" | "warning" | "info")
+/**
+ * How sure the rule is that this is a real problem, apart from its severity.
+ */
+export type FindingConfidence = ("high" | "medium" | "low")
 export type RunStatus = ("running" | "completed" | "failed" | "cancelled")
 /**
  * How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.
@@ -20,18 +32,6 @@ export type ScrollTo = ("top" | "bottom")
 export type ScrollWait = ("animations" | "height")
 export type ActionKind = ("click" | "hover" | "type" | "select" | "press")
 export type LogLevel = ("debug" | "info" | "warn" | "error")
-/**
- * error: very likely a real problem. warning: probably a problem, check it. info: worth a look.
- */
-export type FindingSeverity = ("error" | "warning" | "info")
-/**
- * How sure the rule is that this is a real problem, apart from its severity.
- */
-export type FindingConfidence = ("high" | "medium" | "low")
-/**
- * target: one browser at one viewport, written next to its components.json. run: findings about the run as a whole, written in the run folder.
- */
-export type FindingScope = ("target" | "run")
 
 export interface SpecTypes {
 BaselineFile?: BaselineFile
@@ -47,6 +47,9 @@ EngineHelloResult?: EngineHelloResult
 ExtractOptions?: ExtractOptions
 RunStartParams?: RunStartParams
 RunStartResult?: RunStartResult
+DiffCompareParams?: DiffCompareParams
+FindingsAnalyseParams?: FindingsAnalyseParams
+FindingsResult?: FindingsResult
 RunCancelParams?: RunCancelParams
 RunEventParams?: RunEventParams
 RunDoneParams?: RunDoneParams
@@ -418,7 +421,7 @@ export interface EngineHelloResult {
 engineVersion: string
 protocolVersion: number
 /**
- * Features this engine can run. Known values: extract.
+ * Features this engine can run. Known values: extract, diff, findings. diff and findings are the methods diff.compare and findings.analyse; a client that needs them checks this list.
  */
 features: string[]
 }
@@ -536,6 +539,133 @@ runId: string
  * Absolute path.
  */
 runFolder: string
+}
+/**
+ * Compares one target of run folder a with one target of run folder b. Reads local files, at most 64 MiB per components.json, and answers when done; it does not start a browser.
+ */
+export interface DiffCompareParams {
+/**
+ * Path of a run folder made by run.start (side A, the older or reference side).
+ */
+a: string
+/**
+ * Path of a run folder (side B, the newer or other side). May be the same folder as a, to compare two targets of one run.
+ */
+b: string
+/**
+ * Target folder name in a, for example chromium-1280x800. May be left out when the run has one target.
+ */
+targetA?: string
+/**
+ * Target folder name in b. As targetA.
+ */
+targetB?: string
+}
+/**
+ * Runs the automated checks over a finished run folder. Reads local files, at most 64 MiB per components.json; writes nothing.
+ */
+export interface FindingsAnalyseParams {
+/**
+ * Path of a run folder.
+ */
+run: string
+/**
+ * Only this target's findings are returned (every target is still analysed, so a suppression used in another browser is not reported unused). Default: all targets, then the run-level findings.
+ */
+target?: string
+/**
+ * Path of a suppression file (YAML, at most 256 KiB), as `traceqa findings --suppressions` takes it. Default: none.
+ */
+suppressions?: string
+}
+/**
+ * One FindingsFile per target, in the run's order, then a run-scope file when there is something for it.
+ */
+export interface FindingsResult {
+files: FindingsFile[]
+}
+/**
+ * findings.json for one target (scope target) or for the run (scope run).
+ */
+export interface FindingsFile {
+formatVersion: number
+/**
+ * Raised when a rule is added or changes what it reports.
+ */
+rulesVersion: number
+scope: FindingScope
+runId: string
+/**
+ * Folder name inside the run folder. Absent when the file was computed from a components.json alone, and for scope run.
+ */
+target?: string
+url?: string
+browser?: BrowserInfo
+viewport?: Viewport
+counts: FindingCounts
+findings: Finding[]
+/**
+ * Findings set aside by the suppression file, each with its reason.
+ */
+suppressed: Finding[]
+/**
+ * Known codes: name_source_missing, suppression_unused, suppression_expired.
+ */
+warnings: Warning[]
+}
+/**
+ * Findings that are not suppressed, by severity.
+ */
+export interface FindingCounts {
+error: number
+warning: number
+info: number
+}
+/**
+ * One problem found by one rule in one component.
+ */
+export interface Finding {
+/**
+ * The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is.
+ */
+id: string
+/**
+ * Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete.
+ */
+rule: string
+severity: FindingSeverity
+confidence: FindingConfidence
+componentId: string
+/**
+ * Keys of the instances concerned, at most 20.
+ */
+instances: string[]
+role: string
+name: string
+path: string
+message: string
+/**
+ * What the rule measured. The fields depend on the rule; see docs/usage.md.
+ */
+evidence: {
+[k: string]: unknown
+}
+/**
+ * WCAG 2.2 success criteria the check relates to, for example 2.5.8.
+ */
+wcag: string[]
+helpUrl?: string
+suppressed?: FindingSuppression
+}
+/**
+ * Why a finding was set aside, from the suppression file.
+ */
+export interface FindingSuppression {
+reason: string
+/**
+ * YYYY-MM-DD. The entry applies through that day.
+ */
+expires?: string
 }
 export interface RunCancelParams {
 runId: string
@@ -1177,89 +1307,6 @@ kind: string
 retryable: boolean
 }
 /**
- * Why a finding was set aside, from the suppression file.
- */
-export interface FindingSuppression {
-reason: string
-/**
- * YYYY-MM-DD. The entry applies through that day.
- */
-expires?: string
-}
-/**
- * Findings that are not suppressed, by severity.
- */
-export interface FindingCounts {
-error: number
-warning: number
-info: number
-}
-/**
- * One problem found by one rule in one component.
- */
-export interface Finding {
-/**
- * The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is.
- */
-id: string
-/**
- * Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete.
- */
-rule: string
-severity: FindingSeverity
-confidence: FindingConfidence
-componentId: string
-/**
- * Keys of the instances concerned, at most 20.
- */
-instances: string[]
-role: string
-name: string
-path: string
-message: string
-/**
- * What the rule measured. The fields depend on the rule; see docs/usage.md.
- */
-evidence: {
-[k: string]: unknown
-}
-/**
- * WCAG 2.2 success criteria the check relates to, for example 2.5.8.
- */
-wcag: string[]
-helpUrl?: string
-suppressed?: FindingSuppression
-}
-/**
- * findings.json for one target (scope target) or for the run (scope run).
- */
-export interface FindingsFile {
-formatVersion: number
-/**
- * Raised when a rule is added or changes what it reports.
- */
-rulesVersion: number
-scope: FindingScope
-runId: string
-/**
- * Folder name inside the run folder. Absent when the file was computed from a components.json alone, and for scope run.
- */
-target?: string
-url?: string
-browser?: BrowserInfo
-viewport?: Viewport
-counts: FindingCounts
-findings: Finding[]
-/**
- * Findings set aside by the suppression file, each with its reason.
- */
-suppressed: Finding[]
-/**
- * Known codes: name_source_missing, suppression_unused, suppression_expired.
- */
-warnings: Warning[]
-}
-/**
  * The whole manifest.
  */
 export interface ManifestFile {
@@ -1503,6 +1550,14 @@ export const CLIENT_PROTOCOL_METHODS = {
   "engine.shutdown": {
     "params": "Empty",
     "result": "Empty"
+  },
+  "diff.compare": {
+    "params": "DiffCompareParams",
+    "result": "DiffFile"
+  },
+  "findings.analyse": {
+    "params": "FindingsAnalyseParams",
+    "result": "FindingsResult"
   }
 } as const;
 export const CLIENT_PROTOCOL_NOTIFICATIONS = {

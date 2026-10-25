@@ -30,8 +30,11 @@ export {
   toTarget,
   type Browser,
   type CloseOptions,
+  type DiffOptions,
   type EngineOptions,
   type ExtractOptions,
+  type FindingsOptions,
+  type RunRef,
 } from "./client.js";
 
 // The spec types a caller meets most. Every other one is under `protocol`.
@@ -40,8 +43,11 @@ export type {
   BrowserTarget,
   Component,
   ComponentsFile,
+  DiffFile,
   EngineHelloResult,
   Event,
+  FindingsFile,
+  FindingsResult,
   Instance,
   RunManifest,
   RunStatus,

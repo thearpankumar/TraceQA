@@ -21,6 +21,14 @@ CLIENT_PROTOCOL_METHODS = {
     "engine.shutdown": {
         "params": "Empty",
         "result": "Empty"
+    },
+    "diff.compare": {
+        "params": "DiffCompareParams",
+        "result": "DiffFile"
+    },
+    "findings.analyse": {
+        "params": "FindingsAnalyseParams",
+        "result": "FindingsResult"
     }
 }
 CLIENT_PROTOCOL_NOTIFICATIONS = {

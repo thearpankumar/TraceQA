@@ -67,6 +67,30 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "note": "The engine refuses a run whose URL cannot be loaded.",
         "start": run_start("not-a-url", [(1280, 800)]),
     },
+    "diff": {
+        "note": "One extraction at two viewports, then diff.compare of the run's two targets (a cross-viewport diff).",
+        "start": run_start(
+            SHOP, [(1280, 800), (390, 844)], parallel=2, options={"maxScrollSteps": 0, "timeoutMs": 30000}
+        ),
+        "queries": [
+            (
+                "diff.compare",
+                lambda folder: {
+                    "a": folder,
+                    "b": folder,
+                    "targetA": "chromium-1280x800",
+                    "targetB": "chromium-390x844",
+                },
+            )
+        ],
+    },
+    "findings": {
+        "note": "One extraction at two viewports, then findings.analyse of the whole run.",
+        "start": run_start(
+            SHOP, [(1280, 800), (390, 844)], parallel=2, options={"maxScrollSteps": 0, "timeoutMs": 30000}
+        ),
+        "queries": [("findings.analyse", lambda folder: {"run": folder})],
+    },
     "cancel": {
         "note": "The client cancels the run when the first page has opened.",
         "start": run_start(SHOP, [(1280, 800), (390, 844)], parallel=1),
@@ -103,10 +127,13 @@ def record(name: str, scenario: dict[str, Any], port: int, runs: str) -> list[di
         process.stdin.write(json.dumps(real) + "\n")
         process.stdin.flush()
 
+    raw: list[dict[str, Any]] = []
+
     def receive() -> dict[str, Any]:
         line = process.stdout.readline()
         if not line:
             raise SystemExit(f"{name}: the engine exited")
+        raw.append(json.loads(line))
         text = line.replace(real_shop.rstrip("/"), SHOP.rstrip("/")).replace(str(port + 1), "4174")
         # The run folder path, written with the separators of this system.
         for spelling in {runs, runs.replace("\\", "\\\\"), json.dumps(runs)[1:-1]}:
@@ -137,6 +164,19 @@ def record(name: str, scenario: dict[str, Any], port: int, runs: str) -> list[di
             # The answer to run.cancel may come after run.done.
             while not any(line.get("engine", {}).get("id") == 3 for line in lines):
                 receive()
+    # Requests that read the finished run folder. The recording shows the folder as /work/runs/...;
+    # the engine is sent the real one.
+    next_id = 5
+    for method, params in scenario.get("queries", []):
+        recorded_folder = answer["result"]["runFolder"]
+        real_folder = next(m for m in raw if m.get("id") == 2)["result"]["runFolder"]
+        shown = {"jsonrpc": "2.0", "id": next_id, "method": method, "params": params(recorded_folder)}
+        real = {**shown, "params": params(real_folder)}
+        send(shown, real)
+        reply = receive()
+        if "result" not in reply:
+            raise SystemExit(f"{name}: {method} failed: {reply}")
+        next_id += 1
     # A client that closes on purpose says so. Without this the engine would take the end of its input
     # for a crashed client and cancel whatever is running.
     shutdown = {"jsonrpc": "2.0", "id": 4, "method": "engine.shutdown", "params": {}}

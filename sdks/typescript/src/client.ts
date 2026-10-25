@@ -8,9 +8,13 @@ import {
   CLIENT_PROTOCOL_VERSION,
   type BrowserTarget,
   type ComponentsFile,
+  type DiffCompareParams,
+  type DiffFile,
   type EngineHelloParams,
   type EngineHelloResult,
   type Event,
+  type FindingsAnalyseParams,
+  type FindingsResult,
   type RunCancelParams,
   type RunDoneParams,
   type RunEventParams,
@@ -30,6 +34,8 @@ import {
 } from "./errors.js";
 import {
   parseComponentsFile,
+  parseDiffFile,
+  parseFindingsResult,
   parseHelloResult,
   parseRunDone,
   parseRunEvent,
@@ -129,6 +135,27 @@ export class ExtractResult {
     }
     return parseComponentsFile(text);
   }
+}
+
+/** A run folder: its path, or the result of `extract`. */
+export type RunRef = string | ExtractResult;
+
+function folderOf(run: RunRef): string {
+  return typeof run === "string" ? run : run.runFolder;
+}
+
+export interface DiffOptions {
+  /** Target folder name in `a`, for example `chromium-1280x800`. May be left out when `a` has one target. */
+  targetA?: string;
+  /** Target folder name in `b`. May be left out when `b` has one target. */
+  targetB?: string;
+}
+
+export interface FindingsOptions {
+  /** Keep only this target's file, for example `chromium-1280x800`. Default: every target. */
+  target?: string;
+  /** Path of a suppression file (YAML), as `traceqa findings --suppressions` takes it. */
+  suppressions?: string;
 }
 
 /** A state file's path, or the state itself. Errors never show what the file holds. */
@@ -504,6 +531,50 @@ export class Engine {
         rejectRun(error);
       });
     });
+  }
+
+  /** Throws a `TraceQAError` when this engine is too old to offer `feature`. */
+  private requireFeature(feature: string): void {
+    if (!this.info.features.includes(feature)) {
+      throw new TraceQAError(
+        `this engine (${this.info.engineVersion}) does not offer ${feature}. Upgrade traceqa.`,
+        "unsupported",
+      );
+    }
+  }
+
+  /**
+   * Compare one target of run `a` with one target of run `b`, by component id. `a` and `b` are run
+   * folders (paths, or the results of `extract`); they may be the same run, to compare two of its
+   * targets. In the result, `added` means only in `b`. Reads local files and starts no browser.
+   *
+   * Rejects with an `EngineRefusedError` of kind `invalid_params`, whose message says what to fix,
+   * when a folder or target is wrong. A relative path is read against the working directory.
+   */
+  async diff(a: RunRef, b: RunRef, options: DiffOptions = {}): Promise<DiffFile> {
+    this.requireFeature("diff");
+    const params: DiffCompareParams = {
+      a: folderOf(a),
+      b: folderOf(b),
+      ...(options.targetA === undefined ? {} : { targetA: options.targetA }),
+      ...(options.targetB === undefined ? {} : { targetB: options.targetB }),
+    };
+    return parseDiffFile(await this.connection.call<unknown>("diff.compare", params));
+  }
+
+  /**
+   * Run the automated checks over a finished run. These are checks, not a conformance claim.
+   * Resolves with one file per target, then one for the run when it has something to say. Nothing
+   * is written to the run folder.
+   */
+  async findings(run: RunRef, options: FindingsOptions = {}): Promise<FindingsResult> {
+    this.requireFeature("findings");
+    const params: FindingsAnalyseParams = {
+      run: folderOf(run),
+      ...(options.target === undefined ? {} : { target: options.target }),
+      ...(options.suppressions === undefined ? {} : { suppressions: options.suppressions }),
+    };
+    return parseFindingsResult(await this.connection.call<unknown>("findings.analyse", params));
   }
 
   private cancel(runId: string): void {
