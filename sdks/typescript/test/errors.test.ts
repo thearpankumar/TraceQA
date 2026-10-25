@@ -21,9 +21,9 @@ import { parseComponentsFile, parseRunDone, parseRunEvent } from "../src/validat
 import { ROOT, fakeEngine, tempDir, type FakeMode } from "./helpers.js";
 
 /** Same class as `Engine`, with the seam that tests attach a fake engine through. */
-const attach = (mode: FakeMode) => {
+const attach = (mode: FakeMode, options: { onLog?: (line: string) => void } = {}) => {
   const child = fakeEngine(mode);
-  return { child, engine: AttachableEngine.attach(child) };
+  return { child, engine: AttachableEngine.attach(child, options) };
 };
 
 const URL = "http://127.0.0.1:1/";
@@ -145,6 +145,56 @@ describe("a fake engine", () => {
     await engine.close();
     assert.equal(child.killed, false);
     assert.equal(child.exitCode, 0);
+  });
+});
+
+describe("the engine's standard error", () => {
+  test("goes to onLog, line by line, and never to the caller", async () => {
+    const lines: string[] = [];
+    const engine = await attach("noisy", { onLog: (line) => lines.push(line) }).engine;
+    await engine.close();
+    assert.deepEqual(lines, ["one", "two", "three"]);
+  });
+
+  test("is dropped when there is no onLog", async () => {
+    const engine = await attach("noisy").engine;
+    await engine.close();
+  });
+
+  test("a throwing onLog does not stop the engine, and the pipe is still drained", async () => {
+    let calls = 0;
+    const { engine: attached } = attach("loud", {
+      onLog: () => {
+        calls += 1;
+        throw new Error("a broken handler");
+      },
+    });
+    // 200 KB on stderr before the answer to hello: nothing answers if nobody reads the pipe.
+    const engine = await attached;
+    await engine.close();
+    assert.equal(calls, 1, "a handler that threw is not called again");
+  });
+
+  test("an engine that dies says why", async () => {
+    await assert.rejects(attach("closed").engine, (error: EngineExitedError) => {
+      assert.ok(error instanceof EngineExitedError);
+      assert.match(error.message, /exited unexpectedly with code 3/);
+      assert.match(error.message, /boom: no driver/);
+      assert.equal(error.stderrTail, "boom: no driver");
+      return true;
+    });
+  });
+
+  test("the tail in the error is bounded", async () => {
+    await assert.rejects(attach("chatty").engine, (error: EngineExitedError) => {
+      const tail = error.stderrTail ?? "";
+      const lines = tail.split("\n");
+      assert.equal(lines.length, 20);
+      assert.equal(lines[0], "line 81");
+      assert.equal(lines.at(-1), "line 100");
+      assert.ok(tail.length <= 4000);
+      return true;
+    });
   });
 });
 

@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { spawn } from "node:child_process";
 import { after, before, describe, test } from "node:test";
 
 import { Engine, extract, toTarget, TraceQAError, type Event, type RunManifest } from "../src/index.js";
@@ -14,6 +15,44 @@ describe("against the real engine", { skip: HAVE_BINARY ? false : "build the eng
     shop = await startShop();
   });
   after(() => shop.stop());
+
+  /** Runs `extract` in a fresh node process and returns what that process wrote to stdout and stderr. */
+  const extractInChild = (withLog: boolean): Promise<{ stdout: string; stderr: string }> => {
+    const sdk = new URL("../src/index.js", import.meta.url).href;
+    const script = `
+      import { extract } from ${JSON.stringify(sdk)};
+      const lines = [];
+      const [url, binary, outDir] = process.argv.slice(1);
+      const options = { binary, outDir${withLog ? ", onLog: (line) => lines.push(line)" : ""} };
+      const result = await extract(url, options);
+      console.log(JSON.stringify({ status: result.status, lines }));
+    `;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", script, shop.url, BINARY, tempDir()], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    return new Promise((resolveChild, reject) => {
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      child.once("error", reject);
+      child.once("close", () => resolveChild({ stdout, stderr }));
+    });
+  };
+
+  test("with the default options nothing is written to stderr", async () => {
+    const { stdout, stderr } = await extractInChild(false);
+    assert.equal(stderr, "", "the engine's logs stay out of the caller's stderr");
+    assert.equal((JSON.parse(stdout) as { status: string }).status, "completed");
+  });
+
+  test("onLog receives the engine's log lines", async () => {
+    const { stdout, stderr } = await extractInChild(true);
+    assert.equal(stderr, "");
+    const { lines } = JSON.parse(stdout) as { lines: string[] };
+    assert.ok(lines.some((line) => /\[driver /.test(line)), lines.join("\n"));
+  });
 
   test("extract returns what the engine wrote", async () => {
     const out = tempDir();

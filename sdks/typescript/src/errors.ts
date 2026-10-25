@@ -27,11 +27,14 @@ export class EngineStartError extends TraceQAError {
 /** The engine's pipe closed or the process died. `exitCode` is set when it is known. */
 export class EngineExitedError extends TraceQAError {
   readonly exitCode: number | undefined;
+  /** The last lines the engine wrote to its standard error (at most 20 lines, 4000 characters). */
+  readonly stderrTail: string | undefined;
 
-  constructor(message: string, exitCode?: number, options?: ErrorOptions) {
+  constructor(message: string, exitCode?: number, options?: ErrorOptions & { stderrTail?: string | undefined }) {
     super(message, undefined, options);
     this.name = "EngineExitedError";
     this.exitCode = exitCode;
+    this.stderrTail = options?.stderrTail;
   }
 }
 
