@@ -1,0 +1,50 @@
+{
+  "formatVersion": 1,
+  "groupId": "g_20261013_220000_a1b2",
+  "seed": "https://shop.test/",
+  "origin": "https://shop.test",
+  "depth": 1,
+  "limits": {
+    "maxPages": 50,
+    "delayMs": 500,
+    "maxMinutes": 10,
+    "perPattern": 20,
+    "include": [],
+    "exclude": ["**/logout*", "**/signout*", "**/log-out*", "**/delete*", "**/unsubscribe*"]
+  },
+  "robots": { "respected": true, "status": "fetched" },
+  "pages": [
+    {
+      "index": 0,
+      "url": "https://shop.test/",
+      "finalUrl": "https://shop.test/",
+      "depth": 0,
+      "runId": "r_20261013_220000_0001",
+      "status": "completed",
+      "title": "Shop",
+      "componentIds": ["c_5b1d77a0e2c4", "c_9f2a41c07b3e", "c_a10c33d4f5e6"],
+      "linksOut": [1]
+    },
+    {
+      "index": 1,
+      "url": "https://shop.test/cart",
+      "finalUrl": "https://shop.test/cart",
+      "depth": 1,
+      "runId": "r_20261013_220004_0002",
+      "status": "completed",
+      "title": "Cart",
+      "componentIds": ["c_5b1d77a0e2c4", "c_a10c33d4f5e6"],
+      "linksOut": [0]
+    }
+  ],
+  "components": {
+    "c_5b1d77a0e2c4": { "role": "link", "name": "Home", "pages": [0, 1] },
+    "c_9f2a41c07b3e": { "role": "button", "name": "Add to cart", "pages": [0] },
+    "c_a10c33d4f5e6": { "role": "link", "name": "Cart", "pages": [0, 1] }
+  },
+  "shared": ["c_5b1d77a0e2c4", "c_a10c33d4f5e6"],
+  "skipped": [
+    { "url": "https://shop.test/logout", "reason": "excluded" },
+    { "url": "mailto:help@shop.test", "reason": "scheme" }
+  ]
+}

@@ -207,6 +207,11 @@ uvx pip-audit==2.10.1 -r requirements.txt --no-deps --disable-pip
 (`uv`), npm and GitHub Actions, with minor and patch updates grouped and a
 seven-day wait for new releases. Dependabot configuration errors show only on
 GitHub (Insights, Dependency graph, Dependabot); check there after changing it.
+
+`traceqa map` fetches robots.txt with `ureq` (rustls, no other features). Its TLS stack brings
+three licences beyond MIT and Apache-2.0: ISC (`ring`, `rustls-webpki`, `untrusted`), BSD-3-Clause
+(`subtle`) and CDLA-Permissive-2.0 (`webpki-roots`). They are listed in `deny.toml` with that
+comment, exactly as `cargo deny` reported them; remove them together if the dependency goes.
 `.github/CODEOWNERS` names the owner for the workflows, `deny.toml`, scripts, the
 MCP server and the lock files.
 

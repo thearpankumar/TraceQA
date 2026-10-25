@@ -224,6 +224,54 @@ there in 3 of 5 runs is a page problem, however green each single run looked.
 A group folder holds no `run.json`, so tools that list runs (`list_runs` in MCP) do not see it as
 a run.
 
+## `traceqa map`
+
+```sh
+traceqa map https://shop.example --depth 2
+```
+
+Reads a page, follows its same-origin links a few levels deep, and says which components are on
+which page and which are on every page (the header and footer). It never clicks or submits: the only
+requests are the browser's own page loads (GET), plus one GET of `/robots.txt` per origin.
+
+> **Warning: logout and delete links.** With `--storage-state` the crawl is signed in, and loading
+> `/logout` would sign the saved session out (or `/delete-account` would delete something). Paths
+> matching `**/logout*`, `**/signout*`, `**/log-out*`, `**/delete*` and `**/unsubscribe*` are
+> therefore never followed; they are listed in `site.json` under `skipped`. Add more with
+> `--exclude`, and use `--include` to limit the crawl to the parts you want. Map a site you own or
+> have permission to read.
+
+| Option | Meaning |
+|---|---|
+| `--depth N` | Links to follow from the first page (default 1, most 5). 0 reads only the page. |
+| `--max-pages N` | Most pages to read (default 50, most 500). |
+| `--delay-ms MS` | Pause between pages (default 500). |
+| `--max-minutes N` | Stop after this long (default 10); unread pages are listed as skipped. |
+| `--include GLOB`, `--exclude GLOB` | Path globs (`*` one folder, `**` across folders), repeatable. |
+| `--no-robots` | Ignore robots.txt. `site.json` says so (`robots.respected: false`). |
+| `--browser`, `--viewport`, `--storage-state`, `--out`, `--headed` | As for `extract`. |
+| `--json` | Print `site.json` only; progress goes to standard error. |
+
+Links come only from components with the role `link` and an `href`, in every frame and including
+hidden ones (a mobile menu). The address is resolved against the page's final address, the fragment
+is dropped, tracking parameters (`utm_*`, `fbclid`, `gclid` and similar) are removed, and only the
+same scheme, host and port are kept. `mailto:`, `tel:`, `javascript:`, `data:` and files such as
+PDFs, archives, images and media are skipped. At most 20 addresses are read for one path pattern
+(`/products/1`, `/products/2` count as `/products/{n}`), which stops endless calendars and
+paginations.
+
+robots.txt follows RFC 9309 for the product token `traceqa`: the longest matching Allow or Disallow
+wins, `*` and `$` work, a 4xx answer allows everything, and a 5xx answer or no answer disallows the
+whole crawl.
+
+Each page is an ordinary run in `--out` (so `diff`, `findings`, `codegen` and MCP read them). Next to
+them `runs/g_<id>/` holds `group.json` (a `RunGroup` of kind `site`) and `site.json` (a `SiteFile`):
+`pages` (url, final url, depth, run id, title, component ids, links out), `components` (id to role,
+name and page indexes), `shared` (ids present on every page that was read), `skipped` (link and
+reason) and the limits and robots status used. A header whose landmark name changes from page to
+page gets different component ids and is not listed as shared. Ctrl-C stops after the page in
+flight, finishes the group and exits 130.
+
 ## `traceqa runs`
 
 What is in the runs folder, and clearing it out. None of these starts a browser.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 from typing import Any
 from enum import Enum
 
@@ -1284,6 +1284,135 @@ class InstanceRange(BaseModel):
     max: int = Field(..., ge=0)
 
 
+class SiteLimits(BaseModel):
+    """
+    What bounded the crawl.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    max_pages: int = Field(..., validation_alias="maxPages", serialization_alias="maxPages", ge=0)
+    delay_ms: int = Field(
+        ..., validation_alias="delayMs", serialization_alias="delayMs", description="Pause between two pages.", ge=0
+    )
+    max_minutes: int = Field(..., validation_alias="maxMinutes", serialization_alias="maxMinutes", ge=0)
+    per_pattern: int = Field(
+        ...,
+        validation_alias="perPattern", serialization_alias="perPattern",
+        description="At most this many addresses are read for one path pattern, where numbers and long hex or UUID segments count as one (/products/{n}).",
+        ge=0,
+    )
+    include: list[str] = Field(
+        ..., description="The --include globs. Empty means everything on the origin."
+    )
+    exclude: list[str] = Field(
+        ...,
+        description="The globs that were not followed: the defaults for logout, delete and similar paths, and any --exclude.",
+    )
+
+
+class SiteRobots(BaseModel):
+    """
+    How robots.txt was applied.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    respected: bool = Field(..., description="False with --no-robots.")
+    status: str = Field(
+        ...,
+        description="Known values: fetched (rules read and applied), not-found (a 4xx answer: everything allowed), unavailable (a 5xx answer or no answer: everything disallowed, as RFC 9309 says), disabled (--no-robots).",
+    )
+
+
+class LinksOutItem(RootModel[int]):
+    root: int = Field(..., ge=0)
+
+
+class SitePage(BaseModel):
+    """
+    One address of the site.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    index: int = Field(..., ge=0)
+    url: str = Field(..., description="The address that was asked for.")
+    final_url: str | None = Field(
+        default=None,
+        validation_alias="finalUrl", serialization_alias="finalUrl",
+        description="Where the page ended up after redirects. Absent when it was not read.",
+    )
+    depth: int = Field(
+        ..., description="Links followed from the seed to get here.", ge=0
+    )
+    run_id: str | None = Field(
+        default=None,
+        validation_alias="runId", serialization_alias="runId",
+        description="The ordinary run that read the page. Absent when it was not read.",
+    )
+    status: str = Field(
+        ...,
+        description="The run's status (completed, failed, cancelled), or skipped when the page was queued and never read.",
+    )
+    title: str | None = None
+    component_ids: list[str] = Field(
+        ...,
+        validation_alias="componentIds", serialization_alias="componentIds",
+        description="Ids of the components found on the page, in every frame, sorted.",
+    )
+    links_out: list[LinksOutItem] = Field(
+        ...,
+        validation_alias="linksOut", serialization_alias="linksOut",
+        description="Indexes of the pages this page links to, sorted.",
+    )
+    skipped: str | None = Field(
+        default=None,
+        description="Why a page was not read or its links not used: max-minutes or cancelled (queued, never read), left-origin (it redirected to another origin; its links and components are not used).",
+    )
+
+
+class Page(RootModel[int]):
+    root: int = Field(..., ge=0)
+
+
+class SiteComponent(BaseModel):
+    """
+    A component and the pages it was found on.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: str
+    name: str = Field(
+        ...,
+        description="As in components.json; '*' when the name differs between instances.",
+    )
+    pages: list[Page] = Field(..., description="Indexes into pages, sorted.")
+
+
+class SiteSkip(BaseModel):
+    """
+    A link that was not followed.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    url: str = Field(
+        ...,
+        description="The link, resolved against its page. The query and fragment are left out of web addresses.",
+    )
+    reason: str = Field(
+        ...,
+        description="Known values: scheme (mailto, tel, javascript, data and other non-web links), file (a document, archive, image or media file), other-origin, excluded (matched an exclude glob), not-included (matched no include glob), robots, pattern-limit, max-pages, invalid.",
+    )
+
+
 class VisualSide(BaseModel):
     """
     One of the two compared targets.
@@ -1708,6 +1837,50 @@ class ComponentStability(BaseModel):
     flags: list[str] = Field(
         ...,
         description="Known values: unstable (0 < rate < 1), count_varies (the instance count differs between the runs that had it), state_flaps (visible or enabled differs between those runs), name_varies (more than one name).",
+    )
+
+
+class SiteFile(BaseModel):
+    """
+    site.json. Page addresses have secret parameters replaced, as in components.json.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    group_id: str = Field(
+        ...,
+        validation_alias="groupId", serialization_alias="groupId",
+        description="The group folder's name. Equals the groupId in group.json.",
+    )
+    seed: str = Field(..., description="The page the crawl started from, as asked for.")
+    origin: str = Field(
+        ...,
+        description="Scheme, host and port of the seed after redirects. Only pages with this origin are followed.",
+    )
+    depth: int = Field(
+        ...,
+        description="The deepest link level that was asked for. The seed is depth 0.",
+        ge=0,
+    )
+    limits: SiteLimits
+    robots: SiteRobots
+    pages: list[SitePage] = Field(
+        ...,
+        description="Every page that was read or queued, in the order it was reached (breadth first). A page's index is its position here.",
+    )
+    components: dict[str, SiteComponent] = Field(
+        ...,
+        description="Every component found on a page that was read, by component id.",
+    )
+    shared: list[str] = Field(
+        ...,
+        description="Ids of the components present on every page that was read successfully, sorted. Empty when fewer than two pages were read. A header or footer whose landmark names change from page to page gets different ids on each page and is not listed.",
+    )
+    skipped: list[SiteSkip] = Field(
+        ...,
+        description="Links that were found and not followed, one entry per address and reason.",
     )
 
 

@@ -18,9 +18,12 @@ mod install;
 mod interrupt;
 mod login;
 mod manifest;
+mod map;
 mod mcp;
+mod robots;
 mod runs;
 mod serve;
+mod site;
 mod stability;
 mod visual;
 
@@ -80,6 +83,12 @@ enum Command {
     ///
     /// Then run: traceqa extract URL --storage-state FILE
     Login(login::LoginArgs),
+    /// Read a page and the pages it links to, and list which components are on which.
+    ///
+    /// Follows same-origin links a few levels deep, politely (robots.txt, a pause between pages,
+    /// page limits) and never clicks. Links such as /logout and /delete are not followed.
+    /// Writes site.json in a group folder next to the runs.
+    Map(map::MapArgs),
     /// List, count and delete the runs in the runs folder.
     ///
     /// Then: traceqa runs prune --keep 20 --dry-run
@@ -101,6 +110,7 @@ fn main() -> ExitCode {
         Command::Heal(args) => heal::run(&args),
         Command::Install(args) => install::run(&args),
         Command::Login(args) => login::run(&args),
+        Command::Map(args) => map::run(&args),
         Command::Mcp(args) => mcp::run(&args),
         Command::Runs(args) => runs::run(&args),
         Command::Serve(args) => serve::run(&args),
