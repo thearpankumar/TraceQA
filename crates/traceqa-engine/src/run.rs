@@ -1,13 +1,13 @@
 //! One run: every requested browser at every requested viewport.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde_json::json;
+use serde_json::{json, Value};
 use thiserror::Error;
 use traceqa_protocol::supervise::guard;
 use traceqa_protocol::sync::{CondvarExt, LockExt};
@@ -259,17 +259,24 @@ impl Run {
         }
         // In the order they were asked for, whatever order they finished in. A target that never
         // finished, because the run panicked, failed.
+        let mut ids = Vec::with_capacity(finished.len());
         manifest.targets = jobs
             .iter()
             .zip(finished)
             .map(|(job, outcome)| match outcome {
-                Some(outcome) => outcome.summary,
-                None => unfinished_summary(job, internal_error.as_deref()),
+                Some(outcome) => {
+                    ids.push(outcome.ids);
+                    outcome.summary
+                }
+                None => {
+                    ids.push(Vec::new());
+                    unfinished_summary(job, internal_error.as_deref())
+                }
             })
             .collect();
 
-        for message in disagreements(&manifest.targets) {
-            progress.emit("warning", None, message, json!({ "code": "browsers_disagree" }));
+        for (message, data) in disagreements(&manifest.targets, &ids) {
+            progress.emit("warning", None, message, data);
         }
 
         manifest.status = roll_up_status(&manifest.targets);
@@ -749,6 +756,9 @@ struct Finished {
     summary: TargetSummary,
     /// It failed because the browser or its driver did not answer in time.
     timed_out: bool,
+    /// Component ids found, sorted. Kept so the run can say which ids browsers disagree on.
+    /// Empty unless the target completed.
+    ids: Vec<String>,
 }
 
 /// Runs one target and reports how it went. It never fails: a failure is part of the report.
@@ -773,6 +783,7 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
         return Finished {
             summary,
             timed_out: false,
+            ids: Vec::new(),
         };
     }
 
@@ -807,8 +818,12 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
         });
     summary.duration_ms = crate::util::ms(started.elapsed());
 
+    let mut ids = Vec::new();
     match outcome {
         Ok((file, browser, timings)) => {
+            ids = file.components.iter().map(|c| c.id.clone()).collect();
+            ids.sort();
+            ids.dedup();
             summary.status = RunStatus::Completed;
             summary.browser = Some(browser);
             summary.component_count = file.components.len() as u64;
@@ -853,12 +868,14 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
             return Finished {
                 summary,
                 timed_out: error.is_timed_out(),
+                ids: Vec::new(),
             };
         }
     }
     Finished {
         summary,
         timed_out: false,
+        ids,
     }
 }
 
@@ -947,28 +964,87 @@ fn save(writer: &RunWriter, manifest: &RunManifest) {
     }
 }
 
-/// One message per viewport at which the browsers that finished found different numbers of
-/// elements. The same page should hold the same controls in every browser, so a difference
-/// usually means one of them was read before the page had finished appearing.
-fn disagreements(targets: &[TargetSummary]) -> Vec<String> {
-    let mut by_viewport: Vec<((u64, u64), Vec<&TargetSummary>)> = Vec::new();
-    for target in targets.iter().filter(|target| target.status == RunStatus::Completed) {
+/// Ids named in a message; the event data carries up to [`MAX_LISTED_IDS`].
+const MESSAGE_IDS: usize = 5;
+const MAX_LISTED_IDS: usize = 20;
+
+/// One warning per viewport at which the browsers that finished found different numbers of
+/// elements, as a message and the event data. The same page should hold the same controls in
+/// every browser, so a difference usually means one of them was read before the page had
+/// finished appearing. The message names component ids missing per browser (ids only, never
+/// page text); `ids[i]` are the sorted component ids of `targets[i]`. The trigger is the count
+/// of instances: browsers that find the same number of different elements raise no warning
+/// here, but `traceqa findings` still reports them (rule `browsers-disagree`).
+fn disagreements(targets: &[TargetSummary], ids: &[Vec<String>]) -> Vec<(String, Value)> {
+    let mut by_viewport: Vec<((u64, u64), Vec<usize>)> = Vec::new();
+    for (index, target) in targets.iter().enumerate() {
+        if target.status != RunStatus::Completed {
+            continue;
+        }
         let size = (target.viewport.width, target.viewport.height);
         match by_viewport.iter_mut().find(|(seen, _)| *seen == size) {
-            Some((_, group)) => group.push(target),
-            None => by_viewport.push((size, vec![target])),
+            Some((_, group)) => group.push(index),
+            None => by_viewport.push((size, vec![index])),
         }
     }
     by_viewport
         .into_iter()
-        .filter(|(_, group)| group.iter().any(|target| target.instance_count != group[0].instance_count))
+        .filter(|(_, group)| {
+            group
+                .iter()
+                .any(|i| targets[*i].instance_count != targets[group[0]].instance_count)
+        })
         .map(|((width, height), group)| {
-            let found: Vec<String> =
-                group.iter().map(|target| format!("{} found {}", target.target.browser, target.instance_count)).collect();
-            format!(
-                "Browsers disagree at {width}x{height}: {}. The page may not have finished appearing when it was read. Try a settle time.",
+            let none = Vec::new();
+            let ids_of = |i: usize| ids.get(i).unwrap_or(&none);
+            let union: BTreeSet<&String> = group.iter().flat_map(|i| ids_of(*i)).collect();
+            let found: Vec<String> = group
+                .iter()
+                .map(|i| format!("{} found {}", targets[*i].target.browser, targets[*i].instance_count))
+                .collect();
+            let mut counts = serde_json::Map::new();
+            let mut missing = serde_json::Map::new();
+            let mut missing_total = serde_json::Map::new();
+            let mut parts = Vec::new();
+            for i in &group {
+                let browser = targets[*i].target.browser.clone();
+                counts.insert(browser.clone(), json!(targets[*i].instance_count));
+                let have: BTreeSet<&String> = ids_of(*i).iter().collect();
+                let absent: Vec<&String> = union.iter().filter(|id| !have.contains(*id)).copied().collect();
+                if absent.is_empty() {
+                    continue;
+                }
+                let shown: Vec<&str> = absent.iter().take(MESSAGE_IDS).map(|id| id.as_str()).collect();
+                let more = absent.len() - shown.len();
+                let tail = if more > 0 {
+                    format!(" (and {more} more)")
+                } else {
+                    String::new()
+                };
+                parts.push(format!("missing in {browser}: {}{tail}", shown.join(", ")));
+                missing.insert(
+                    browser.clone(),
+                    json!(absent.iter().take(MAX_LISTED_IDS).collect::<Vec<_>>()),
+                );
+                missing_total.insert(browser, json!(absent.len()));
+            }
+            let detail = if parts.is_empty() {
+                String::new()
+            } else {
+                format!("; {}", parts.join("; "))
+            };
+            let message = format!(
+                "Browsers disagree at {width}x{height}: {}{detail}. The page may not have finished appearing when it was read. Try a settle time.",
                 found.join(", ")
-            )
+            );
+            let data = json!({
+                "code": "browsers_disagree",
+                "viewport": { "width": width, "height": height },
+                "counts": counts,
+                "missing": missing,
+                "missingTotal": missing_total,
+            });
+            (message, data)
         })
         .collect()
 }
@@ -1076,13 +1152,55 @@ mod tests {
             // A browser that failed found nothing, which is not a disagreement.
             summary("webkit", 1280, 0, RunStatus::Failed),
         ];
-        let messages = disagreements(&targets);
+        let messages = disagreements(&targets, &[]);
         assert_eq!(messages.len(), 1);
         assert!(
-            messages[0].contains("390x800: chromium found 81, firefox found 54"),
+            messages[0].0.contains("390x800: chromium found 81, firefox found 54"),
             "{}",
-            messages[0]
+            messages[0].0
         );
+    }
+
+    #[test]
+    fn the_warning_names_the_ids_missing_per_browser_and_caps_the_lists() {
+        let summary = |browser: &str, found: u64| TargetSummary {
+            dir: format!("{browser}-1280x800"),
+            target: BrowserTarget::named(browser),
+            viewport: Viewport {
+                width: 1280,
+                height: 800,
+            },
+            browser: None,
+            status: RunStatus::Completed,
+            component_count: found,
+            instance_count: found,
+            warning_count: 0,
+            duration_ms: 0,
+            timings: None,
+            error: None,
+        };
+        let everything: Vec<String> = (0..30).map(|n| format!("c_{n:012}")).collect();
+        let targets = [summary("chromium", 30), summary("firefox", 6)];
+        let ids = [everything.clone(), everything[..6].to_vec()];
+        let out = disagreements(&targets, &ids);
+        assert_eq!(out.len(), 1);
+        let (message, data) = &out[0];
+        assert!(
+            message.contains("chromium found 30, firefox found 6; missing in firefox: c_000000000006, c_000000000007, c_000000000008, c_000000000009, c_000000000010 (and 19 more)."),
+            "{message}"
+        );
+        assert!(!message.contains("missing in chromium"), "{message}");
+        assert!(message.ends_with("Try a settle time."));
+        assert_eq!(data["code"], "browsers_disagree");
+        assert_eq!(data["viewport"]["width"], 1280);
+        assert_eq!(data["counts"]["firefox"], 6);
+        assert_eq!(data["missing"]["firefox"].as_array().unwrap().len(), 20);
+        assert_eq!(data["missingTotal"]["firefox"], 24);
+        assert!(data["missing"].get("chromium").is_none());
+        // Same count, different elements: no warning here (the findings rule reports it).
+        let swapped = [everything[..6].to_vec(), everything[1..7].to_vec()];
+        let same = [summary("chromium", 6), summary("firefox", 6)];
+        assert!(disagreements(&same, &swapped).is_empty());
     }
 
     #[test]
@@ -1204,6 +1322,7 @@ mod tests {
     #[test]
     fn only_timeouts_are_retried_and_only_when_targets_ran_side_by_side() {
         let finished = |timed_out| Finished {
+            ids: Vec::new(),
             summary: summary_with(RunStatus::Failed),
             timed_out,
         };

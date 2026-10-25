@@ -993,11 +993,11 @@ class Finding(BaseModel):
     )
     id: str = Field(
         ...,
-        description="The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is.",
+        description="The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is. The run-level rule browsers-disagree adds the viewport: browsers-disagree:c_9f2a41c07b3e@1280x800.",
     )
     rule: str = Field(
         ...,
-        description="Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete.",
+        description="Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only).",
     )
     severity: FindingSeverity
     confidence: FindingConfidence

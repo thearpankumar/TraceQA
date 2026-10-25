@@ -881,6 +881,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "traceqa-diff",
  "traceqa-protocol",
 ]
 
