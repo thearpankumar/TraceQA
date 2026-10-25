@@ -121,6 +121,13 @@ jobs:
         run: uv run ruff format --check .
       - name: Installer script (shellcheck)
         run: uv run shellcheck --shell=sh scripts/install.sh
+      - name: The Makefile lists its targets
+        run: |
+          if command -v make >/dev/null; then
+            make help
+          else
+            echo "::warning::make is not installed on this runner; the Makefile was not checked"
+          fi
       - name: Every $ref in spec/ is #/$defs/Name
         run: python3 scripts/check_spec_refs.py
       - name: The copies of page-script/pristine.js are in sync

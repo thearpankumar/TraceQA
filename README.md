@@ -379,13 +379,17 @@ profile untouched with `--no-modify-path`. The options and their environment var
 gh attestation verify traceqa-v0.1.0-linux-x86_64.tar.gz --repo thearpankumar/TraceQA
 ```
 
-**From source**, with Rust 1.88 or later:
+**From source**, with Rust 1.88 or later and GNU make (Git Bash on Windows):
 
 ```sh
 git clone https://github.com/thearpankumar/TraceQA
 cd TraceQA
-cargo install --path crates/traceqa-cli --locked
+make install
 ```
+
+`make install` builds the checkout, copies `traceqa` to `/usr/local/bin` (asking for sudo only for that copy;
+`make install PREFIX=$HOME/.local` needs none), and installs the drivers and browsers from the checkout. Without make,
+`cargo install --path crates/traceqa-cli --locked` builds and installs the binary alone.
 
 ### 2. Install the browsers
 
@@ -398,8 +402,7 @@ traceqa doctor
 ```
 
 `doctor` checks the setup and says how to fix anything that is missing. On Linux, add `--with-deps` to install
-the browsers' system libraries. In a source checkout, `traceqa install --from .` installs the drivers from the
-checkout instead of GitHub.
+the browsers' system libraries. `make install` already did this step.
 
 ### 3. Read your first page
 
@@ -475,8 +478,10 @@ uv run python testbed/sites/buggy-shop/serve.py
 
 Every command works unchanged in Bash, PowerShell and cmd. CI runs the tests on Linux, macOS and Windows.
 
-The [devcontainer](.devcontainer) has Rust, uv, Node and the three browsers ready: open the folder in VS Code and
-choose *Reopen in Container*.
+With GNU make (Git Bash on Windows), `make setup`, `make test`, `make lint` and `make ci` run the same commands,
+`make build` puts a release binary in `bin/`, and `make` lists every target. The [devcontainer](.devcontainer)
+has Rust, uv, Node and the three browsers ready: open the folder in VS Code and choose *Reopen in Container*, or
+run `make devcontainer`.
 
 ## Security
 
