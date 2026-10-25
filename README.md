@@ -108,6 +108,14 @@ page. Download the archive for your system, extract it, and put `traceqa` on
 your `PATH`. Then run `traceqa install chromium firefox webkit` and skip to
 step 3.
 
+Every archive and `SHA256SUMS.txt` carries a build provenance attestation, signed through GitHub, that this
+repository's release workflow built that exact file. To check a download with the GitHub CLI:
+
+```sh
+gh attestation verify traceqa-v0.1.0-linux-x86_64.tar.gz --repo thearpankumar/TraceQA
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
 The binaries are not yet code-signed. On macOS, allow a downloaded binary with
 `xattr -d com.apple.quarantine traceqa`. On Windows, SmartScreen may ask for
 confirmation the first time it runs.
@@ -432,7 +440,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `bench/` | Scores extraction against the demo site. |
 | `tests/` | End-to-end tests of the MCP server and the installer. |
 | `scripts/` | Code generation and transcript recording. |
-| `docs/` | Usage, features, architecture, client guide, testing, releasing, backlog and security policy. |
+| `docs/` | Usage, features, architecture, client guide, testing, backlog and security policy. |
 
 ## Development and testing
 
@@ -491,8 +499,9 @@ Continuous integration runs on every pull request, on pushes to `master`, on dem
 | Test | Linux, macOS, Windows | Clippy (`-D warnings`) on each system, all Rust, Python and TypeScript tests against the built binary and real browsers, and the bench. |
 | CI | Linux | One result for the whole run: passes when every job passed or was skipped for a documentation change. |
 
-Pushing a version tag runs the release workflow, which builds and publishes the
-binaries. See [docs/releasing.md](docs/releasing.md).
+Pushing a version tag (`vX.Y.Z`, on a `master` commit, matching every package version) runs the
+release workflow (`.github/workflows/release.yml`), which audits the dependencies, then builds, checks and
+publishes the binaries.
 
 After changing a schema in `spec/`, regenerate the Python and TypeScript types, and
 after a client protocol change record the transcripts again:
@@ -527,7 +536,6 @@ The Rust types regenerate on build.
 | [docs/features.md](docs/features.md) | Every feature, one line each: what it does and how. |
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
-| [docs/releasing.md](docs/releasing.md) | Version numbers and how to publish a release. |
 | [docs/backlog.md](docs/backlog.md) | Designed but unbuilt work: the explorer, interaction oracles, open gaps and scope cuts. |
 | [docs/SECURITY.md](docs/SECURITY.md) | How to report a vulnerability privately. |
 | [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |

@@ -8,7 +8,7 @@ name: Release
 # It checks that the tag is on master and matches the version in the files, audits the
 # dependencies, builds the release binary on each system, checks that each one starts and
 # reports that version, and publishes them all on the repository's Releases page with build
-# provenance attestations. See docs/releasing.md.
+# provenance attestations.
 
 on:
   push:

@@ -6,10 +6,10 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2021"
 # The oldest compiler that builds the workspace with its locked dependencies (sha2 0.11, image and the
-# icu crates need 1.88). CI builds with exactly this version. Raise it deliberately: docs/releasing.md.
+# icu crates need 1.88). CI builds with exactly this version, so raise it deliberately.
 rust-version = "1.88"
 license = "Apache-2.0"
-# Nothing is published yet. Remove this when a publish plan exists (docs/releasing.md).
+# Nothing is published yet. Remove this when there is a plan to publish the crates.
 publish = false
 repository = "https://github.com/thearpankumar/TraceQA"
 
