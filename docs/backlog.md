@@ -14,8 +14,8 @@ Every item is a heading of the form `### ID: title`, followed by four labelled p
 - **Size.** S (a day or two), M (about a week), L (several weeks).
 
 Item ids are stable. `EXP-` items are the explorer, `ORA-` items the interaction oracles, `ARC-` items
-architecture gaps, `HYG-` items deferred hygiene and `CUT-` items features that were scoped out of the
-feature phase. The numbers F6, F7 and A3 to A10 refer to the feature review that produced this list.
+architecture gaps, `HYG-` items deferred hygiene, `CUT-` items features that were scoped out of the
+feature phase and `LIM-` items known limits of features that did ship. The numbers F6, F7 and A3 to A10 refer to the feature review that produced this list.
 
 Order of work: the safety policy (EXP-5) and the `page.act` extension (EXP-4) come first, because nothing may
 click on a real site without them. The walker (EXP-1 to EXP-3) comes next, then outputs and replay (EXP-7,
@@ -610,6 +610,25 @@ the current code in the same image.
 
 **Size.** M
 
+### HYG-4: The test suite's run folder check skips the optional files
+
+**Why.** `check_run_folder` in `conftest.py` checks `run.json`, `events.jsonl` and every `components.json`
+against `spec/`, but not the files that only some runs write: `axe.json` (`--axe`), `findings.json`
+(`traceqa findings`) and the group folders `runs/g_<id>/` (`--repeat`, `traceqa map`). `tests/test_axe.py`
+validates `axe.json` by itself, so a test that reaches one of these files another way (through `serve`, MCP or
+`map`) checks nothing about it.
+
+**Design.** In the target check, validate `axe.json` against `AxeResults` and `findings.json` against
+`FindingsFile` when they exist, with the same round-trip rule as `components.json`. Add a `check_group_folder`
+for `group.json` (`RunGroup`), `stability.json` (`StabilityFile`) and `site.json` (`SiteFile`), and call it from
+the repeat and map tests.
+
+**Acceptance.** A copy of a run folder whose `axe.json` lacks `axeVersion` fails `check_run_folder` with a
+message naming `axe.json`; the same for a `findings.json` with an unknown field and a `site.json` without
+`pages`. Every existing test still passes.
+
+**Size.** S
+
 ## 5. Scope cuts of the feature phase
 
 Features that were considered and not built, or built in part. Each says why it was cut and when it would be
@@ -752,3 +771,90 @@ version field; `diff --against` accepts both forms.
 sizes), and `diff --against` gives the same verdict with either form on the golden diff pairs.
 
 **Size.** M
+
+## 6. Known limits of the shipped features
+
+Features that shipped in the feature phase but stop short of the whole design. The engineer who built each
+feature recorded the limit; the item says what it would take to lift it.
+
+### LIM-1: Visual comparison skips components whose name changes
+
+**Why.** `traceqa visual` compares crops only for components the structural diff calls unchanged, and it
+skips a component whose accessible name changes between the runs (a clock, a counter, a price). Masking the
+changing text would keep the rest of the component under test, but the collector records the component's box,
+not the boxes of the text inside it.
+
+**Design.** Have the collector record text boxes (one rectangle per text node of a component, capped per
+component) next to the instance box, behind an option so that ordinary runs stay the same size. Visual
+comparison then paints those rectangles the same flat colour in both crops before comparing, and reports the
+component as compared with a mask.
+
+**Acceptance.** On a fixture page whose only change between two runs is the text of a timestamp inside a card,
+`traceqa visual` reports the card as compared and unchanged (not skipped); when the card's background colour
+also changes it reports the card as changed. Runs made without the option have `components.json` files of the
+same size as today.
+
+**Size.** M
+
+### LIM-2: Old diff pictures stay in the output folder
+
+**Why.** `traceqa visual --out DIR` writes `<DIR>/<target>/<id>.diff.png` for each changed component. On a
+second comparison into the same folder it removes the picture of a component that is now unchanged, but not
+the picture of a component that is no longer compared at all (removed from the page, now covered or now
+skipped). A CI artifact can then show a difference that the current report does not list.
+
+**Design.** Before writing, remove every `*.diff.png` in each target folder of `--out` whose id is not in the
+current report's changed list, or write into a fresh folder and replace the old one when the comparison is
+done.
+
+**Acceptance.** Compare two runs that differ in components a and b into `DIR`, then compare two runs where a is
+gone and b is unchanged into the same `DIR`: afterwards `DIR` holds no `.diff.png` file, and the report lists
+none.
+
+**Size.** S
+
+### LIM-3: Shared page chrome with page-specific landmark names is not reported as shared
+
+**Why.** `traceqa map` lists in `site.json` the component ids present on every page it read. The id includes
+the landmark path, so a header whose landmark is named after the page (`aria-label="Cart navigation"` on one
+page, `"Shop navigation"` on another) gives the same buttons different ids, and they are not listed as shared.
+`docs/usage.md` states this.
+
+**Design.** Add a second, looser grouping to `site.json`: components that match by role, name and the landmark
+roles of their path (without the landmark names), listed as `similar` with the ids per page. Keep `shared`
+exact, so that nothing that relies on it changes.
+
+**Acceptance.** On a fixture site of three pages whose `nav` landmark has a different `aria-label` on each page,
+`site.json` lists the nav links under `similar` with one id per page, and `shared` is the same as today.
+
+**Size.** M
+
+### LIM-4: MCP `findings` leaves out axe-core results
+
+**Why.** `traceqa findings` reads `axe.json` when a target has one and reports its violations with the other
+findings. The MCP `findings` tool does not, so an agent gets fewer findings than the CLI for the same run folder.
+
+**Design.** Read `axe.json` in the MCP tool the way the CLI does, and return the axe findings in concise form
+(rule id, impact, component id, count). Do this together with CUT-7, which lets MCP make such runs.
+
+**Acceptance.** For a run made with `traceqa extract --axe` on the buggy shop, the MCP `findings` tool returns
+the same number of axe findings as `traceqa findings --format json` on the same run folder, and every returned
+item is marked as untrusted page content like the rest of the tool's output.
+
+**Size.** S
+
+### LIM-5: Concise `get_components` is about half the size of detailed
+
+**Why.** Concise answers exist to save an agent's context. Since the locator hint was added to every row,
+concise `get_components` on the buggy shop is about 52% of the detailed answer (5759 against 11058 bytes for
+37 rows), where the aim was about a third.
+
+**Design.** In concise rows, give the locator only when it is unique and short, and add a flag that says a
+locator is available through `find` or the detailed answer otherwise. Measure with the same call the MCP test
+makes.
+
+**Acceptance.** The MCP test's measurement of `get_components` with `limit` 37 on `chromium-1280x800` prints a
+concise size of at most 40% of the detailed size, and the test asserts that bound; an agent can still get every
+component's locator from the detailed answer.
+
+**Size.** S
