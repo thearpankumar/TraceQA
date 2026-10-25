@@ -354,8 +354,26 @@ The full design, including both protocols and the reasons behind each decision, 
 
 ### 1. Get the `traceqa` binary
 
-**Prebuilt.** Each [release](https://github.com/thearpankumar/TraceQA/releases) has archives for Linux x86-64,
-macOS on Apple silicon and Windows x86-64, a `SHA256SUMS.txt`, and signed build provenance you can check:
+**One line.** The installer downloads the newest [release](https://github.com/thearpankumar/TraceQA/releases)
+for your system, checks it against the release's `SHA256SUMS.txt`, puts `traceqa` in `~/.local/bin` and adds
+that folder to your PATH.
+
+```sh
+# Linux and macOS
+curl -LsSf https://raw.githubusercontent.com/thearpankumar/TraceQA/master/scripts/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/thearpankumar/TraceQA/master/scripts/install.ps1 | iex
+```
+
+Pin a version with `| sh -s -- --version v0.1.0`, choose the folder with `--install-dir`, and keep your shell
+profile untouched with `--no-modify-path`. The options and their environment variables are listed at the top of
+[install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+
+**By hand.** Each release has archives for Linux x86-64, macOS on Apple silicon and Windows x86-64, a
+`SHA256SUMS.txt`, and signed build provenance you can check:
 
 ```sh
 gh attestation verify traceqa-v0.1.0-linux-x86_64.tar.gz --repo thearpankumar/TraceQA

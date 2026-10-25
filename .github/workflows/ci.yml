@@ -119,6 +119,8 @@ jobs:
         run: uv run ruff check .
       - name: Python format
         run: uv run ruff format --check .
+      - name: Installer script (shellcheck)
+        run: uv run shellcheck --shell=sh scripts/install.sh
       - name: Every $ref in spec/ is #/$defs/Name
         run: python3 scripts/check_spec_refs.py
       - name: The copies of page-script/pristine.js are in sync

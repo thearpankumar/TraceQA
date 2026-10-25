@@ -24,6 +24,9 @@ ALLOWED_SKIPS = [
     r"the WebDriver driver has no hook to run a script before the page's",
     r"set TRACEQA_TEST_SAFARI=1 to drive real Safari",
     r"SIGTERM and SIGHUP cannot be sent to a Windows console command",
+    # Each one-line installer is for its own platforms: install.sh runs on Linux and macOS, install.ps1 on Windows.
+    r"install\.sh is for Linux and macOS; install\.ps1 is tested on Windows",
+    r"install\.ps1 is for Windows; install\.sh is tested on Linux and macOS",
 ]
 
 MISSING_BINARY = re.compile(r"build the (stand-in )?engine first.*", re.DOTALL)
