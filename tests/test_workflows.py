@@ -27,8 +27,8 @@ def steps_of(workflow: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield job_name, step
 
 
-def triggers_of(workflow: dict[str, Any]) -> Any:
-    # PyYAML reads the bare key `on` as the boolean True.
+def triggers_of(workflow: dict[Any, Any]) -> Any:
+    # PyYAML reads the bare key `on` as the boolean True, so the keys are not all strings.
     return workflow.get(True, workflow.get("on"))
 
 

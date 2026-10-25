@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("check_version", ROOT / "scripts" / "check_version.py")
+assert spec is not None and spec.loader is not None
 check_version = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check_version)
 
