@@ -20,6 +20,7 @@ import importlib.util
 import json
 import os
 import re
+import socket
 import subprocess
 import uuid
 from pathlib import Path
@@ -159,6 +160,33 @@ def test_fixture_servers_have_a_deep_backlog(shop_url: str, trouble: str) -> Non
         server.shutdown()
         server.server_close()
     assert port > 0
+
+
+def test_fixture_servers_start_without_a_reverse_dns_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    # HTTPServer.server_bind calls socket.getfqdn on the bound address. On the macOS CI runners that
+    # took about 17 s per server, and the TypeScript tests gave up on the shop after 30 s.
+    def no_lookup(name: str = "") -> str:
+        raise AssertionError(f"socket.getfqdn({name!r}) was called")
+
+    monkeypatch.setattr(socket, "getfqdn", no_lookup)
+    shop = load_by_path("shop_dns_check", ROOT / "fixtures" / "buggy-shop" / "serve.py")
+    port, servers = shop.start_on_free_ports()
+    try:
+        assert [(server.server_name, server.server_port) for server in servers] == [
+            ("127.0.0.1", port),
+            ("127.0.0.1", port + 1),
+        ]
+    finally:
+        for server in servers:
+            server.shutdown()
+            server.server_close()
+    site = load_by_path("trouble_dns_check", ROOT / "fixtures" / "trouble" / "serve.py")
+    server = site.start(0)
+    try:
+        assert server.server_name == "127.0.0.1"
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_bench_frame_prefix_respects_step_name_escaping() -> None:
