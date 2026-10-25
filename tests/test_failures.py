@@ -7,12 +7,15 @@ that the run folder is still valid.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +40,7 @@ def _load(name: str):
 
 
 interrupt = _load("interrupt")
+console_runner = _load("console_runner")
 
 pytestmark = pytest.mark.skipif(not BINARY.is_file(), reason="build the engine first: cargo build")
 
@@ -296,3 +300,64 @@ def test_second_signal_kills_a_driver_that_ignores_signals_and_input(
     (folder,) = out.iterdir()
     assert run_folder_checker(folder).status.value == "cancelled"
     assert result.left == [], f"the driver outlived the command: {result.left}"
+
+
+def _process_alive(pid: int) -> bool:
+    """Whether the process still runs. A zombie has exited and only waits for a parent to reap it,
+    which a container's init may never do, so it counts as gone."""
+    if os.name == "nt":
+        return console_runner._windows_alive(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False)
+    return bool(state.stdout.strip()) and not state.stdout.strip().startswith("Z")
+
+
+# A Windows process has no session to leave: its tree is the parent chain, which the plain case covers.
+@pytest.mark.parametrize(
+    "setsid",
+    [False] if os.name == "nt" else [False, True],
+    ids=lambda value: "own-session" if value else "same-session",
+)
+def test_second_signal_kills_the_whole_driver_tree(
+    trouble: str, tmp_path: Path, run_folder_checker, setsid: bool
+) -> None:
+    # The driver starts a grandchild that ignores signals and never reads its input, as a browser
+    # may. With `setsid` it also leaves the driver's session, so a group kill would miss it: the
+    # engine has to follow parent pids. Checked by pid, because the grandchild is not in the group.
+    pids = tmp_path / "pids.json"
+    options = ["--grandchild", f'"{pids}"'] + (["--setsid"] if setsid else [])
+    driver = f'"{sys.executable}" "{DEAF_DRIVER}" {" ".join(options)}'
+    out = tmp_path / "runs"
+    try:
+        result = _interrupted_extract(
+            trouble,
+            out,
+            signals=2,
+            extra=["--driver", driver, "--settle-ms", "60000"],
+            delay=0.5,
+            gap=0.5,
+            exit_timeout=20,
+        )
+        assert result.returncode == 130, result.stderr
+        (folder,) = out.iterdir()
+        assert run_folder_checker(folder).status.value == "cancelled"
+        tree = json.loads(pids.read_text(encoding="utf-8"))
+        assert tree["driver"] != tree["grandchild"]
+        deadline = time.monotonic() + 10
+        survivors = list(tree.values())
+        while survivors and time.monotonic() < deadline:
+            survivors = [pid for pid in tree.values() if _process_alive(pid)]
+            time.sleep(0.1)
+        assert survivors == [], f"the driver tree outlived the command: {survivors}"
+    finally:
+        # Never leave the deaf processes behind, whatever failed above.
+        if pids.is_file():
+            for pid in json.loads(pids.read_text(encoding="utf-8")).values():
+                if _process_alive(pid):
+                    with contextlib.suppress(OSError):
+                        os.kill(pid, signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
