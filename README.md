@@ -533,7 +533,7 @@ The Rust types regenerate on build.
 | Document | Contents |
 |---|---|
 | [docs/usage.md](docs/usage.md) | Every command and option, the SDKs, the MCP tools, output files, warnings and exit codes. |
-| [docs/features.md](docs/features.md) | Every feature, one line each: what it does and how. |
+| [docs/features.md](docs/features.md) | What you can do with TraceQA, one line each. |
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
 | [docs/backlog.md](docs/backlog.md) | Designed but unbuilt work: the explorer, interaction oracles, open gaps and scope cuts. |
