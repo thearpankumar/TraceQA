@@ -120,4 +120,50 @@ def test_ctrl_c_during_login_removes_the_temporary_file(trouble: str, tmp_path: 
     assert result.returncode == 130, result.stderr
     assert "nothing was saved" in result.stderr
     assert list(folder.iterdir()) == [], "neither the destination nor a temporary file may remain"
+    assert result.seconds is not None and result.seconds < 15, f"the login took {result.seconds} s to stop"
+    assert result.left == [], f"left processes running: {result.left}"
+
+
+def test_second_ctrl_c_during_login_kills_a_deaf_driver(trouble: str, tmp_path: Path) -> None:
+    # The driver ignores signals and its input closing. A second interrupt must still end the
+    # command at once, remove the temporary file and take the driver with it.
+    folder = tmp_path / "saved"
+    folder.mkdir()
+    driver = f'"{sys.executable}" "{ROOT / "tests" / "support" / "deaf_driver.py"}"'
+    command = [
+        str(BINARY),
+        "login",
+        trouble + "hang",
+        "--save",
+        str(folder / "s.json"),
+        "--headless",
+        "--driver",
+        driver,
+    ]
+    result = interrupt.run_interrupted(
+        command, ready={"glob": str(folder / ".s.json.tmp-*")}, signals=2, delay=1.0, exit_timeout=20
+    )
+    assert result.ready, f"the temporary file never appeared:\n{result.stderr}"
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 10, f"quit after {result.seconds} s"
+    assert list(folder.iterdir()) == []
+    assert result.left == [], f"the driver outlived the command: {result.left}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGTERM and SIGHUP cannot be sent to a Windows console command")
+def test_sigterm_during_login_removes_the_temp_file(trouble: str, tmp_path: Path) -> None:
+    folder = tmp_path / "saved"
+    folder.mkdir()
+    command = [str(BINARY), "login", trouble + "hang", "--save", str(folder / "s.json"), "--headless"]
+    result = interrupt.run_interrupted(
+        command,
+        ready={"glob": str(folder / ".s.json.tmp-*")},
+        delay=0.5,
+        signal_name="SIGTERM",
+        target="process",
+    )
+    assert result.ready, f"the temporary file never appeared:\n{result.stderr}"
+    assert result.returncode == 130, result.stderr
+    assert "nothing was saved" in result.stderr
+    assert list(folder.iterdir()) == []
     assert result.left == [], f"left processes running: {result.left}"

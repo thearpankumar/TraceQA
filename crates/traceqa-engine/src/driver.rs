@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,7 @@ use serde_json::Value;
 use thiserror::Error;
 use traceqa_protocol::contracts::driver_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
 use traceqa_protocol::jsonrpc::{self, Id, Line, Message, RpcError};
+use traceqa_protocol::sync::LockExt;
 use traceqa_protocol::types::{
     DriverHelloParams, DriverHelloResult, DriverLogParams, Empty, PageEvalParams, PageEvalResult, PageGotoParams,
     PageGotoResult, PageScreenshotParams, PageScreenshotResult, PageScrollParams, PageScrollResult, RpcErrorData,
@@ -192,7 +194,9 @@ impl fmt::Display for DriverCommand {
 
 /// A driver running as a child process, spoken to over its stdin and stdout.
 pub struct ProcessTransport {
-    child: Child,
+    /// Shared with [`LIVE`], so [`kill_all_drivers`] can reach the process of a driver that is
+    /// in use on another thread. The lock is never held across a driver call.
+    child: Arc<Mutex<Child>>,
     stdin: ChildStdin,
     incoming: Receiver<Result<Message, String>>,
     next_id: u64,
@@ -288,6 +292,12 @@ impl ProcessTransport {
 
         let (sender, incoming) = mpsc::sync_channel(QUEUE_LIMIT);
         thread::spawn(move || read_messages(BufReader::new(stdout), max_line, &sender, &AtomicUsize::new(0)));
+        let child = Arc::new(Mutex::new(child));
+        {
+            let mut live = LIVE.lock_ok();
+            live.retain(|entry| entry.strong_count() > 0);
+            live.push(Arc::downgrade(&child));
+        }
         Ok(Self {
             child,
             stdin,
@@ -430,9 +440,50 @@ impl Drop for ProcessTransport {
                 Duration::from_secs(10),
             );
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let mut child = self.child.lock_ok();
+        let _ = child.kill();
+        let _ = child.wait();
     }
+}
+
+/// The driver processes this process started and has not yet ended.
+static LIVE: Mutex<Vec<Weak<Mutex<Child>>>> = Mutex::new(Vec::new());
+
+/// Kills and reaps every driver process this process started. For a process that is about to
+/// exit: `process::exit` runs no `Drop`, so a driver that ignores signals and its input closing
+/// would outlive the command. A driver that is dropped normally is shut down politely instead.
+///
+/// Only the driver process itself is ended, plus its descendants on Windows (`taskkill /T`,
+/// because a launcher such as the Python one starts the real driver as a child). On Unix a
+/// driver's own children close when their pipes to it die.
+pub fn kill_all_drivers() {
+    let children: Vec<_> = LIVE.lock_ok().clone();
+    kill_registered(&children);
+}
+
+/// [`kill_all_drivers`] for the given processes only.
+fn kill_registered(children: &[Weak<Mutex<Child>>]) {
+    for child in children.iter().filter_map(Weak::upgrade) {
+        let mut child = child.lock_ok();
+        #[cfg(windows)]
+        kill_tree(child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// Windows: ends a process and everything it started. `taskkill` is run by absolute path, not
+/// looked up on PATH.
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let taskkill = std::path::Path::new(&root).join("System32").join("taskkill.exe");
+    let _ = Command::new(taskkill)
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// A connected driver that has completed the version handshake.
@@ -510,6 +561,16 @@ impl Driver {
 
     pub fn open_session(&mut self, params: &SessionOpenParams) -> Result<SessionOpenResult, DriverError> {
         self.request(method::SESSION_OPEN, params, SLOW)
+    }
+
+    /// As [`close_session`](Self::close_session), but gives up after `limit`, for a command that
+    /// is being interrupted and must not wait for the driver's own timeout.
+    pub fn close_session_within(&mut self, session_id: &str, limit: Duration) -> Result<(), DriverError> {
+        let params = SessionCloseParams {
+            session_id: session_id.to_string(),
+        };
+        self.request::<_, Empty>(method::SESSION_CLOSE, &params, limit)
+            .map(drop)
     }
 
     pub fn close_session(&mut self, session_id: &str) -> Result<(), DriverError> {
@@ -715,6 +776,30 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::Arc;
+
+    #[test]
+    fn kill_registered_ends_a_driver_that_ignores_its_input() {
+        let line = if cfg!(windows) {
+            "cmd /c ping -n 600 127.0.0.1"
+        } else {
+            "sleep 600"
+        };
+        let transport = ProcessTransport::spawn(&DriverCommand::parse(line).unwrap()).unwrap();
+        let weak = Arc::downgrade(&transport.child);
+        assert!(
+            LIVE.lock_ok().iter().any(|entry| entry.ptr_eq(&weak)),
+            "a started driver is registered"
+        );
+        assert!(transport.child.lock_ok().try_wait().unwrap().is_none());
+        kill_registered(&[weak]);
+        assert!(
+            transport.child.lock_ok().try_wait().unwrap().is_some(),
+            "the process is gone and was reaped"
+        );
+        drop(transport);
+        LIVE.lock_ok().retain(|entry| entry.strong_count() > 0);
+        assert!(LIVE.lock_ok().iter().all(|entry| entry.strong_count() > 0));
+    }
 
     #[test]
     fn command_lines_split_on_whitespace_and_respect_quotes() {

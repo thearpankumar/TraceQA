@@ -207,7 +207,7 @@ traceqa extract http://127.0.0.1:4173/
 ### Command line
 
 Exit codes make it suitable for CI: `0` when every browser completed, `1` when
-any failed, `2` for invalid input, `130` when stopped with Ctrl-C. `--json` prints a machine-readable summary.
+any failed, `2` for invalid input, `130` when stopped with Ctrl-C (or SIGTERM or SIGHUP on Unix). `--json` prints a machine-readable summary.
 All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
 
 ### Python

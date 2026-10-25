@@ -22,7 +22,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 clap = { version = "4.6.7", features = ["derive"] }
-ctrlc = "3.5.2"
+# "termination": SIGTERM and SIGHUP take the same handler as Ctrl-C (Unix).
+ctrlc = { version = "3.5.2", features = ["termination"] }
 sha2 = "0.11.1"
 unicode-normalization = "0.1.25"
 url = "2"

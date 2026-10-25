@@ -36,7 +36,8 @@ class Interrupted:
     seconds: float | None
     stdout: str
     stderr: str
-    left: list[int]
+    left: list[str]
+    """What was still running afterwards, as "PID COMMAND"."""
 
 
 def send_interrupt(process: subprocess.Popen) -> None:
@@ -61,13 +62,17 @@ def run_interrupted(
     env: dict[str, str] | None = None,
     ready_timeout: float = 120,
     exit_timeout: float = 60,
+    signal_name: str = "SIGINT",
+    target: str = "group",
 ) -> Interrupted:
     """Starts `command`, waits for `ready` ({"stderr": TEXT} or {"glob": PATTERN}), interrupts.
 
     `signals` interrupts are sent `gap` seconds apart, the first one `delay` seconds after the
     command was ready. Never hangs: a command that is not ready in `ready_timeout` seconds, or
     does not end in `exit_timeout`, is killed and reported (`ready` False, or a `returncode` of
-    "still running").
+    "still running"). `signal_name` is SIGINT, SIGTERM or SIGHUP (the last two on Unix only) and
+    `target` is "group" (the whole group, like a terminal) or "process" (the command alone, like
+    `timeout` or `docker stop`).
     """
     spec = {
         "command": command,
@@ -78,6 +83,8 @@ def run_interrupted(
         "env": env or {},
         "ready_timeout": ready_timeout,
         "exit_timeout": exit_timeout,
+        "signal": signal_name,
+        "target": target,
     }
     if os.name != "nt":
         runner = importlib.util.spec_from_file_location("console_runner", RUNNER)
