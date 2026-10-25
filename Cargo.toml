@@ -20,6 +20,7 @@ traceqa-recorder = { path = "crates/traceqa-recorder" }
 traceqa-mcp = { path = "crates/traceqa-mcp" }
 traceqa-diff = { path = "crates/traceqa-diff" }
 traceqa-findings = { path = "crates/traceqa-findings" }
+traceqa-heal = { path = "crates/traceqa-heal" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # YAML for the suppression file. serde_yaml is archived and serde-saphyr needs rustc 1.89, above our 1.88.

@@ -1,0 +1,50 @@
+{
+  "formatVersion": 1,
+  "runId": "r_20261025_064332_b084",
+  "baseline": {
+    "key": "heal-shop",
+    "url": "http://127.0.0.1:8000/a",
+    "promotedAt": "2026-10-25T06:40:11Z"
+  },
+  "items": [
+    {
+      "kind": "rename_proposal",
+      "id": "c_8a1f03b2c4d5",
+      "newId": "c_bdd5126b9432",
+      "target": "chromium-1280x800",
+      "role": "button",
+      "name": "Save for later",
+      "action": "propose",
+      "confidence": "medium",
+      "evidence": [
+        "same role \"button\"",
+        "same landmark \"main\"",
+        "name \"Save for later\" became \"Save for later!\" (similarity 0.93)",
+        "box centre moved 0.0% across and 0.0% down the viewport"
+      ],
+      "fixPreview": "- page.getByRole(\"button\", { name: \"Save for later\", exact: true })\n+ page.getByRole(\"button\", { name: \"Save for later!\", exact: true })"
+    },
+    {
+      "kind": "locator_fix",
+      "id": "c_0e554708ec69",
+      "newId": "c_0e554708ec69",
+      "target": "chromium-1280x800",
+      "role": "button",
+      "name": "Help",
+      "action": "fix",
+      "evidence": [
+        "the id is the same, so it is the same component; only the way to find it changed"
+      ],
+      "fixPreview": "- page.getByRole(\"button\", { name: \"Help\", exact: true })\n+ page.getByRole(\"main\").getByRole(\"button\", { name: \"Help\", exact: true })"
+    }
+  ],
+  "summary": {
+    "unchanged": 4,
+    "locatorFixes": 1,
+    "renameProposals": 1,
+    "removed": 0,
+    "ambiguous": 0,
+    "sessionNotAccepted": 0,
+    "failed": true
+  }
+}

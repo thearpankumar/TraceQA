@@ -13,6 +13,7 @@ mod diff;
 mod doctor;
 mod extract;
 mod findings;
+mod heal;
 mod install;
 mod interrupt;
 mod login;
@@ -59,6 +60,10 @@ enum Command {
     /// Prints a table and writes findings.json next to each components.json. These are
     /// automated checks, not a conformance claim.
     Findings(findings::FindingsArgs),
+    /// Sort what a run lost against a baseline: mechanical fixes, rename proposals, failures.
+    ///
+    /// Proposals are only applied when you accept them. Then: traceqa heal RUN --against NAME --accept ID
+    Heal(heal::HealArgs),
     /// Speak the client protocol on stdin and stdout. This is what SDKs start.
     Serve(serve::ServeArgs),
     /// Let AI tools such as Claude Code run TraceQA (an MCP server).
@@ -88,6 +93,7 @@ fn main() -> ExitCode {
         Command::Doctor(args) => doctor::run(&args),
         Command::Extract(args) => extract::run(&args),
         Command::Findings(args) => findings::run(&args),
+        Command::Heal(args) => heal::run(&args),
         Command::Install(args) => install::run(&args),
         Command::Login(args) => login::run(&args),
         Command::Mcp(args) => mcp::run(&args),
