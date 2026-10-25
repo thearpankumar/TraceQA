@@ -20,6 +20,8 @@ desktop.ini
 
 # Rust (Cargo)
 target/
+# The release binary `make build` copies out of target/
+/bin/
 **/*.rs.bk
 *.pdb
 rustc-ice-*.txt

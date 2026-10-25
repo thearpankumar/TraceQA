@@ -25,7 +25,9 @@ uv sync
 uv run playwright install chromium firefox webkit
 ```
 
-`cargo build` makes `target/debug/traceqa`; `uv sync` puts the drivers in `.venv`.
+`cargo build` makes `target/debug/traceqa`; `uv sync` puts the drivers in `.venv`. With GNU make, `make setup` does
+the same, `make install` builds the checkout and installs it (binary, drivers and browsers), and `make` lists the
+other targets.
 
 ## Drivers
 
