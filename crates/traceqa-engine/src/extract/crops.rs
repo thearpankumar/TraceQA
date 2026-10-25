@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use traceqa_protocol::types::{Component, PageScreenshotParams, Warning};
+use traceqa_common::types::{Component, PageScreenshotParams, Warning};
 use traceqa_recorder::{save_crops, CropRequest, PageImage};
 
 use super::frames::element_key;

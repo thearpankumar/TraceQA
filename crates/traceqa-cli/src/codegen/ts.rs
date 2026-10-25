@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use traceqa_protocol::locator::ts_string;
+use traceqa_common::locator::ts_string;
 
 use super::{is_component_id, Entry, Plan};
 

@@ -52,7 +52,7 @@ pub fn save_crops(page: &PageImage, requests: &[CropRequest], crops_dir: &Path) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use traceqa_protocol::types::Rect;
+    use traceqa_common::types::Rect;
 
     #[test]
     fn crops_are_scaled_padded_and_clamped() {

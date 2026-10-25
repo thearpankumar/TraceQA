@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     Component, ComponentSummary, ComponentsFile, DiffEntry, DiffEntryKind, DiffFile, DiffSide, DiffSummary, PairLink,
     Warning,
 };
@@ -62,7 +62,7 @@ pub const FIELDS: [&str; 9] = [
 /// each state. Boxes, crops, selectors and attributes are left out on purpose: they move with
 /// every layout change and would bury the differences that matter.
 pub fn summarise(component: &Component) -> ComponentSummary {
-    let count = |test: &dyn Fn(&traceqa_protocol::types::ElementState) -> bool| {
+    let count = |test: &dyn Fn(&traceqa_common::types::ElementState) -> bool| {
         component.instances.iter().filter(|i| test(&i.state)).count() as u64
     };
     ComponentSummary {

@@ -7,8 +7,8 @@
 
 use std::collections::BTreeMap;
 
+use traceqa_common::types::{Component, ComponentsFile};
 use traceqa_diff::{DiffEntryKind, DiffFile};
-use traceqa_protocol::types::{Component, ComponentsFile};
 
 /// A box may differ by this many CSS pixels in width or height before the component counts as resized.
 pub const SIZE_TOLERANCE: f64 = 1.0;

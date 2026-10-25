@@ -18,8 +18,8 @@ pub mod patch;
 pub mod similarity;
 
 pub use candidates::{classify, landmark, preview, HealError, MAX_MOVE, SESSION_NOT_ACCEPTED};
-use traceqa_protocol::types::BaselineRef;
-pub use traceqa_protocol::types::{HealAction, HealConfidence, HealItem, HealKind, HealReport, HealSummary};
+use traceqa_common::types::BaselineRef;
+pub use traceqa_common::types::{HealAction, HealConfidence, HealItem, HealKind, HealReport, HealSummary};
 
 /// `HealReport.formatVersion`.
 pub const FORMAT_VERSION: u64 = 1;

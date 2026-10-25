@@ -7,13 +7,13 @@ use std::sync::atomic::Ordering;
 use std::sync::Once;
 
 use clap::Args;
-use traceqa_engine::axe::{self, AxeScript};
-use traceqa_engine::driver::Drivers;
-use traceqa_engine::{driver_commands, EngineError, Execution, Run};
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     BrowserTarget, Event, ExtractOptions, GroupRun, RunGroup, RunManifest, RunStartParams, RunStatus, StabilityFile,
     StorageState, Viewport,
 };
+use traceqa_engine::axe::{self, AxeScript};
+use traceqa_engine::driver::Drivers;
+use traceqa_engine::{driver_commands, EngineError, Execution, Run};
 use traceqa_recorder::{new_run_id, now_rfc3339, read_components, TargetRef};
 
 use crate::args::{parse_browser, parse_viewport, DriverArgs};

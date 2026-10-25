@@ -1,7 +1,7 @@
 //! Reading the page: the collector run in the main page and every frame, and where frames sit.
 
 use serde_json::json;
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     CollectorResult, FrameInfo, PageEvalParams, Rect, RequestsFailed, ScrollInfo, SessionOpenResult, Warning,
 };
 

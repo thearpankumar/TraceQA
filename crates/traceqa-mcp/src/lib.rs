@@ -20,11 +20,11 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use traceqa_common::jsonrpc::{code, serve_lines, Id, Message, Output, RpcError};
+use traceqa_common::supervise::guard;
+use traceqa_common::sync::LockExt;
 use traceqa_engine::driver::DriverCommand;
 pub use traceqa_engine::{Interrupt, UrlPolicy};
-use traceqa_protocol::jsonrpc::{code, serve_lines, Id, Message, Output, RpcError};
-use traceqa_protocol::supervise::guard;
-use traceqa_protocol::sync::LockExt;
 
 /// MCP versions this server speaks, newest first. A client asking for one of these gets it;
 /// any other client is offered the newest and decides for itself.

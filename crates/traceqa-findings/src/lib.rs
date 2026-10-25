@@ -12,7 +12,7 @@ mod cross_browser;
 pub mod rules;
 pub mod suppress;
 
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     AxeResults, ComponentsFile, Finding, FindingCounts, FindingScope, FindingSeverity, FindingSuppression,
     FindingsFile, Warning,
 };
@@ -378,7 +378,7 @@ mod tests {
         let none = analyse_target(&f, &Options::default());
         assert_eq!(none.findings.len(), 1);
         let mut warn_only = file_with(json!([unnamed("c_000000000001")]));
-        warn_only.components[0].confidence = traceqa_protocol::types::Confidence::Low;
+        warn_only.components[0].confidence = traceqa_common::types::Confidence::Low;
         let out = analyse_target(
             &warn_only,
             &Options {

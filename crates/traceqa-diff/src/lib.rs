@@ -26,7 +26,7 @@ pub use baseline::{BaselineError, BaselineStore};
 pub use compare::{changed_fields, compare, flags, summarise, DiffError, Options, FIELDS, FORMAT_VERSION};
 pub use gate::{Gate, GateError, GateToken};
 pub use markdown::{render_markdown, MAX_ROWS};
-pub use traceqa_protocol::types::{
+pub use traceqa_common::types::{
     ComponentSummary, DiffEntry, DiffEntryKind, DiffFile, DiffSide, DiffSummary, PairLink,
 };
 

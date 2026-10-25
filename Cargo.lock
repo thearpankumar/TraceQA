@@ -978,12 +978,12 @@ dependencies = [
  "serde_norway",
  "sha2",
  "tar",
+ "traceqa-common",
  "traceqa-diff",
  "traceqa-engine",
  "traceqa-findings",
  "traceqa-heal",
  "traceqa-mcp",
- "traceqa-protocol",
  "traceqa-recorder",
  "traceqa-visual",
  "unicode-normalization",
@@ -992,71 +992,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "traceqa-diff"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "traceqa-protocol",
- "url",
-]
-
-[[package]]
-name = "traceqa-engine"
-version = "0.1.0"
-dependencies = [
- "image",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "traceqa-diff",
- "traceqa-engine",
- "traceqa-findings",
- "traceqa-protocol",
- "traceqa-recorder",
- "unicode-normalization",
- "url",
-]
-
-[[package]]
-name = "traceqa-findings"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "serde_norway",
- "traceqa-diff",
- "traceqa-protocol",
-]
-
-[[package]]
-name = "traceqa-heal"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "traceqa-diff",
- "traceqa-protocol",
- "unicode-normalization",
-]
-
-[[package]]
-name = "traceqa-mcp"
-version = "0.1.0"
-dependencies = [
- "base64",
- "serde",
- "serde_json",
- "thiserror",
- "traceqa-diff",
- "traceqa-engine",
- "traceqa-findings",
- "traceqa-protocol",
-]
-
-[[package]]
-name = "traceqa-protocol"
+name = "traceqa-common"
 version = "0.1.0"
 dependencies = [
  "prettyplease",
@@ -1069,13 +1005,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "traceqa-diff"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "traceqa-common",
+ "url",
+]
+
+[[package]]
+name = "traceqa-engine"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "traceqa-common",
+ "traceqa-diff",
+ "traceqa-engine",
+ "traceqa-findings",
+ "traceqa-recorder",
+ "unicode-normalization",
+ "url",
+]
+
+[[package]]
+name = "traceqa-findings"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "traceqa-common",
+ "traceqa-diff",
+]
+
+[[package]]
+name = "traceqa-heal"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "traceqa-common",
+ "traceqa-diff",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "traceqa-mcp"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "traceqa-common",
+ "traceqa-diff",
+ "traceqa-engine",
+ "traceqa-findings",
+]
+
+[[package]]
 name = "traceqa-recorder"
 version = "0.1.0"
 dependencies = [
  "image",
  "serde",
  "serde_json",
- "traceqa-protocol",
+ "traceqa-common",
 ]
 
 [[package]]
@@ -1091,8 +1091,8 @@ version = "0.1.0"
 dependencies = [
  "image",
  "serde_json",
+ "traceqa-common",
  "traceqa-diff",
- "traceqa-protocol",
 ]
 
 [[package]]

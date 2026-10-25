@@ -1,6 +1,6 @@
 [package]
-name = "traceqa-protocol"
-description = "Message and file types generated from spec/, plus the JSON-RPC line format."
+name = "traceqa-common"
+description = "The shared base of every TraceQA crate: the types generated from spec/, the JSON-RPC line format and shared helpers."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

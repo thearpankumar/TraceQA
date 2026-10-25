@@ -16,15 +16,15 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use traceqa_protocol::contracts::driver_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
-use traceqa_protocol::jsonrpc::{self, Id, Line, Message, RpcError};
-use traceqa_protocol::sync::LockExt;
-use traceqa_protocol::types::{
+use traceqa_common::contracts::driver_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
+use traceqa_common::jsonrpc::{self, Id, Line, Message, RpcError};
+use traceqa_common::sync::LockExt;
+use traceqa_common::types::{
     DriverHelloParams, DriverHelloResult, DriverLogParams, Empty, PageEvalParams, PageEvalResult, PageGotoParams,
     PageGotoResult, PageScreenshotParams, PageScreenshotResult, PageScrollParams, PageScrollResult, RpcErrorData,
     SessionCloseParams, SessionOpenParams, SessionOpenResult, SessionStorageParams, StorageState,
 };
-pub use traceqa_protocol::ErrorKind;
+pub use traceqa_common::ErrorKind;
 
 use crate::url_safety::redact_text;
 
@@ -1037,7 +1037,7 @@ mod tests {
     #[test]
     fn driver_log_lines_are_redacted_before_they_reach_stderr() {
         let log = DriverLogParams {
-            level: traceqa_protocol::types::LogLevel::Warn,
+            level: traceqa_common::types::LogLevel::Warn,
             message: "retrying https://h/oauth?code=1&access_token=abc after a reset".into(),
         };
         assert_eq!(

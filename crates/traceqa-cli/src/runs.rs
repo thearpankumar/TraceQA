@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{ArgGroup, Args, Subcommand};
 use serde_json::json;
-use traceqa_protocol::types::{RunGroup, RunManifest, RunStatus};
+use traceqa_common::types::{RunGroup, RunManifest, RunStatus};
 
 /// A `running` run older than this is a leftover of a killed process, not a live run.
 const STALE_SECS: i64 = 24 * 3600;

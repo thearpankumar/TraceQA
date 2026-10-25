@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     BaselineAlias, BaselineFile, BaselinePromotion, BaselineSource, BaselineTarget, BrowserInfo, ComponentsFile,
     DiffFile, PairLink, Viewport,
 };
@@ -540,7 +540,7 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, BaselineError> {
 /// alias wins over a heuristic pair, whose stale links are dropped. Returns how many pairs were
 /// made. Fixes `summary.paired` to count every pair.
 pub fn apply_aliases(diff: &mut DiffFile, aliases: &[BaselineAlias]) -> usize {
-    use traceqa_protocol::types::{Confidence, DiffEntryKind};
+    use traceqa_common::types::{Confidence, DiffEntryKind};
     let mut made = 0;
     for alias in aliases {
         let from = diff

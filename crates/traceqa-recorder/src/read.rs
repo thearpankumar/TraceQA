@@ -11,7 +11,7 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use serde::de::DeserializeOwned;
-use traceqa_protocol::types::{AxeResults, ComponentsFile, RunManifest, TargetSummary};
+use traceqa_common::types::{AxeResults, ComponentsFile, RunManifest, TargetSummary};
 
 /// The largest `run.json` or `components.json` that is read.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;

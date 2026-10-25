@@ -22,7 +22,7 @@
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 
-use traceqa_protocol::types::PageGotoResult;
+use traceqa_common::types::PageGotoResult;
 use url::{Host, Url};
 
 /// Host names of metadata services, compared in lower case without a trailing dot.

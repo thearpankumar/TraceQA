@@ -8,11 +8,11 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
+use traceqa_common::types::{BaselineRef, Component, ComponentsFile, RunStatus};
 use traceqa_diff::baseline::AliasInput;
 use traceqa_diff::BaselineStore;
 use traceqa_heal::patch::{self, Edit, Lang};
 use traceqa_heal::{build_report, classify, render_markdown, HealItem, HealKind, HealReport};
-use traceqa_protocol::types::{BaselineRef, Component, ComponentsFile, RunStatus};
 use traceqa_recorder::{now_rfc3339, open_run, read_components};
 
 use crate::diff::{open_baseline, DEFAULT_BASELINE_DIR};

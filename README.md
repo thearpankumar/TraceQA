@@ -423,7 +423,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `crates/traceqa-mcp/` | The MCP server behind `traceqa mcp`. |
 | `crates/traceqa-diff/` | Compares two runs by component id, behind `traceqa diff`, and keeps baselines, the `--fail-on` gate and the GitHub and SARIF output. |
 | `crates/traceqa-visual/` | Compares the crops of two runs pixel by pixel, behind `traceqa visual`. |
-| `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
+| `crates/traceqa-common/` | The shared base of the Rust crates: types generated from `spec/`, the message line format and shared helpers. |
 | `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
 | `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |
 | `web-drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |

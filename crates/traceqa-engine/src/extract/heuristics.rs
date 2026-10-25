@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use traceqa_protocol::types::{Component, PageGotoResult, Warning};
+use traceqa_common::types::{Component, PageGotoResult, Warning};
 
 use super::frames::{element_key, ElementKey, Reading};
 use super::warning;
@@ -212,7 +212,7 @@ pub(super) fn stored_session_warnings(reading: &Reading, final_url: &str, saved_
 mod tests {
     use super::*;
     use crate::group::Located;
-    use traceqa_protocol::types::{CollectorResult, ComponentsFile, RequestsFailed};
+    use traceqa_common::types::{CollectorResult, ComponentsFile, RequestsFailed};
 
     /// The shop example's elements, as one reading of a page.
     fn reading() -> Reading {

@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Map, Value};
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     Component, ComponentsFile, Confidence, Finding, FindingConfidence, FindingSeverity, Instance,
 };
 

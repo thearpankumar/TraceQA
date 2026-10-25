@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use traceqa_common::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, Viewport};
 use traceqa_engine::driver::{Driver, DriverError, Drivers, ErrorKind, Transport};
 use traceqa_engine::{Abort, Execution, Run};
-use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, Viewport};
 
 /// What `page.goto` does.
 #[derive(Clone)]

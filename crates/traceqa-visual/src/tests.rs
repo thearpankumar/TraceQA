@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use image::{Rgba, RgbaImage};
 use serde_json::{json, Value};
-use traceqa_protocol::types::{ComponentsFile, VisualResultStatus};
+use traceqa_common::types::{ComponentsFile, VisualResultStatus};
 
 use super::*;
 
@@ -86,7 +86,7 @@ fn run(
     a: &ComponentsFile,
     b: &ComponentsFile,
     ratio: f64,
-) -> Result<traceqa_protocol::types::VisualReport, VisualError> {
+) -> Result<traceqa_common::types::VisualReport, VisualError> {
     visual(
         &Target {
             label: "A",
@@ -108,10 +108,7 @@ fn run(
     )
 }
 
-fn status<'a>(
-    report: &'a traceqa_protocol::types::VisualReport,
-    id: &str,
-) -> &'a traceqa_protocol::types::VisualResult {
+fn status<'a>(report: &'a traceqa_common::types::VisualReport, id: &str) -> &'a traceqa_common::types::VisualResult {
     report.results.iter().find(|r| r.id == id).expect("a result")
 }
 

@@ -3,7 +3,7 @@
     uv run scripts/gen_python_protocol.py           rewrite the generated files
     uv run scripts/gen_python_protocol.py --check   fail if they are out of date
 
-Mirrors crates/traceqa-protocol/build.rs: every spec/*.schema.json file
+Mirrors crates/traceqa-common/build.rs: every spec/*.schema.json file
 contributes its $defs to one shared namespace.
 """
 

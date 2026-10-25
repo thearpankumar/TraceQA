@@ -27,7 +27,7 @@ must be unique across files: the three generators flatten refs to the last segme
 
 A `Viewport` side is 1 to 10000 (`common.schema.json`). The engine enforces it with one check,
 `Viewport::check`, for every way a viewport arrives; the generated Python and TypeScript types
-carry the bounds, and `crates/traceqa-protocol/build.rs` leaves them out of the Rust types
+carry the bounds, and `crates/traceqa-common/build.rs` leaves them out of the Rust types
 (typify would make the field `NonZero<u64>`), where a test keeps the schema equal to
 `MAX_VIEWPORT_SIDE`.
 
@@ -177,7 +177,7 @@ Playwright's matching: a name is `exact` (whitespace squashed, case kept) and hi
 are not found unless `needsIncludeHidden`. It never contains an index (`nth`): a component
 that cannot be told apart is `unique: false`, or `forced` with a CSS selector. Every string
 in it is page text; code that turns it into source must escape it
-(`traceqa_protocol::locator::ts_string` / `py_string` do). The field is optional, so runs
+(`traceqa_common::locator::ts_string` / `py_string` do). The field is optional, so runs
 made before it exist stay valid; `traceqa codegen` asks for those to be extracted again.
 
 ## Rules for changing a contract

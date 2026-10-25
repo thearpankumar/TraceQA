@@ -14,7 +14,7 @@
 use std::collections::HashSet;
 
 use serde::Deserialize;
-use traceqa_protocol::types::Warning;
+use traceqa_common::types::Warning;
 
 use crate::clean;
 

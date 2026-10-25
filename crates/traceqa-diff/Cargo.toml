@@ -12,7 +12,7 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-traceqa-protocol.workspace = true
+traceqa-common.workspace = true
 url.workspace = true
 
 [lints]

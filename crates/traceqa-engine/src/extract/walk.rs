@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
 
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     PageEvalParams, PageScrollParams, Rect, ScrollInfo, ScrollTo, ScrollWait, SessionOpenResult, Warning,
 };
 

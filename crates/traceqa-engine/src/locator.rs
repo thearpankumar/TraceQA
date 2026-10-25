@@ -15,7 +15,7 @@
 //! inside the nearest ancestors that tell it apart; the exact text; and, last, a structural
 //! CSS selector marked `forced`. `nth()` is never used: it picks an element silently.
 
-use traceqa_protocol::types::{Component, Locator, LocatorScope, LocatorStrategy, PathStep};
+use traceqa_common::types::{Component, Locator, LocatorScope, LocatorStrategy, PathStep};
 
 use crate::fingerprint::REPEAT_THRESHOLD;
 

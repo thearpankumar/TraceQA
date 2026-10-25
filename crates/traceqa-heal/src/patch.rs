@@ -5,7 +5,7 @@
 //! expression that codegen wrote for the baseline. A line that a person edited is left alone and
 //! reported. Patching twice gives the same text as patching once.
 
-use traceqa_protocol::types::Locator;
+use traceqa_common::types::Locator;
 
 /// The language of a page object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
-use traceqa_protocol::types::ComponentsFile;
+use traceqa_common::types::ComponentsFile;
 use traceqa_recorder::{open_run, read_components, RunFolder};
 use traceqa_visual::{render_markdown, visual, Settings, Target, DEFAULT_MAX_DIFF_RATIO, DEFAULT_THRESHOLD};
 

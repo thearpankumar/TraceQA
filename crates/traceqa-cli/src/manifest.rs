@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use traceqa_protocol::types::{ComponentsFile, Confidence, ManifestComponent, ManifestFile, Viewport};
+use traceqa_common::types::{ComponentsFile, Confidence, ManifestComponent, ManifestFile, Viewport};
 
 /// `ManifestFile.formatVersion`.
 pub const FORMAT_VERSION: u64 = 1;

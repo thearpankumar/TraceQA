@@ -23,11 +23,11 @@ use std::time::{Duration, Instant};
 
 use crate::interrupt;
 use clap::Args;
+use traceqa_common::sync::LockExt;
+use traceqa_common::types::{BrowserTarget, PageGotoParams, SessionOpenParams, StorageState, Viewport, WaitUntil};
 use traceqa_engine::driver::DriverError;
 use traceqa_engine::driver::Drivers;
 use traceqa_engine::driver_commands;
-use traceqa_protocol::sync::LockExt;
-use traceqa_protocol::types::{BrowserTarget, PageGotoParams, SessionOpenParams, StorageState, Viewport, WaitUntil};
 
 #[derive(Args)]
 pub struct LoginArgs {

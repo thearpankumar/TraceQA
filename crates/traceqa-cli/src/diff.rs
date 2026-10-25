@@ -9,9 +9,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, ValueEnum};
+use traceqa_common::types::{BaselineRef, BaselineReport, BaselineTargetReport, ComponentsFile, RunStatus};
 use traceqa_diff::baseline::{apply_aliases, Loaded};
 use traceqa_diff::{compare, github, render_markdown, sarif, BaselineStore, DiffError, DiffFile, Gate, Options};
-use traceqa_protocol::types::{BaselineRef, BaselineReport, BaselineTargetReport, ComponentsFile, RunStatus};
 use traceqa_recorder::{open_run, read_components, RunFolder};
 
 /// Where `--against NAME` looks for the baseline.

@@ -1,8 +1,8 @@
 //! Arguments that more than one command takes.
 
 use clap::Args;
-use traceqa_protocol::types::{BrowserTarget, Viewport};
-use traceqa_protocol::ParseError;
+use traceqa_common::types::{BrowserTarget, Viewport};
+use traceqa_common::ParseError;
 
 #[derive(Args)]
 pub struct DriverArgs {

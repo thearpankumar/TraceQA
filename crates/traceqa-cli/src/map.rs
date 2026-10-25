@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use clap::Args;
-use traceqa_protocol::types::{
+use traceqa_common::types::{
     BrowserTarget, ExtractOptions, GroupRun, RunGroup, RunManifest, RunStartParams, RunStatus, SiteComponent, SiteFile,
     SiteLimits, SitePage, SiteRobots, SiteSkip, StorageState, Viewport,
 };

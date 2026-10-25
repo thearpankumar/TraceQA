@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use thiserror::Error;
-use traceqa_protocol::supervise::guard;
-use traceqa_protocol::sync::{CondvarExt, LockExt};
-use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, TargetSummary, Viewport};
+use traceqa_common::supervise::guard;
+use traceqa_common::sync::{CondvarExt, LockExt};
+use traceqa_common::types::{BrowserTarget, Event, RunManifest, RunStartParams, RunStatus, TargetSummary, Viewport};
 use traceqa_recorder::{new_run_id, now_rfc3339, write_manifest_in, RunWriter};
 
 use crate::driver::{DriverCommand, DriverError, Drivers, ErrorKind};
@@ -20,7 +20,7 @@ use crate::extract::{extract_target, Job, Progress, Sink};
 use crate::url_policy::UrlPolicy;
 use crate::url_safety::{check_navigable, redact};
 
-pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_protocol::contracts::run_folder::VERSION;
+pub(crate) const RUN_FOLDER_VERSION: u64 = traceqa_common::contracts::run_folder::VERSION;
 
 /// Features this engine can run.
 pub(crate) const FEATURES: [&str; 1] = ["extract"];
