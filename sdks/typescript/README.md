@@ -40,7 +40,8 @@ also available as `error.stderrTail`.
 Errors are `TraceQAError` and its subclasses `EngineStartError`,
 `EngineExitedError`, `EngineRefusedError` and `EngineProtocolError`; the original
 error is kept in `cause`. `engine.close({ timeoutMs })` kills an engine that does
-not exit in time.
+not exit in time. After a Ctrl-C, SIGTERM or SIGHUP the engine cancels its runs and
+exits with code 130; a run in flight then ends `cancelled`.
 
 ## ESM only
 

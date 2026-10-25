@@ -171,9 +171,11 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Extract(args) => extract(args),
         Command::Serve(args) => {
+            install_server_interrupt("traceqa: stopping: cancelling the runs. Press Ctrl-C again to quit at once.");
             let stdin = BufReader::new(io::stdin());
             let options = serve::ServeOptions {
                 max_runs: args.max_runs,
+                interrupt: Some(server_interrupt()),
             };
             match serve::serve_with(
                 stdin,
@@ -193,6 +195,27 @@ fn main() -> ExitCode {
         Command::Doctor(args) => install::doctor(&args.drivers.drivers, args.verbose),
         Command::Login(args) => login::login(&args),
     }
+}
+
+/// What `serve` and `mcp` share with the signal handler: the cancel flag and the abort request.
+fn server_interrupt() -> traceqa_engine::Interrupt {
+    traceqa_engine::Interrupt {
+        cancel: &interrupt::CANCEL,
+        abort: &interrupt::ABORT,
+    }
+}
+
+/// Ctrl-C, SIGTERM and SIGHUP for a server: the first cancels every run and the process leaves
+/// when none is in flight; a second one, or the bound, quits at once. Stdout carries the
+/// protocol, so everything said here goes to stderr.
+fn install_server_interrupt(first_message: &'static str) {
+    interrupt::install(interrupt::Hooks {
+        first_message,
+        waits_for_run_folder: true,
+        exits_when_idle: true,
+        on_exit: || {},
+        first_signal_bound: Some(interrupt::FIRST_SIGNAL_BOUND),
+    });
 }
 
 fn mcp(args: &McpArgs) -> ExitCode {
@@ -220,7 +243,9 @@ fn mcp(args: &McpArgs) -> ExitCode {
         allow_remote_browsers: args.allow_remote_browsers,
         policy: traceqa_mcp::UrlPolicy::new(args.block_private, &args.allow_hosts),
         max_concurrent_extracts: args.max_concurrent_extracts,
+        interrupt: Some(server_interrupt()),
     };
+    install_server_interrupt("traceqa: stopping: cancelling the calls. Press Ctrl-C again to quit at once.");
     // Stdout belongs to the protocol. Everything for people goes to stderr, which hosts log.
     match traceqa_mcp::serve(BufReader::new(io::stdin()), Box::new(io::stdout()), config) {
         Ok(()) => ExitCode::SUCCESS,
@@ -289,8 +314,9 @@ fn extract(args: ExtractArgs) -> ExitCode {
         first_message: "
 Cancelling: closing the browsers. Press Ctrl-C again to quit at once.",
         waits_for_run_folder: true,
+        exits_when_idle: false,
         on_exit: || {},
-        first_signal_bound: None,
+        first_signal_bound: Some(interrupt::FIRST_SIGNAL_BOUND),
     });
     let execution = Execution {
         drivers: &|| Drivers::new(commands.clone()),

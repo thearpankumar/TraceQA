@@ -8,21 +8,23 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
 use traceqa_protocol::contracts::client_protocol::{method, notification, VERSION as PROTOCOL_VERSION};
 use traceqa_protocol::jsonrpc::{code, serve_lines, Message, Output, RpcError};
 use traceqa_protocol::supervise::guard;
+use traceqa_protocol::sync::LockExt;
 use traceqa_protocol::types::{
     EngineHelloParams, EngineHelloResult, Event, RpcErrorData, RunCancelParams, RunDoneParams, RunEventParams,
     RunStartParams, RunStartResult,
 };
 
 use crate::driver::{DriverCommand, Drivers, ErrorKind};
-use crate::run::{failed_after_panic, Execution, Run, FEATURES};
+use crate::run::{failed_after_panic, Execution, Interrupt, Run, FEATURES};
 
 fn failure(rpc_code: i64, kind: &ErrorKind, message: impl Into<String>) -> RpcError {
     failure_with(rpc_code, kind, false, message)
@@ -76,14 +78,51 @@ pub struct ServeOptions {
     /// How many runs may be going at once. A `run.start` beyond this is refused with a
     /// retryable `busy` error. At least 1 is used.
     pub max_runs: usize,
+    /// The process's signal state. When its `cancel` flag is set, every run is cancelled through
+    /// the same path as `run.cancel`, and `run.start` is refused. Its `abort` ends the runs at
+    /// once. The process, not this function, exits afterwards: the input may be blocked on a
+    /// read that nothing will end. `None` for a server that reacts to its input only.
+    pub interrupt: Option<Interrupt>,
 }
 
 impl Default for ServeOptions {
     fn default() -> Self {
         Self {
             max_runs: DEFAULT_MAX_RUNS,
+            interrupt: None,
         }
     }
+}
+
+/// How often the interrupt monitor looks at the signal flag.
+const INTERRUPT_POLL: Duration = Duration::from_millis(20);
+
+/// The cancel flags of the runs that were started, for the interrupt monitor.
+type Flags = Arc<Mutex<Vec<Arc<AtomicBool>>>>;
+
+/// What starting a run needs besides the request.
+struct Context<'a> {
+    make_drivers: &'a MakeDrivers,
+    output: &'a Output,
+    active: &'a Arc<AtomicUsize>,
+    max_runs: usize,
+    interrupt: Option<Interrupt>,
+    flags: &'a Flags,
+}
+
+/// Cancels every registered run as soon as `interrupt.cancel` is set, until `done` is. It keeps
+/// storing on every tick, so a run registered in the moment after the signal is caught too.
+fn monitor(interrupt: Interrupt, flags: Flags, done: Arc<AtomicBool>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        while !done.load(Ordering::SeqCst) {
+            if interrupt.cancel.load(Ordering::SeqCst) {
+                for flag in flags.lock_ok().iter() {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            }
+            thread::sleep(INTERRUPT_POLL);
+        }
+    })
 }
 
 /// Makes the drivers one run's workers use.
@@ -115,6 +154,19 @@ fn serve_inner(
     let mut runs: HashMap<String, ActiveRun> = HashMap::new();
     let active = Arc::new(AtomicUsize::new(0));
     let max_runs = options.max_runs.max(1);
+    let flags: Flags = Arc::default();
+    let monitor_done = Arc::new(AtomicBool::new(false));
+    let monitoring = options
+        .interrupt
+        .map(|interrupt| monitor(interrupt, Arc::clone(&flags), Arc::clone(&monitor_done)));
+    let context = Context {
+        make_drivers,
+        output: &output,
+        active: &active,
+        max_runs,
+        interrupt: options.interrupt,
+        flags: &flags,
+    };
     // Set by engine.shutdown: the client is closing on purpose and wants no new runs.
     let mut shutting_down = false;
 
@@ -132,13 +184,16 @@ fn serve_inner(
 
             let result = match method.as_str() {
                 method::ENGINE_HELLO => parse(params).and_then(|request: EngineHelloParams| hello(&request)),
-                method::RUN_START if shutting_down => Err(failure(
-                    code::APPLICATION_ERROR,
-                    &ErrorKind::Busy,
-                    "the engine is shutting down and starts no new runs",
-                )),
-                method::RUN_START => parse(params)
-                    .and_then(|request| start_run(request, make_drivers, &output, &mut runs, &active, max_runs)),
+                method::RUN_START
+                    if shutting_down || context.interrupt.is_some_and(|i| i.cancel.load(Ordering::SeqCst)) =>
+                {
+                    Err(failure(
+                        code::APPLICATION_ERROR,
+                        &ErrorKind::Busy,
+                        "the engine is shutting down and starts no new runs",
+                    ))
+                }
+                method::RUN_START => parse(params).and_then(|request| start_run(request, &context, &mut runs)),
                 method::ENGINE_SHUTDOWN => {
                     shutting_down = true;
                     answer(serde_json::json!({}))
@@ -179,6 +234,10 @@ fn serve_inner(
         drop(run.go);
         let _ = run.thread.join();
     }
+    monitor_done.store(true, Ordering::SeqCst);
+    if let Some(monitoring) = monitoring {
+        let _ = monitoring.join();
+    }
     reading
 }
 
@@ -213,12 +272,17 @@ fn hello(hello: &EngineHelloParams) -> Result<Value, RpcError> {
 /// client as notifications.
 fn start_run(
     request: RunStartParams,
-    make_drivers: &MakeDrivers,
-    output: &Output,
+    context: &Context,
     runs: &mut HashMap<String, ActiveRun>,
-    active: &Arc<AtomicUsize>,
-    max_runs: usize,
 ) -> Result<Value, RpcError> {
+    let Context {
+        make_drivers,
+        output,
+        active,
+        max_runs,
+        interrupt,
+        flags,
+    } = *context;
     // Before a run folder is made. The count drops before a run says it is done, so a client
     // that starts its next run on seeing run.done is not refused.
     if active.fetch_add(1, Ordering::SeqCst) >= max_runs {
@@ -240,6 +304,15 @@ fn start_run(
     };
 
     let cancel = Arc::new(AtomicBool::new(false));
+    {
+        // Runs that have ended are dropped from the list; only this list and the run hold a flag.
+        let mut flags = flags.lock_ok();
+        flags.retain(|flag| Arc::strong_count(flag) > 1);
+        flags.push(Arc::clone(&cancel));
+    }
+    // Held by the run's thread until after run.done is written: a process that waits for
+    // "no run in flight" before it exits then never cuts a client's last message short.
+    let in_flight = interrupt.map(|interrupt| interrupt.abort.enter());
     let (go, accepted_was_sent) = mpsc::channel::<()>();
     let thread = thread::spawn({
         let (run_id, cancel, output, make_drivers) = (
@@ -266,8 +339,11 @@ fn start_run(
             // `execute` supervises its own work; this is the second belt, for a panic that gets
             // out of it, so the client is always told the run is done.
             let folder = run.folder().to_path_buf();
-            let manifest = guard(|| run.execute(&execution, &mut on_event))
-                .unwrap_or_else(|message| failed_after_panic(&folder, &run_id, &message));
+            let manifest = guard(|| match interrupt {
+                Some(interrupt) => run.execute_abortable(&execution, interrupt.abort, &mut on_event),
+                None => run.execute(&execution, &mut on_event),
+            })
+            .unwrap_or_else(|message| failed_after_panic(&folder, &run_id, &message));
             drop(counted);
             let done = RunDoneParams {
                 run_id: run_id.clone(),
@@ -275,6 +351,7 @@ fn start_run(
                 manifest,
             };
             output.notify(notification::RUN_DONE, &done);
+            drop(in_flight);
         }
     });
     runs.insert(
@@ -614,7 +691,10 @@ mod tests {
         let server = thread::spawn({
             let captured = captured.clone();
             move || {
-                let options = ServeOptions { max_runs: 1 };
+                let options = ServeOptions {
+                    max_runs: 1,
+                    ..ServeOptions::default()
+                };
                 serve_inner(io::BufReader::new(server_input), Box::new(captured), &make, &options).unwrap();
             }
         });
@@ -690,17 +770,19 @@ mod tests {
 
     /// Serves on a pipe in a thread. Returns the way to write to it and to wait for it to return.
     fn serve_on_a_pipe(make: MakeDrivers, captured: &Captured) -> (io::PipeWriter, JoinHandle<()>) {
+        serve_on_a_pipe_with(make, captured, ServeOptions::default())
+    }
+
+    fn serve_on_a_pipe_with(
+        make: MakeDrivers,
+        captured: &Captured,
+        options: ServeOptions,
+    ) -> (io::PipeWriter, JoinHandle<()>) {
         let (server_input, input) = io::pipe().unwrap();
         let server = thread::spawn({
             let captured = captured.clone();
             move || {
-                serve_inner(
-                    io::BufReader::new(server_input),
-                    Box::new(captured),
-                    &make,
-                    &ServeOptions::default(),
-                )
-                .unwrap();
+                serve_inner(io::BufReader::new(server_input), Box::new(captured), &make, &options).unwrap();
             }
         });
         (input, server)
@@ -736,6 +818,54 @@ mod tests {
         let on_disk = run_json(&captured);
         assert_eq!(on_disk["status"], "cancelled");
         assert!(on_disk["finishedAt"].is_string(), "{on_disk}");
+        let _ = std::fs::remove_dir_all(out_dir);
+    }
+
+    #[test]
+    fn the_interrupt_cancels_the_run_with_the_input_still_open_and_refuses_new_runs() {
+        use crate::run::Abort;
+        // Statics of their own: tests never touch the process's real signal state.
+        let cancel: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        let abort: &'static Abort = Box::leak(Box::new(Abort::new()));
+        let options = ServeOptions {
+            interrupt: Some(Interrupt { cancel, abort }),
+            ..ServeOptions::default()
+        };
+        let (started, started_rx) = mpsc::channel();
+        let (release, wait) = mpsc::channel::<()>();
+        let out_dir = std::env::temp_dir().join(format!("traceqa-serve-signal-{}", std::process::id()));
+        let captured = Captured::default();
+        let (mut input, server) = serve_on_a_pipe_with(slow_drivers(started, wait), &captured, options);
+        writeln!(input, "{}", two_target_start(1, &out_dir)).unwrap();
+        started_rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        assert!(!abort.wait_idle(Duration::ZERO), "a run is in flight");
+
+        // The signal arrives; nobody closes the input.
+        cancel.store(true, Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(200));
+        drop(release);
+        assert!(abort.wait_idle(Duration::from_secs(20)), "the run ended and said so");
+        let done = replies_in(&captured)
+            .into_iter()
+            .find(|reply| reply["method"] == "run.done")
+            .expect("run.done was written before the run stopped being in flight");
+        assert_eq!(done["params"]["status"], "cancelled", "{done}");
+        let on_disk = run_json(&captured);
+        assert_eq!(on_disk["status"], "cancelled");
+        assert!(on_disk["finishedAt"].is_string(), "{on_disk}");
+
+        writeln!(input, "{}", two_target_start(2, &out_dir)).unwrap();
+        let refused = loop {
+            if let Some(reply) = replies_in(&captured).into_iter().find(|reply| reply["id"] == 2) {
+                break reply;
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(refused["error"]["data"]["kind"], "busy", "{refused}");
+        assert!(refused["error"]["message"].as_str().unwrap().contains("shutting down"));
+
+        drop(input);
+        server.join().unwrap();
         let _ = std::fs::remove_dir_all(out_dir);
     }
 

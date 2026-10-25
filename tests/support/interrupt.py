@@ -64,6 +64,7 @@ def run_interrupted(
     exit_timeout: float = 60,
     signal_name: str = "SIGINT",
     target: str = "group",
+    stdin_lines: list[str] | None = None,
 ) -> Interrupted:
     """Starts `command`, waits for `ready` ({"stderr": TEXT} or {"glob": PATTERN}), interrupts.
 
@@ -72,7 +73,8 @@ def run_interrupted(
     does not end in `exit_timeout`, is killed and reported (`ready` False, or a `returncode` of
     "still running"). `signal_name` is SIGINT, SIGTERM or SIGHUP (the last two on Unix only) and
     `target` is "group" (the whole group, like a terminal) or "process" (the command alone, like
-    `timeout` or `docker stop`).
+    `timeout` or `docker stop`). `stdin_lines` are written to the command's input, which stays
+    open until it ends: a server with a client connected.
     """
     spec = {
         "command": command,
@@ -85,6 +87,7 @@ def run_interrupted(
         "exit_timeout": exit_timeout,
         "signal": signal_name,
         "target": target,
+        "stdin_lines": stdin_lines,
     }
     if os.name != "nt":
         runner = importlib.util.spec_from_file_location("console_runner", RUNNER)

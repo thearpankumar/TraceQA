@@ -15,10 +15,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use traceqa_engine::driver::DriverCommand;
-pub use traceqa_engine::UrlPolicy;
+pub use traceqa_engine::{Interrupt, UrlPolicy};
 use traceqa_protocol::jsonrpc::{code, serve_lines, Id, Message, Output, RpcError};
 use traceqa_protocol::supervise::guard;
 use traceqa_protocol::sync::LockExt;
@@ -43,6 +44,11 @@ pub struct Config {
     /// How many `extract` calls may run at once. More are answered "busy" at once, so a host
     /// that fires many cannot start many browsers. At least 1 is used.
     pub max_concurrent_extracts: usize,
+    /// The process's signal state. When its `cancel` flag is set every running call is cancelled
+    /// (a cancelled call is not answered, as with `notifications/cancelled`) and new `extract`
+    /// calls are refused; its `abort` ends the runs at once. The process exits afterwards, not
+    /// this function: the input may be blocked on a read. `None` reacts to the input only.
+    pub interrupt: Option<Interrupt>,
     /// Drivers made some other way, so a test can supply scripted ones.
     #[cfg(test)]
     pub scripted: Option<Arc<dyn Fn() -> traceqa_engine::driver::Drivers + Send + Sync>>,
@@ -122,6 +128,24 @@ impl Drop for Slot {
     }
 }
 
+/// How often the interrupt monitor looks at the signal flag.
+const INTERRUPT_POLL: Duration = Duration::from_millis(20);
+
+/// Cancels every running call as soon as the signal flag is set, until `done` is. It keeps
+/// storing on every tick, so a call registered just after the signal is caught too.
+fn monitor(interrupt: Interrupt, running: Running, done: Arc<AtomicBool>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        while !done.load(Ordering::SeqCst) {
+            if interrupt.cancel.load(Ordering::SeqCst) {
+                for flag in running.lock_ok().values() {
+                    flag.store(true, Ordering::Relaxed);
+                }
+            }
+            thread::sleep(INTERRUPT_POLL);
+        }
+    })
+}
+
 /// Serves one host until `input` ends. Tool calls still running are then cancelled and
 /// waited for, so no run folder is left half written.
 pub fn serve(input: impl BufRead, output: Box<dyn Write + Send>, config: Config) -> io::Result<()> {
@@ -130,6 +154,10 @@ pub fn serve(input: impl BufRead, output: Box<dyn Write + Send>, config: Config)
     let running: Running = Arc::default();
     let slots: Arc<Slots> = Arc::default();
     let mut calls: Vec<JoinHandle<()>> = Vec::new();
+    let monitor_done = Arc::new(AtomicBool::new(false));
+    let monitoring = config
+        .interrupt
+        .map(|interrupt| monitor(interrupt, Arc::clone(&running), Arc::clone(&monitor_done)));
 
     let reading = serve_lines(input, &output, error, |message| {
         calls.retain(|call| !call.is_finished());
@@ -163,6 +191,10 @@ pub fn serve(input: impl BufRead, output: Box<dyn Write + Send>, config: Config)
     }
     for call in calls {
         let _ = call.join();
+    }
+    monitor_done.store(true, Ordering::SeqCst);
+    if let Some(monitoring) = monitoring {
+        let _ = monitoring.join();
     }
     reading
 }
@@ -219,6 +251,16 @@ fn start_call(
     } else {
         MAX_OTHER_CALLS
     };
+    if extract
+        && config
+            .interrupt
+            .is_some_and(|interrupt| interrupt.cancel.load(Ordering::SeqCst))
+    {
+        let text = "shutting down: the server was told to stop and starts no new extractions.";
+        let result = Ok(json!({ "content": [{ "type": "text", "text": text }], "isError": true }));
+        output.send(&Message::Response { id, result });
+        return None;
+    }
     let slot = match slots.take(extract, limit, running, &id) {
         Ok(slot) => slot,
         Err(limit) => {
@@ -235,6 +277,9 @@ fn start_call(
     let cancelled = Arc::new(AtomicBool::new(false));
     running.lock_ok().insert(id.clone(), Arc::clone(&cancelled));
     let (output, config) = (output.clone(), Arc::clone(config));
+    // Held until the answer is out, so a process that waits for "nothing in flight" before it
+    // exits never cuts the host's last message short.
+    let in_flight = config.interrupt.map(|interrupt| interrupt.abort.enter());
     Some(thread::spawn(move || {
         let progress_token = params.pointer("/_meta/progressToken").cloned();
         let report = |progress: u64, message: &str| {
@@ -272,6 +317,7 @@ fn start_call(
         if !cancelled.load(Ordering::Relaxed) {
             output.send(&Message::Response { id, result });
         }
+        drop(in_flight);
     }))
 }
 

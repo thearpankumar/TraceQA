@@ -46,6 +46,7 @@ impl Host {
             allow_remote_browsers: false,
             policy: UrlPolicy::default(),
             max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+            interrupt: None,
             scripted: None,
         })
     }
@@ -445,6 +446,7 @@ fn extract_asks_the_engine_for_visible_elements_only_unless_include_hidden_is_se
         allow_remote_browsers: false,
         policy: UrlPolicy::default(),
         max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+        interrupt: None,
         scripted: None,
     };
     let hidden = |arguments: Value| {
@@ -610,6 +612,7 @@ fn config_with(state_dir: Option<PathBuf>) -> Config {
         allow_remote_browsers: false,
         policy: UrlPolicy::default(),
         max_concurrent_extracts: DEFAULT_MAX_CONCURRENT_EXTRACTS,
+        interrupt: None,
         scripted: None,
     }
 }
@@ -1124,6 +1127,7 @@ fn extra_extract_calls_beyond_the_cap_are_answered_busy_at_once_and_reads_still_
         allow_remote_browsers: false,
         policy: UrlPolicy::default(),
         max_concurrent_extracts: 1,
+        interrupt: None,
         scripted: Some(scripted),
     });
     let extract = json!({ "name": "extract", "arguments": { "url": "https://example.test/" } });
@@ -1151,6 +1155,65 @@ fn extra_extract_calls_beyond_the_cap_are_answered_busy_at_once_and_reads_still_
     let third = host.send_request("tools/call", extract);
     let finished = host.answer_to(third);
     assert_eq!(finished["result"]["isError"], false, "{finished}");
+    host.stop();
+    fs::remove_dir_all(runs).unwrap();
+}
+
+#[test]
+fn the_interrupt_cancels_an_extract_without_answering_it_and_refuses_new_ones() {
+    use traceqa_engine::Abort;
+    // Statics of their own: tests never touch the process's real signal state.
+    let cancel: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+    let abort: &'static Abort = Box::leak(Box::new(Abort::new()));
+    let runs = runs_folder("interrupt");
+    let (release, scripted) = blocked_until_dropped();
+    let mut host = Host::start_config(Config {
+        runs_dir: runs.clone(),
+        drivers: Vec::new(),
+        state_dir: None,
+        allow_remote_browsers: false,
+        policy: UrlPolicy::default(),
+        max_concurrent_extracts: 2,
+        interrupt: Some(Interrupt { cancel, abort }),
+        scripted: Some(scripted),
+    });
+    let extract = json!({ "name": "extract", "arguments": { "url": "https://example.test/" } });
+    let first = host.send_request("tools/call", extract.clone());
+    // The call is in flight once the server has read the line.
+    let started = std::time::Instant::now();
+    while abort.wait_idle(Duration::ZERO) {
+        assert!(started.elapsed() < Duration::from_secs(20), "the call never started");
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    // The signal arrives; the host keeps its input open.
+    cancel.store(true, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(200));
+    drop(release);
+    assert!(abort.wait_idle(Duration::from_secs(30)), "the call ended");
+
+    let refused = host.send_request("tools/call", extract);
+    let refused = host.answer_to(refused);
+    assert_eq!(refused["result"]["isError"], true);
+    assert!(
+        refused["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("shutting down"),
+        "{refused}"
+    );
+    // The cancelled call is not answered, like one the host cancelled itself.
+    assert_eq!(host.request("ping", json!({}))["result"], json!({}));
+    assert!(host.notes.iter().all(|note| note["id"] != first), "{:?}", host.notes);
+
+    let folder = fs::read_dir(&runs)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.file_name().is_some_and(|name| name != RUN_ID))
+        .expect("the extract made a run folder");
+    let manifest: Value = serde_json::from_str(&fs::read_to_string(folder.join("run.json")).unwrap()).unwrap();
+    assert_eq!(manifest["status"], "cancelled", "{manifest}");
+    assert!(manifest["finishedAt"].is_string());
     host.stop();
     fs::remove_dir_all(runs).unwrap();
 }
