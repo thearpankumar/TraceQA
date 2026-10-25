@@ -1,0 +1,211 @@
+{
+  "summary": {
+    "added": 0,
+    "changed": 5,
+    "paired": 0,
+    "removed": 0,
+    "unchanged": 32
+  },
+  "entries": [
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Open menu",
+        "nameIsTemplate": false,
+        "path": "banner",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 0
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Open menu",
+        "nameIsTemplate": false,
+        "path": "banner",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 1
+      },
+      "fields": [
+        "visible"
+      ],
+      "flags": [
+        "became_visible"
+      ],
+      "id": "c_5c4f0ff66a79",
+      "kind": "changed"
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Contact",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 1
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Contact",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 0
+      },
+      "fields": [
+        "visible"
+      ],
+      "flags": [
+        "became_hidden"
+      ],
+      "id": "c_b54c3bf7e8ca",
+      "kind": "changed"
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Deals",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 1
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Deals",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 0
+      },
+      "fields": [
+        "visible"
+      ],
+      "flags": [
+        "became_hidden"
+      ],
+      "id": "c_aa4f4bb1284f",
+      "kind": "changed"
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Home",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 1
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Home",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 0
+      },
+      "fields": [
+        "visible"
+      ],
+      "flags": [
+        "became_hidden"
+      ],
+      "id": "c_7a1136e6d1f7",
+      "kind": "changed"
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Products",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 1
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Products",
+        "nameIsTemplate": false,
+        "path": "navigation \"main\" > list > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 0
+      },
+      "fields": [
+        "visible"
+      ],
+      "flags": [
+        "became_hidden"
+      ],
+      "id": "c_c6dd003e68d8",
+      "kind": "changed"
+    }
+  ]
+}

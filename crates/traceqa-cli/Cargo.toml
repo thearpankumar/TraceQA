@@ -16,9 +16,11 @@ path = "src/main.rs"
 clap.workspace = true
 ctrlc.workspace = true
 serde_json.workspace = true
+traceqa-diff.workspace = true
 traceqa-engine.workspace = true
 traceqa-mcp.workspace = true
 traceqa-protocol.workspace = true
+traceqa-recorder.workspace = true
 
 [lints]
 workspace = true

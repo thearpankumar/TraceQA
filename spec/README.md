@@ -10,6 +10,7 @@ from them, so the sides cannot drift apart.
 | `driver-protocol.schema.json` | Driver protocol | The engine and a browser driver |
 | `collector.schema.json` | Collector output | The in-page script and the engine |
 | `run-folder.schema.json` | Run folder | The engine and anything that reads results |
+| `diff.schema.json` | Diff output | `traceqa diff` and anything that reads its report |
 | `common.schema.json` | Shared types | Used by the files above |
 | `fingerprint.md` | Component id recipe | The engine and anything that compares runs |
 | `fingerprint-vectors.json` | Shared test vectors for the recipe | The engine's unit tests and the collector test (`tests/test_fingerprint_vectors.py`) |
@@ -113,6 +114,14 @@ out. The engine checks each hop against the address rules of the MCP server
 (`traceqa mcp --block-private`, see `docs/usage.md`). A refused hop fails the
 target with the `blocked_url` error kind (not retryable), and nothing from the
 page is written.
+
+## The diff
+
+`traceqa diff` joins two `components.json` files on the component id. The id hashes version, role,
+name and path, so a change of role or name is a different id: it is reported as one removed and one
+added entry that point at each other (`pairedWith`), never as `changed`. Ids of different
+`fingerprintVersion`s are never compared. A diff has no timestamp of its own and a fixed entry
+order, so the same two inputs give the same bytes.
 
 ## Run folder layout
 

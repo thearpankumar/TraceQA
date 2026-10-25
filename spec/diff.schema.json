@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "diff.schema.json",
+  "title": "TraceQA diff",
+  "description": "The result of `traceqa diff A B`: which components two pages (or the same page at two times, in two browsers, or at two viewports) do not share, and how the shared ones differ. Components are joined on their id, which is the same on both sides only when role, name, path and fingerprint version are equal (spec/fingerprint.md).",
+  "x-traceqa": { "contract": "diff", "version": 1 },
+  "$defs": {
+    "DiffFile": {
+      "description": "Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).",
+      "type": "object",
+      "required": ["formatVersion", "mode", "a", "b", "summary", "entries", "warnings"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "mode": {
+          "description": "What kind of comparison this is, worked out from the two sides. Known values: cross-browser (same run, same viewport, another browser), cross-viewport (same run, same browser, another viewport), run-to-run (different runs, same browser and viewport), custom.",
+          "type": "string"
+        },
+        "a": { "$ref": "#/$defs/DiffSide" },
+        "b": { "$ref": "#/$defs/DiffSide" },
+        "summary": { "$ref": "#/$defs/DiffSummary" },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/DiffEntry" } },
+        "warnings": {
+          "description": "Things the reader should know about the comparison. Known codes: viewports_differ (components hidden by design are expected).",
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/Warning" }
+        }
+      }
+    },
+    "DiffSide": {
+      "description": "One of the two compared pages.",
+      "type": "object",
+      "required": ["label", "runId", "browser", "viewport", "url", "finalUrl", "capturedAt", "fingerprintVersion", "componentCount"],
+      "properties": {
+        "label": { "description": "What the person typed for this side.", "type": "string" },
+        "runId": { "type": "string" },
+        "target": { "description": "The target folder name inside the run, when known.", "type": "string" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "url": { "type": "string" },
+        "finalUrl": { "type": "string" },
+        "capturedAt": { "description": "RFC 3339 timestamp in UTC, copied from the side's components.json.", "type": "string" },
+        "fingerprintVersion": { "type": "integer", "minimum": 0 },
+        "componentCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "DiffSummary": {
+      "description": "How many components fall in each group. A paired entry is counted under added or removed, and its pair once more in paired.",
+      "type": "object",
+      "required": ["added", "removed", "changed", "unchanged", "paired"],
+      "properties": {
+        "added": { "type": "integer", "minimum": 0 },
+        "removed": { "type": "integer", "minimum": 0 },
+        "changed": { "type": "integer", "minimum": 0 },
+        "unchanged": { "type": "integer", "minimum": 0 },
+        "paired": { "description": "Pairs of one removed and one added component that look like the same component after a change.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "DiffEntry": {
+      "description": "One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.",
+      "type": "object",
+      "required": ["kind", "id", "fields", "flags"],
+      "properties": {
+        "kind": { "description": "One of added, removed, changed. An added component is in B only, a removed one in A only.", "type": "string", "enum": ["added", "removed", "changed"] },
+        "id": { "description": "The component id.", "type": "string" },
+        "a": { "description": "The component on side A. Absent for added.", "$ref": "#/$defs/ComponentSummary" },
+        "b": { "description": "The component on side B. Absent for removed.", "$ref": "#/$defs/ComponentSummary" },
+        "fields": {
+          "description": "For changed: the ComponentSummary fields that differ (instances, visible, enabled, covered, checked, expanded, selected, pressed, confidence). Empty otherwise.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "flags": {
+          "description": "Ready-made facts for gating, in this order when present: became_hidden (some visible instances on A, none on B), became_visible, became_disabled (some enabled instances on A, none on B), became_enabled, became_covered (no covered instance on A, some on B), became_uncovered, count_up, count_down (instance count). Only on changed entries.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "pairedWith": { "description": "Set on a removed or added entry that looks like the other side's entry after a change of role or name.", "$ref": "#/$defs/PairLink" }
+      }
+    },
+    "ComponentSummary": {
+      "description": "What a diff compares about one component. The state fields count the instances in that state (covered counts only instances that were tested and found covered).",
+      "type": "object",
+      "required": ["role", "name", "nameIsTemplate", "path", "instances", "visible", "enabled", "covered", "checked", "expanded", "selected", "pressed", "confidence"],
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "type": "string" },
+        "nameIsTemplate": { "type": "boolean" },
+        "path": { "type": "string" },
+        "instances": { "type": "integer", "minimum": 0 },
+        "visible": { "type": "integer", "minimum": 0 },
+        "enabled": { "type": "integer", "minimum": 0 },
+        "covered": { "type": "integer", "minimum": 0 },
+        "checked": { "type": "integer", "minimum": 0 },
+        "expanded": { "type": "integer", "minimum": 0 },
+        "selected": { "type": "integer", "minimum": 0 },
+        "pressed": { "type": "integer", "minimum": 0 },
+        "confidence": { "$ref": "common.schema.json#/$defs/Confidence" }
+      }
+    },
+    "PairLink": {
+      "description": "Links a removed entry to the added entry that is probably the same component. The id hashes role, name and path, so a change of role or name gives a new id.",
+      "type": "object",
+      "required": ["id", "reason", "confidence"],
+      "properties": {
+        "id": { "description": "The id of the other entry.", "type": "string" },
+        "reason": { "description": "Known values: role_changed (same path and name, other role), name_changed (same path and role, other name or template flag).", "type": "string" },
+        "confidence": { "$ref": "common.schema.json#/$defs/Confidence" }
+      }
+    }
+  }
+}
