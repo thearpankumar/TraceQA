@@ -1,411 +1,431 @@
+<div align="center">
+
 # TraceQA
 
 **Discover bugs. Forge deterministic tests. Prevent regressions.**
 
-TraceQA is a browser-agnostic, agentic quality assurance engine for web
-applications. It reads a web page in real browsers, understands every
-interactive element on it, and produces structured, comparable results that
-people, test suites and AI agents can act on.
+TraceQA opens your web page in real browsers, finds every control a person can use,<br/>
+and gives each one an ID that stays the same across browsers, screen sizes and builds.
 
-> **Status:** early release. The first capability, component extraction, is
-> complete and tested on macOS, Windows and Linux. Exploration, check mode and
-> sweep mode are on the [roadmap](#roadmap).
+[![CI](https://github.com/thearpankumar/TraceQA/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/thearpankumar/TraceQA/actions/workflows/ci.yml)
+[![Audit](https://github.com/thearpankumar/TraceQA/actions/workflows/audit.yml/badge.svg?branch=master)](https://github.com/thearpankumar/TraceQA/actions/workflows/audit.yml)
+[![License](https://img.shields.io/github/license/thearpankumar/TraceQA)](LICENSE)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](Cargo.toml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#installation)
 
-## Contents
+[See it in action](#see-it-in-action) · [Features](#features) · [Architecture](#architecture) · [Install](#installation) · [Docs](#documentation)
 
-- [What is TraceQA](#what-is-traceqa)
-- [Key capabilities](#key-capabilities)
-- [Supported platforms and browsers](#supported-platforms-and-browsers)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Ways to use TraceQA](#ways-to-use-traceqa)
-- [Architecture](#architecture)
-- [Repository layout](#repository-layout)
-- [Development and testing](#development-and-testing)
-- [Roadmap](#roadmap)
-- [Documentation](#documentation)
-- [License](#license)
+</div>
+
+---
 
 ## What is TraceQA
 
-Testing a web application across browsers and screen sizes is slow, manual and
-inconsistent. Each browser behaves a little differently, and test scripts break
-whenever the page changes.
+Every web test starts with the same question: *what is on this page, and how do I reach it?* Usually someone
+clicks through the page in one browser, copies selectors by hand, and the tests break the next time the page or
+the browser changes.
 
-TraceQA approaches this from the page itself. Given a URL, it opens the page in
-every requested browser at every requested screen size, and builds a precise
-inventory of what a user can interact with: every button, link, input and
-control, with its role, accessible name, state, position and a picture of it.
+TraceQA answers that question for you. Give it a URL, and it loads the page in Chromium, Firefox, WebKit, Safari
+or a WebDriver grid, at every screen size you ask for. It scrolls the whole page, reads inside frames and shadow
+DOM, and lists everything a person can interact with: buttons, links, fields and widgets, each with its role,
+accessible name, state and a ready-to-use Playwright locator.
 
-Every element receives an **identifier that stays the same across browsers,
-screen sizes and runs**. That makes results directly comparable. The same
-"Add to cart" button in Chrome on a desktop and in Safari on a phone is
-recognised as the same component, so differences between them are real
-differences on the page.
+The key step comes next. Repeated elements are grouped into **components**, and each component gets an **ID
+that does not change** across browsers, screen sizes and runs. A page becomes data you can diff, gate, test and
+hand to an AI.
 
-This inventory is the foundation for the rest of the product. An explorer will
-interact with these components, and check and sweep modes will turn what it
-finds into bug reports and deterministic tests.
+<table>
+<tr>
+<td width="33%" valign="top">
 
-## Key capabilities
+### Discover
 
-| Capability | Description |
+Accessibility and quality checks attached to real components: unnamed controls, fake buttons, tiny targets,
+browsers that disagree, plus axe-core.
+
+</td>
+<td width="33%" valign="top">
+
+### Forge
+
+Playwright page objects in TypeScript or Python, generated from what the page actually contains. When the page
+changes, `traceqa heal` repairs the locators.
+
+</td>
+<td width="33%" valign="top">
+
+### Prevent
+
+Save a baseline, compare every build against it, and fail the pull request when a control disappears, gets
+disabled or gets covered.
+
+</td>
+</tr>
+</table>
+
+> [!NOTE]
+> TraceQA is pre-1.0. The command line and the file formats are versioned and may still change.
+
+## See it in action
+
+The repository ships a demo shop full of deliberate bugs. One command reads it in three browser engines at
+desktop and phone sizes:
+
+```console
+$ traceqa extract http://127.0.0.1:4173/ --browser chromium,firefox,webkit --viewport 1280x800,390x844
+
+TARGET                   STATUS     COMPONENTS INSTANCES WARNINGS    TIME
+chromium-1280x800        completed          37        67        1   14.3s
+chromium-390x844         completed          37        67        1   14.3s
+firefox-1280x800         completed          37        67        1   23.5s
+firefox-390x844          completed          37        67        1   23.5s
+webkit-1280x800          completed          37        67        1    7.2s
+webkit-390x844           completed          37        67        1    7.1s
+```
+
+Six browser and size combinations find the same 37 components, with the same IDs. Run the checks on the result:
+
+```console
+$ traceqa findings runs/r_20261025_202132_e41c
+
+chromium-1280x800: 3 errors, 2 warnings, 1 info
+SEVERITY RULE                   COMPONENT       ROLE       NAME                     FINDING
+error    unnamed-control        c_22db864e0a14  button                              A button has no accessible name, so a screen reader announces it without saying what it does.
+error    fake-button            c_015589123eaf  generic    Dismiss                  This element acts like a button (a pointer cursor or a click handler) but is not a button or link and cannot be reached with the keyboard.
+error    fake-button            c_cf32bca1f4ff  generic    See today's offers       This element acts like a button (a pointer cursor or a click handler) but is not a button or link and cannot be reached with the keyboard.
+warning  small-target           c_1d776447f7e3  button     कार्ट देखें              The target is 62.1x23 CSS pixels, below the 24x24 minimum, and sits close to other targets.
+warning  small-target           c_38a4abbc53b5  link       تواصل معنا               The target is 76.5x21 CSS pixels, below the 24x24 minimum, and sits close to other targets.
+info     missing-autocomplete   c_7e3842decc6b  textbox    Email address            This email field has no autocomplete attribute, so browsers and assistive tools cannot fill it in for the person.
+```
+
+Then turn the result into a page object (`traceqa codegen runs/r_20261025_202132_e41c --lang ts`):
+
+```ts
+// traceqa:id c_663c9dccbb31
+// role: "button", name: "Search"
+get searchButton(): Locator {
+  return this.page.getByRole("button", { name: "Search", exact: true });
+}
+
+// traceqa:id c_22db864e0a14
+// role: "button", name: ""
+get button_22db86(): Locator {
+  return this.page.locator("#cart-btn");
+}
+```
+
+The unnamed cart button is `c_22db864e0a14` in every browser, at every size, in every run. When a later build
+fixes it, or breaks something else, `traceqa diff` reports exactly which component changed.
+
+## Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Sees the whole page
+
+- Every button, link, input, select, editable region and ARIA widget, plus elements that only *look* clickable.
+- Open shadow DOM, same- and cross-origin iframes, and content that loads as you scroll.
+- Marks what is hidden, disabled, or covered by a cookie banner or modal.
+- Read-only: it loads and scrolls, and never clicks, types or submits.
+
+</td>
+<td width="50%" valign="top">
+
+### Every browser, every size, one run
+
+- Chromium, Chrome, Edge, Firefox, WebKit, real Safari, a running browser over CDP, or any WebDriver grid.
+- All of them side by side, at every viewport you list.
+- One browser failing never stops the others, and a timed-out one is retried alone.
+- Ctrl-C stops quickly and still leaves a valid run folder.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### IDs that do not drift
+
+- An ID comes from role, normalised name and structural path, never from position, CSS classes, browser or size.
+- Twelve "Add to cart" buttons are one component with twelve instances, and product cards collapse to one template.
+- Counters and countdowns keep their ID while their text changes.
+- `extract --repeat N` reads a page N times and flags components that come and go.
+
+</td>
+<td width="50%" valign="top">
+
+### A regression gate for CI
+
+- `traceqa baseline` keeps a reference run you commit to the repository.
+- `traceqa diff --against main --fail-on removed,disabled` fails the build on the changes you choose.
+- GitHub annotations and SARIF output, `verify` manifests of what must exist, and per-component pixel compare.
+- `traceqa map` follows a site's links and lists which components live on which pages.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Accessibility and quality findings
+
+- Built-in checks: unnamed controls, weak names, fake buttons, small targets, covered controls, ambiguous links,
+  missing autocomplete, and browsers that disagree.
+- axe-core results placed on the component they belong to.
+- Suppressions with a reason and an expiry date, and a `--fail-on` gate.
+
+</td>
+<td width="50%" valign="top">
+
+### Tests from a run
+
+- `traceqa codegen` writes Playwright page objects in TypeScript or Python, one property per component.
+- `traceqa heal` compares a run with a baseline, patches locators that moved, and proposes renames that are
+  applied only with `--accept`.
+- Every property carries its `traceqa:id`, so tools can find it and update it.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### Built for AI tools
+
+- `traceqa mcp` gives Claude Code, Cursor and other MCP clients eight tools: extract, find, describe a page,
+  diff runs, run findings, fetch a component's picture and more.
+- Page text is marked untrusted, and cloud metadata addresses are refused.
+- Remote browsers and saved sign-ins are off until the operator allows them.
+
+</td>
+<td width="50%" valign="top">
+
+### Safe with real sites
+
+- `traceqa login` saves a sign-in once, and the saved state is never written to a run folder.
+- Tokens, passwords and signatures in addresses become `REDACTED` in every file.
+- `traceqa serve` speaks a documented JSON-RPC protocol over standard input and output, so any language can
+  drive the engine.
+
+</td>
+</tr>
+</table>
+
+The full list, one line per feature, is in [docs/features.md](docs/features.md).
+
+## Vision
+
+Testing tools usually make you choose. Hand-written scripts are precise but break whenever the page changes. AI
+agents adapt to change, but they rarely do the same thing twice. TraceQA starts from a different idea: **a web
+page can be read as data.** Once every component has a stable identity, exploring, judging, testing and gating
+all become repeatable and explainable.
+
+## What makes it different
+
+| The usual way | The TraceQA way |
 |---|---|
-| Complete element discovery | Buttons, links, inputs, selects, editable regions, and elements that only look clickable. |
-| Whole-page coverage | Open shadow DOM, same-origin and cross-origin iframes, and content that loads as the page scrolls. |
-| Stable identifiers | The same component has the same id in every browser and on every run, and across screen sizes unless the layout moves it under a differently named landmark. |
-| Component grouping | Repeated elements, such as twelve "Add to cart" buttons in a product grid, become one component with twelve instances. |
-| Evidence | Role, accessible name, selectors, position, visibility and state for each element, and an optional cropped screenshot. |
-| Parallel execution | Browsers and screen sizes run side by side, with a time breakdown for each. |
-| Consistent results | One in-page collector runs in every browser, so results are measured the same way everywhere. |
-| AI agent ready | A built-in MCP server lets AI tools such as Claude Code and Cursor run TraceQA and inspect its results. |
-| Any language | A documented protocol (`traceqa serve`) and a guide for writing a client. |
-| Non-invasive | It navigates to the URL and scrolls to load lazy content. With `--storage-state` it first sets cookies and local storage. It never clicks, types or submits anything. |
+| Record clicks in one browser and get selectors for whatever you happened to touch. | Read the whole page in every browser and get a locator for **everything**, without clicking anything. |
+| Compare screenshots pixel by pixel: a new font fails the build, and a missing button is lost in the noise. | Compare **components**: added, removed, renamed, disabled, hidden or covered. Pixel compare is optional and per component. |
+| Run accessibility rules and get a list of DOM nodes that shifts with every build. | Findings are attached to **component IDs**, so you can track, suppress and gate them across builds. |
+| Let an AI agent click around, and get something different every run. | Same page, same IDs, every run. AI tools get **structured, deterministic data** over MCP. |
+| Run one browser at a time and glue the results together with scripts. | Run Chromium, Firefox, WebKit, Safari and grids **side by side in one run**, and compare them by component. |
 
-## Supported platforms and browsers
+Four principles hold it together:
 
-**Operating systems:** macOS, Windows and Linux, from a single codebase. Every
-change is tested on all three in continuous integration.
-
-| Browser | How it is driven |
-|---|---|
-| Chromium, Google Chrome, Microsoft Edge | Playwright |
-| Firefox | Playwright |
-| WebKit | Playwright |
-| Safari | WebDriver, through `safaridriver` on macOS. Tested on Safari 26. |
-| Agent and cloud browsers | Chrome DevTools Protocol endpoint (`cdp=ENDPOINT`) |
-| Selenium grids and cloud device farms | Any W3C WebDriver server (`webdriver=URL`) |
-
-## Installation
-
-### Prerequisites
-
-| Requirement | Needed for |
-|---|---|
-| [Rust](https://rustup.rs), stable | Building the `traceqa` binary |
-| [uv](https://docs.astral.sh/uv/) | Installing the browser drivers |
-| [Git](https://git-scm.com) | Getting the source |
-| [Node.js](https://nodejs.org) 24 or later | Only for the codegen tests (`tests/codegen_ts`) |
-
-Install uv if it is not already present:
-
-```sh
-# macOS and Linux
-brew install uv        # or: pipx install uv
-
-# Windows
-winget install --id=astral-sh.uv -e
-```
-
-Other ways, including a versioned installer with its published checksum, are on
-[uv's installation page](https://docs.astral.sh/uv/getting-started/installation/).
-
-### Step 1: Install the traceqa binary
-
-Each tagged version publishes binaries for macOS, Windows and Linux on the
-repository's [Releases](https://github.com/thearpankumar/TraceQA/releases)
-page. Download the archive for your system, extract it, and put `traceqa` on
-your `PATH`. Then run `traceqa install chromium firefox webkit` and skip to
-step 3.
-
-Every archive and `SHA256SUMS.txt` carries a build provenance attestation, signed through GitHub, that this
-repository's release workflow built that exact file. To check a download with the GitHub CLI:
-
-```sh
-gh attestation verify traceqa-v0.1.0-linux-x86_64.tar.gz --repo thearpankumar/TraceQA
-sha256sum -c SHA256SUMS.txt --ignore-missing
-```
-
-The binaries are not yet code-signed. On macOS, allow a downloaded binary with
-`xattr -d com.apple.quarantine traceqa`. On Windows, SmartScreen may ask for
-confirmation the first time it runs.
-
-Until the first release, or to build the latest code, install from source:
-
-```sh
-git clone https://github.com/thearpankumar/TraceQA.git
-cd TraceQA
-cargo install --locked --path crates/traceqa-cli
-```
-
-This places `traceqa` in Cargo's binary folder (`~/.cargo/bin`), which rustup
-adds to `PATH`.
-
-### Step 2: Install the drivers and browsers
-
-From the same folder:
-
-```sh
-traceqa install --from . chromium firefox webkit
-```
-
-This creates a private Python environment in `~/.traceqa`, installs the browser
-drivers into it at the versions the repository was tested with, and downloads
-the browsers. It does not affect other Python projects on the machine.
-
-On Linux, add `--with-deps` to also install the system libraries the browsers
-need. Safari needs no download; enable "Allow remote automation" in Safari's
-Developer settings instead.
-
-### Step 3: Verify the installation
-
-```sh
-traceqa doctor
-```
-
-This reports where each driver was found, whether it starts, and which browsers
-it can open.
-
-### AI tools
-
-| Integration | Setup |
-|---|---|
-| Claude Code | `claude mcp add traceqa -- traceqa mcp` |
-| Other MCP hosts | Add the command `traceqa` with the argument `mcp` in the host's MCP settings. |
-
-## Quick start
-
-Extract the components of a page in Chromium at the default screen size:
-
-```sh
-traceqa extract https://example.com
-```
-
-Compare three browsers at a desktop and a phone size, with a picture of each
-component:
-
-```sh
-traceqa extract https://example.com \
-    --browser chromium,firefox,webkit \
-    --viewport 1280x800,390x844 \
-    --crops
-```
-
-Each run writes a self-contained run folder under `./runs`, holding a summary,
-an event log, and the components found for each browser and screen size. The
-formats are described in [docs/usage.md](docs/usage.md#output-files).
-
-Find components that come and go (a chat widget, a banner that loads late) by reading the page
-several times, and keep the runs folder in check (see
-[docs/usage.md](docs/usage.md#--repeat-find-unstable-components)):
-
-```sh
-traceqa extract https://example.com --repeat 5 --fail-on-unstable
-traceqa runs prune --keep 20 --older-than 14d --dry-run
-```
-
-Then run automated checks over the run: controls with no name, buttons that are
-not buttons, targets too small to hit. They are automated checks, not a
-conformance claim (see [docs/usage.md](docs/usage.md#traceqa-findings)):
-
-```sh
-traceqa findings runs/<runId>
-```
-
-Optionally add axe-core's rules to the same findings, placed on component ids. axe-core (MPL-2.0) is not shipped with TraceQA; `traceqa install --axe` downloads it, hash-checked, at your request ([docs/usage.md](docs/usage.md#accessibility-checks-with-axe-core), [docs/third-party-notices.md](docs/third-party-notices.md)):
-
-```sh
-traceqa install --axe
-traceqa extract https://example.com --axe
-```
-
-Check a run against a manifest of what the page must have (`traceqa baseline init` writes a first
-one; see [docs/usage.md](docs/usage.md#traceqa-verify)). Exit 1 when something is missing:
-
-```sh
-traceqa verify runs/<runId> --manifest manifest.yaml --strict
-```
-
-Turn a run into a Playwright page object, in TypeScript or Python, with one property per
-component (role and exact name first, never `nth()`; see
-[docs/usage.md](docs/usage.md#traceqa-codegen)):
-
-```sh
-traceqa codegen runs/<run> --lang ts --out tests/pages
-```
-
-When a page changes, `traceqa heal` sorts what a run lost against a baseline: a mechanical fix when the
-component keeps its id, a proposal (never applied by itself, refused in CI) when exactly one component is its
-rename, a failure when it is gone, a refusal when it is unclear (see [docs/usage.md](docs/usage.md#traceqa-heal)):
-
-```sh
-traceqa heal runs/<run> --against NAME
-traceqa heal runs/<run> --against NAME --accept ID --page-object tests/pages/shop.page.ts
-```
-
-For pages behind a sign-in, sign in once and reuse the saved state:
-
-```sh
-traceqa login https://app.example.com --save state.json
-traceqa extract https://app.example.com/dashboard --storage-state state.json
-```
-
-To try TraceQA without a site of your own, serve the bundled demo shop from the
-repository and extract it:
-
-```sh
-uv run python testbed/sites/buggy-shop/serve.py
-traceqa extract http://127.0.0.1:4173/
-```
-
-## Ways to use TraceQA
-
-| Interface | Best for | Entry point |
-|---|---|---|
-| Command line | Local checks, scripts and CI pipelines | `traceqa extract` |
-| MCP server | AI agents and assistants | `traceqa mcp` |
-| Client protocol | Any other language | `traceqa serve`, see [docs/clients.md](docs/clients.md) |
-
-### Command line
-
-Exit codes make it suitable for CI: `0` when every browser completed, `1` when
-any failed, `2` for invalid input, `130` when stopped with Ctrl-C (or SIGTERM or SIGHUP on Unix). `--json` prints a machine-readable summary.
-
-To see what changed between two runs (two browsers, two viewports, or yesterday and today),
-use `traceqa diff RUN_A RUN_B`; see [docs/usage.md](docs/usage.md#traceqa-diff).
-To fail a CI job when a component is lost or disabled, save a reference with `traceqa baseline save` and
-check with `traceqa diff RUN --against NAME --fail-on removed,disabled`; see
-[Baselines and the CI gate](docs/usage.md#baselines-and-the-ci-gate).
-To catch a style change on one component, extract both runs with `--crops` and run `traceqa visual RUN_A RUN_B`
-(same browser and viewport only); see [docs/usage.md](docs/usage.md#traceqa-visual).
-All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
-
-### AI agents (MCP)
-
-`traceqa mcp` implements the Model Context Protocol. Once connected, an AI tool
-can be asked in plain language, for example "check the buttons on example.com in
-Chrome and Firefox and tell me if any are missing a name", and it calls these
-tools itself:
-
-| Tool | Purpose |
-|---|---|
-| `extract` | Run an extraction and return a summary per browser and screen size. |
-| `list_runs` | List earlier runs. |
-| `describe_page` | Outline a page by landmark, in a few hundred tokens. |
-| `find` | Search by role, name, text or state in every browser of a run, and see where a control is missing. |
-| `get_components` | Page through the components of a run, filtered by role, name or landmark, or read one component in full. |
-| `get_crop` | Return the picture of a component, so the AI can see it. |
+- **Deterministic.** The same page gives the same components and the same IDs.
+- **Read-only by default.** It observes the page and never changes anything on it.
+- **One brain.** The Rust engine makes every decision. Drivers only carry out instructions, so every browser is
+  treated the same.
+- **Contracts first.** Every message and file is defined by a JSON Schema, and the Rust and Python types are
+  generated from those schemas, so the languages cannot drift apart.
 
 ## Architecture
 
-TraceQA is a small set of programs that exchange messages. One of them, the
-engine, makes every decision. The others request work from it or carry out its
-instructions.
+TraceQA is a small set of programs that exchange messages. The engine, a single Rust binary, makes every decision.
+Browser drivers are separate Python processes that do what they are told. A plain JavaScript file runs inside
+the page and reports facts.
 
 ```mermaid
 flowchart TB
-    subgraph callers["Callers"]
-        cli["CLI<br/>traceqa extract"]
-        ai["AI tools over MCP<br/>traceqa mcp"]
-        other["Any other language"]
+    cli["traceqa CLI"]
+    ai["AI tools<br/>over MCP"]
+    lang["Any language<br/>via traceqa serve"]
+
+    subgraph engine["Rust engine"]
+        direction LR
+        orchestrate["Orchestrate<br/>browsers x viewports"] --> group["Group and fingerprint<br/>stable component IDs"] --> analyse["Diff, findings, verify,<br/>codegen, heal, visual"]
     end
 
-    subgraph engine["Engine (Rust): all logic"]
-        serve["Serve<br/>client protocol"]
-        run["Run<br/>every browser at every viewport"]
-        extract["Extract<br/>open, scroll, collect, screenshot"]
-        group["Group and fingerprint<br/>components and stable ids"]
-        recorder["Recorder<br/>run folder, events, crops"]
-        serve --> run --> extract --> group --> recorder
-    end
-
-    subgraph drivers["Drivers (Python): no logic"]
+    subgraph drivers["Python drivers"]
+        direction LR
         pw["Playwright driver"]
         wd["WebDriver driver"]
     end
 
-    subgraph browsers["Browsers: page-script.js runs inside the page"]
-        b1["Chromium, Chrome, Edge,<br/>Firefox, WebKit"]
-        b2["Agent and cloud browsers<br/>over CDP"]
-        b3["Safari,<br/>WebDriver grids"]
+    subgraph browsers["Real browsers"]
+        direction LR
+        b1["Chromium, Chrome, Edge,<br/>Firefox, WebKit, CDP"]
+        b2["Safari,<br/>WebDriver grids"]
     end
 
-    spec[("spec/<br/>JSON Schemas")]
-    out[("Run folder")]
+    runs[("Run folder<br/>run.json, events.jsonl,<br/>components.json, crops")]
 
-    cli -->|direct call| run
-    ai -->|direct call| run
-    other -->|JSON-RPC over stdio| serve
-    extract <-->|JSON-RPC over stdio| pw
-    extract <-->|JSON-RPC over stdio| wd
+    cli --> engine
+    ai --> engine
+    lang -->|JSON-RPC over stdio| engine
+    engine <-->|JSON-RPC over stdio| drivers
     pw --> b1
-    pw --> b2
-    wd --> b3
-    recorder --> out
-    spec -.->|types generated from| engine
-    spec -.->|types generated from| drivers
+    wd --> b2
+    engine --> runs
 ```
 
-### Components
+Every message between these programs, and every file they write, is defined once as a JSON Schema in
+[`spec/`](spec). The CLI and the MCP server call the engine directly. Everything else talks to it in JSON-RPC,
+one message per line.
 
-| Component | Language | Responsibility |
-|---|---|---|
-| Engine | Rust | Orchestration, grouping, identifiers and output. The only component that makes decisions. |
-| Command line and MCP server | Rust | Front ends compiled into the same `traceqa` binary as the engine. |
-| Drivers | Python | Control browsers. They carry out instructions and report results, and hold no logic. |
-| Collector | JavaScript | A single script evaluated inside the page that reports facts about its interactive elements. |
-| Contracts | JSON Schema | Define every message and file format. All language bindings are generated from them. |
+### One extraction, step by step
 
-### How an extraction works
+For every browser at every viewport:
 
-1. The engine selects a driver that can open the requested browser and opens a
-   session at the requested screen size.
-2. It loads the page and waits for it to settle: the load event, a quiet
-   network, a stable page height, and no intro animation still running.
-3. It scrolls through the page, which loads content that only appears on
-   scroll, and optionally captures a screenshot of each screen.
-4. It runs the collector in the main page and in every frame, and merges the
-   results into page coordinates.
-5. It groups elements into components and computes their stable identifiers.
-6. It writes the results to the run folder and reports each step as a live
-   event.
+```mermaid
+sequenceDiagram
+    participant E as Engine
+    participant D as Driver
+    participant B as Browser
+    E->>D: session.open (browser, viewport)
+    D->>B: launch
+    E->>D: page.goto (url)
+    D->>B: load, then wait for a quiet network, a stable height and finished animations
+    E->>D: page.scroll
+    D->>B: scroll a screen at a time, so lazy content appears
+    E->>D: page.eval (page-script.js, in every frame)
+    B-->>D: role, name, state, box and path of each element
+    D-->>E: facts only
+    Note over E: merge frames into page coordinates,<br/>group elements into components,<br/>hash role + name + path into a c_ ID
+    E->>E: write components.json and events.jsonl
+    E->>D: session.close
+```
 
-Every browser and screen size runs side by side. A failure in one does not
-affect the others.
+### How you use it every day
 
-### Design principles
+```mermaid
+flowchart LR
+    extract["traceqa extract"] --> run[("run folder")]
+    run --> findings["traceqa findings"]
+    run --> diff["traceqa diff<br/>--against main"]
+    run --> codegen["traceqa codegen"]
+    codegen --> pages["Playwright<br/>page objects"]
+    baseline[("baseline<br/>main")] --> diff
+    findings --> gate{"CI gate"}
+    diff --> gate
+    gate -->|clean| merge["Merge"]
+    gate -->|unintended change| fail["Pull request fails"]
+    gate -->|intended change| promote["traceqa baseline promote<br/>makes it the new baseline"]
+```
 
-| Principle | Benefit |
+<details>
+<summary><b>Repository map</b></summary>
+
+| Path | What lives there |
 |---|---|
-| All logic lives in one engine | Every interface and every browser behaves identically. |
-| Browsers are reached through separate driver programs | Supporting a new browser never changes the engine. |
-| One in-page collector for every browser | Results are measured the same way and are directly comparable. |
-| Programs communicate in JSON-RPC over standard streams | Any language that can start a process can integrate. |
-| JSON Schemas are the single source of truth | Rust and Python types are generated and cannot drift apart. |
-| Results are files on disk | Every run can be inspected, compared and reported on later. |
+| [`crates/traceqa-cli`](crates/traceqa-cli) | The `traceqa` binary, one module per command. |
+| [`crates/traceqa-engine`](crates/traceqa-engine) | All the logic: orchestration, grouping and component IDs. |
+| [`crates/traceqa-common`](crates/traceqa-common) | Types generated from `spec/`, the JSON-RPC line format and shared helpers. |
+| [`crates/traceqa-recorder`](crates/traceqa-recorder) | Writes the run folder and the live event stream. |
+| [`crates/traceqa-diff`](crates/traceqa-diff) | Compares two runs by component ID. |
+| [`crates/traceqa-findings`](crates/traceqa-findings) | The accessibility and quality checks. |
+| [`crates/traceqa-heal`](crates/traceqa-heal) | Sorts what a run lost against a baseline into fixes, renames and failures. |
+| [`crates/traceqa-visual`](crates/traceqa-visual) | Compares component pictures pixel by pixel. |
+| [`crates/traceqa-mcp`](crates/traceqa-mcp) | The MCP server for AI tools. |
+| [`crates/traceqa-replay`](crates/traceqa-replay) | A stand-in engine that replays recorded conversations, for testing clients. |
+| [`page-script`](page-script) | `page-script.js`, which runs inside the page and reports what it finds. |
+| [`web-drivers`](web-drivers) | The Playwright and WebDriver drivers, and `traceqa-protocol`, their shared generated types. |
+| [`spec`](spec) | JSON Schemas for every message and file, with examples, transcripts and the ID recipe. |
+| [`testbed`](testbed) | Demo sites, including the buggy shop, and the end-to-end bench. |
+| [`tests`](tests) | End-to-end, driver, MCP and installer tests. |
+| [`scripts`](scripts) | Code generation and CI helpers. |
 
-The full design, including the message flow and the reasoning behind each
-decision, is in [docs/architecture.md](docs/architecture.md).
+</details>
 
-## Repository layout
+The full design, including both protocols and the reasons behind each decision, is in
+[docs/architecture.md](docs/architecture.md).
 
-| Path | Purpose |
+## Installation
+
+### 1. Get the `traceqa` binary
+
+**Prebuilt.** Each [release](https://github.com/thearpankumar/TraceQA/releases) has archives for Linux x86-64,
+macOS on Apple silicon and Windows x86-64, a `SHA256SUMS.txt`, and signed build provenance you can check:
+
+```sh
+gh attestation verify traceqa-v0.1.0-linux-x86_64.tar.gz --repo thearpankumar/TraceQA
+```
+
+**From source**, with Rust 1.88 or later:
+
+```sh
+git clone https://github.com/thearpankumar/TraceQA
+cd TraceQA
+cargo install --path crates/traceqa-cli --locked
+```
+
+### 2. Install the browsers
+
+TraceQA needs [uv](https://docs.astral.sh/uv/), which it uses to set up its drivers in `~/.traceqa`, away from
+your own projects:
+
+```sh
+traceqa install chromium firefox webkit
+traceqa doctor
+```
+
+`doctor` checks the setup and says how to fix anything that is missing. On Linux, add `--with-deps` to install
+the browsers' system libraries. In a source checkout, `traceqa install --from .` installs the drivers from the
+checkout instead of GitHub.
+
+### 3. Read your first page
+
+```sh
+traceqa extract https://example.com --browser chromium,firefox --viewport 1280x800,390x844
+traceqa findings runs/<run-id>
+traceqa codegen runs/<run-id> --lang ts
+```
+
+### Use it from an AI tool
+
+```sh
+claude mcp add traceqa -- traceqa mcp
+```
+
+Other MCP clients start the program `traceqa` with the argument `mcp`.
+
+### Gate your pull requests
+
+```sh
+traceqa baseline save runs/<run-id> --name main
+traceqa diff runs/<new-run-id> --against main --fail-on removed,disabled --format github
+```
+
+A complete GitHub Actions job is in [docs/usage.md](docs/usage.md#baselines-and-the-ci-gate).
+
+## Documentation
+
+| Document | Read it for |
 |---|---|
-| `crates/traceqa-engine/` | The engine library. |
-| `crates/traceqa-cli/` | The `traceqa` command, including `install` and `doctor`. |
-| `crates/traceqa-mcp/` | The MCP server behind `traceqa mcp`. |
-| `crates/traceqa-diff/` | Compares two runs by component id, behind `traceqa diff`, and keeps baselines, the `--fail-on` gate and the GitHub and SARIF output. |
-| `crates/traceqa-visual/` | Compares the crops of two runs pixel by pixel, behind `traceqa visual`. |
-| `crates/traceqa-common/` | The shared base of the Rust crates: types generated from `spec/`, the message line format and shared helpers. |
-| `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
-| `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |
-| `web-drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |
-| `web-drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
-| `page-script/` | The script that runs inside each page and reads its elements (the collector). |
-| `web-drivers/traceqa-protocol/` | Python types generated from `spec/` and the base the drivers share. |
-| `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
-| `testbed/sites/buggy-shop/` | Demo site with a manifest of its expected components. |
-| `testbed/sites/collector-cases/` | Small pages that test the collector one behaviour at a time. |
-| `testbed/sites/patterns/` | Pages built like real sites (menus, carousels, forms, grids, tables, dialogs) that test the whole engine. |
-| `testbed/sites/trouble/` | A site that fails on purpose, for the failure tests. |
-| `testbed/bench/` | Scores extraction against the demo site. |
-| `tests/` | End-to-end tests of the MCP server and the installer. |
-| `scripts/` | Code generation and transcript recording. |
-| `docs/` | Usage, features, architecture, client guide, testing, backlog and security policy. |
+| [Usage](docs/usage.md) | Every command, option, exit code and output file. |
+| [Features](docs/features.md) | Everything TraceQA can do, one line each. |
+| [Architecture](docs/architecture.md) | How the engine, drivers and page script fit together, and why. |
+| [Clients](docs/clients.md) | Driving the engine from any language with `traceqa serve`. |
+| [Testing](docs/testing.md) | Mutation testing of the component ID and checks of the generated page objects. |
+| [Backlog](docs/backlog.md) | Designed but not built yet: the explorer, interaction oracles and more. |
+| [Contracts](spec/README.md) | The JSON Schemas, their versions and the rules for changing them. |
+| [Component IDs](spec/fingerprint.md) | The exact ID recipe and its known limits. |
+| [Security](docs/SECURITY.md) | How to report a vulnerability privately. |
+| [Third-party notices](docs/third-party-notices.md) | Licences of the code TraceQA ships. |
 
 ## Development and testing
 
-Set up a development environment from the repository root:
+Set up the repository (needs Rust stable and uv):
 
 ```sh
 cargo build
@@ -413,17 +433,13 @@ uv sync
 uv run playwright install chromium firefox webkit
 ```
 
-Run the test suites:
+Run the tests: the Rust crates, then the Python suites, then the end-to-end bench on the demo shop:
 
 ```sh
 cargo test
 uv run pytest
 uv run testbed/bench/run.py
 ```
-
-These are the Rust crates, then the collector cases, drivers, MCP server and installer, then
-the end-to-end bench on the demo site. Every command runs unchanged from the repository root in Bash,
-PowerShell and cmd on Windows, and in a POSIX shell on macOS and Linux.
 
 Run the linters:
 
@@ -433,69 +449,19 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-By default a Python test that needs the built binary, `uv`, or `chromedriver` is skipped
-when it is missing. CI sets `TRACEQA_REQUIRE_BINARY=1` to turn those skips into failures
-(and `TRACEQA_REQUIRE_CHROMEDRIVER=1` for chromedriver), and `TRACEQA_NO_UNEXPECTED_SKIPS=1`
-to fail the run on any skip whose reason is not listed in `tests/support/ci_guards.py`. Set
-them locally to check that nothing was silently skipped.
-
-Every part of the repository has tests, from unit tests of each crate to
-end-to-end runs in real browsers. The collector is checked case by case in
-three browsers against pages that state their own expected results, and every
-run folder a test produces is checked against the JSON Schemas in `spec/`. The MCP server is tested with the official
-MCP client library.
-
-Continuous integration runs on every pull request, on pushes to `master`, on demand and weekly:
-
-| Job | Platforms | Checks |
-|---|---|---|
-| Changes | Linux | Decides whether the change touches code. Only `README.md`, `LICENSE` and Markdown files under `docs/` count as documentation; a change made of those alone skips Lint and Test. Manual and weekly scheduled runs test everything. |
-| Lint | Linux | Formatting for Rust, lint and type checks for Python, that every `$ref` in `spec/` resolves, that generated types match `spec/`, and that every package has the same version. |
-| Test | Linux, macOS, Windows | Clippy (`-D warnings`) on each system, all Rust and Python tests against the built binary and real browsers, and the bench. |
-| CI | Linux | One result for the whole run: passes when every job passed or was skipped for a documentation change. |
-
-Pushing a version tag (`vX.Y.Z`, on a `master` commit, matching every package version) runs the
-release workflow (`.github/workflows/release.yml`), which audits the dependencies, then builds, checks and
-publishes the binaries.
-
-After changing a schema in `spec/`, regenerate the Python types, and
-after a client protocol change record the transcripts again:
+Start the demo shop at http://127.0.0.1:4173/ to try the commands above:
 
 ```sh
-uv run scripts/gen_python_protocol.py
-uv run scripts/record_transcripts.py
+uv run python testbed/sites/buggy-shop/serve.py
 ```
 
-The Rust types regenerate on build.
+Every command works unchanged in Bash, PowerShell and cmd. CI runs the tests on Linux, macOS and Windows.
 
-## Roadmap
+## Security
 
-| Stage | Description | Status |
-|---|---|---|
-| Component extraction | Inventory of every interactive element, with stable identifiers | Available |
-| MCP server | AI agent integration | Available |
-| SDKs | Python and TypeScript SDKs | Planned |
-| One-command setup | `traceqa install` and `traceqa doctor` | Available |
-| Releases | Prebuilt binaries for every tagged version | Available |
-| Distribution | A GitHub Action, and packages on PyPI and npm | Planned |
-| Site map | `traceqa map` follows same-origin links and lists the components on each page | Available |
-| Explorer | Interacts with components to test the application | Planned |
-| Check mode | Tests one feature and reports what breaks | Planned |
-| Sweep mode | Tests the whole application and reports every issue | Planned |
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [docs/usage.md](docs/usage.md) | Every command and option, the MCP tools, output files, warnings and exit codes. |
-| [docs/features.md](docs/features.md) | What you can do with TraceQA, one line each. |
-| [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
-| [docs/clients.md](docs/clients.md) | Writing a client in another language. |
-| [docs/backlog.md](docs/backlog.md) | Designed but unbuilt work: the explorer, interaction oracles, open gaps and scope cuts. |
-| [docs/SECURITY.md](docs/SECURITY.md) | How to report a vulnerability privately. |
-| [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
-| [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
+Please report vulnerabilities privately, as described in [docs/SECURITY.md](docs/SECURITY.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+TraceQA is licensed under the [Apache License 2.0](LICENSE). Third-party licences are listed in
+[docs/third-party-notices.md](docs/third-party-notices.md).
