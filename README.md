@@ -187,6 +187,14 @@ conformance claim (see [docs/usage.md](docs/usage.md#traceqa-findings)):
 traceqa findings runs/<runId>
 ```
 
+Turn a run into a Playwright page object, in TypeScript or Python, with one property per
+component (role and exact name first, never `nth()`; see
+[docs/usage.md](docs/usage.md#traceqa-codegen)):
+
+```sh
+traceqa codegen runs/<run> --lang ts --out tests/pages
+```
+
 For pages behind a sign-in, sign in once and reuse the saved state:
 
 ```sh

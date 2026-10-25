@@ -150,6 +150,50 @@
       "type": "string",
       "enum": ["high", "low"]
     },
+    "LocatorStrategy": {
+      "description": "How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.",
+      "type": "string",
+      "enum": ["role", "testid", "text", "css"]
+    },
+    "LocatorScope": {
+      "description": "One ancestor a locator searches inside, outermost first in Locator.scope.",
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "description": "The ancestor's accessible name, matched exactly.", "type": "string" }
+      }
+    },
+    "Locator": {
+      "description": "How to find a component again with Playwright-style locators (getByRole, getByTestId, getByText). The counts are over the instances collected in the same file, so uniqueness is proven for one page in one browser; `traceqa codegen` combines the files of all browsers. Never uses nth(): a component that cannot be told apart is reported as not unique, or located by CSS with forced set.",
+      "type": "object",
+      "required": ["strategy", "unique", "matches", "own", "forced", "needsIncludeHidden"],
+      "properties": {
+        "strategy": { "$ref": "#/$defs/LocatorStrategy" },
+        "role": { "description": "ARIA role, for the role strategy.", "type": "string" },
+        "name": { "description": "Accessible name (role strategy) or text (text strategy). Matched exactly: whitespace normalised, case sensitive. Absent when the name is a template or changes.", "type": "string" },
+        "exact": { "description": "True whenever a name is used.", "type": "boolean" },
+        "testId": { "description": "Value of data-testid, for the testid strategy.", "type": "string" },
+        "scope": {
+          "description": "Ancestors to search inside, outermost first, each a descendant of the one before.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/LocatorScope" }
+        },
+        "frame": { "description": "Label of the frame the component is in, as written in its path: lower case, whitespace normalised. Absent for the main frame.", "type": "string" },
+        "css": { "description": "CSS selector, only for the css strategy.", "type": "string" },
+        "unique": { "description": "True when the locator matches the component's instances and nothing else collected (matches equals own).", "type": "boolean" },
+        "matches": { "description": "How many collected instances in this file the locator matches.", "type": "integer", "minimum": 0 },
+        "own": { "description": "How many of those are instances of this component.", "type": "integer", "minimum": 0 },
+        "ambiguousWith": {
+          "description": "Ids of other components the locator also matches, at most 5.",
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string" }
+        },
+        "forced": { "description": "True when no readable locator told the component apart and a structural CSS selector was used. Brittle: it breaks when the page layout changes.", "type": "boolean" },
+        "needsIncludeHidden": { "description": "True when every instance is hidden, so a role locator only finds it with includeHidden.", "type": "boolean" }
+      }
+    },
     "RunStatus": {
       "type": "string",
       "enum": ["running", "completed", "failed", "cancelled"]

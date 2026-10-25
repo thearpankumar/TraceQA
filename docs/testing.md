@@ -42,3 +42,27 @@ Exit codes ([reference](https://mutants.rs/exit-codes.html)):
 
 A missed mutant is either a missing test or a sign that the code does nothing useful there;
 read the line before deciding.
+
+## Generated page objects (`traceqa codegen`)
+
+`tests/test_codegen.py` reads the Buggy Shop in Chromium, Firefox and WebKit (and Chromium at
+390x844), writes page objects in both languages and runs them against the live shop. Every
+property must find exactly as many elements as that browser's `components.json` recorded. The
+Python object runs with Playwright's sync API in the test itself. The TypeScript object runs
+with `@playwright/test` in `tests/codegen_ts` (`shop.spec.ts`, three projects), started by the
+test through `node node_modules/@playwright/test/cli.js test`.
+
+```sh
+uv run pytest tests/test_codegen.py
+```
+
+`tests/codegen_ts/package.json` pins `@playwright/test` to the exact version of Playwright in
+`uv.lock`, so both languages use the browsers `uv run playwright install chromium firefox webkit`
+put in the cache; a test fails when the two versions differ, so update them together (change the
+version in `package.json`, run `npm install --package-lock-only` there, and `uv lock`). The test
+runs `npm ci` in that folder when `node_modules` is missing; CI does it in its own step. Node 22.13
+or newer is needed (`module.stripTypeScriptTypes`, used by `record.mjs`, which loads a generated
+page object with a stand-in `page` to prove that hostile page text stays inside string literals).
+
+A failure here usually means the engine and Playwright disagree about a role or a name. Fix the
+engine (`crates/traceqa-engine/src/locator.rs`), not the test.

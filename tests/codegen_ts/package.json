@@ -1,0 +1,16 @@
+{
+  "name": "traceqa-codegen-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runs the page objects that `traceqa codegen --lang ts` writes against the demo shop. tests/test_codegen.py drives it.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

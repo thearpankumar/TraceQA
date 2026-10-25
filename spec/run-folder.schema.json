@@ -130,6 +130,7 @@
           "type": "string"
         },
         "crop": { "description": "Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.", "type": "string" },
+        "locator": { "description": "How to find the component again with a Playwright-style locator. Uniqueness is within this file (one page, one browser); `traceqa codegen` combines the files of every browser.", "$ref": "common.schema.json#/$defs/Locator" },
         "instances": { "type": "array", "items": { "$ref": "#/$defs/Instance" } }
       }
     },

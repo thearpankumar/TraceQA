@@ -6,6 +6,7 @@
 
 pub mod error;
 pub mod jsonrpc;
+pub mod locator;
 pub mod supervise;
 pub mod sync;
 

@@ -144,6 +144,19 @@ event. The run is `cancelled` if any target is, else `failed` if any failed. A
 run that is forced to quit (a second Ctrl-C) is still closed: `run.json` says
 `cancelled` with `finishedAt`, and `events.jsonl` ends with `run.finished`.
 
+## Locator
+
+`Locator` (in `common.schema.json`, used by `Component.locator`) describes how to find a
+component again with Playwright locators. It is computed per target, so its counts
+(`matches`, `own`) and `unique` only cover the elements of that one file; "unique across
+browsers" is decided by `traceqa codegen`, which reads the files of every target. It follows
+Playwright's matching: a name is `exact` (whitespace squashed, case kept) and hidden elements
+are not found unless `needsIncludeHidden`. It never contains an index (`nth`): a component
+that cannot be told apart is `unique: false`, or `forced` with a CSS selector. Every string
+in it is page text; code that turns it into source must escape it
+(`traceqa_protocol::locator::ts_string` / `py_string` do). The field is optional, so runs
+made before it exist stay valid; `traceqa codegen` asks for those to be extracted again.
+
 ## Rules for changing a contract
 
 1. **Adding an optional field is compatible.** No version change. Readers must
