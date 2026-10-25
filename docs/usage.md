@@ -2,7 +2,15 @@
 
 ## Setup
 
-With the `traceqa` binary (needs [uv](https://docs.astral.sh/uv/) for the drivers):
+Get the binary with the one-line installer, which checks the download's SHA-256 and adds `~/.local/bin` to
+PATH (options at the top of each script):
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/thearpankumar/TraceQA/master/scripts/install.sh | sh       # Linux, macOS
+irm https://raw.githubusercontent.com/thearpankumar/TraceQA/master/scripts/install.ps1 | iex            # Windows PowerShell
+```
+
+Then install the drivers and a browser (needs [uv](https://docs.astral.sh/uv/)):
 
 ```sh
 traceqa install chromium firefox webkit
