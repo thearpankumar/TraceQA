@@ -527,6 +527,7 @@ The Rust types regenerate on build.
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
 | [docs/releasing.md](docs/releasing.md) | Version numbers and how to publish a release. |
+| [docs/backlog.md](docs/backlog.md) | Designed but unbuilt work: the explorer, interaction oracles, open gaps and scope cuts. |
 | [SECURITY.md](SECURITY.md) | How to report a vulnerability privately. |
 | [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
 | [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
