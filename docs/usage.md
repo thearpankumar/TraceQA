@@ -265,7 +265,7 @@ Exit codes: `0` the comparison ran; `1` `--fail-on-different` matched; `2` input
 ## `traceqa verify`
 
 Checks a finished run against a manifest: what must exist, must not exist, and which warnings are allowed
-(example: `fixtures/buggy-shop/manifest.yaml`; schema: `spec/manifest.schema.json`). `traceqa baseline init` writes a
+(example: `testbed/sites/buggy-shop/manifest.yaml`; schema: `spec/manifest.schema.json`). `traceqa baseline init` writes a
 first one.
 
 ```sh
@@ -289,7 +289,7 @@ manifest keys are errors. `sarif` output is for SARIF viewers, not GitHub code s
 Exit codes: `0` every target passes; `1` a target fails; `2` the manifest or run cannot be used.
 
 ```text
-$ traceqa verify runs/r_20261013_210455_a1b2 --manifest fixtures/buggy-shop/manifest.yaml
+$ traceqa verify runs/r_20261013_210455_a1b2 --manifest testbed/sites/buggy-shop/manifest.yaml
 chromium-1280x800 (desktop): FAIL, 37 components checked, 1 failures
   FAIL missing at desktop: button 'Open the size guide' x1 (nearest: button 'Open size guide' c_4f1a...)
 ```
@@ -726,9 +726,9 @@ traceqa extract https://example.com --settle-ms 5000
 ## Demo site and bench
 
 ```sh
-uv run python fixtures/buggy-shop/serve.py     # http://127.0.0.1:4173/
+uv run python testbed/sites/buggy-shop/serve.py     # http://127.0.0.1:4173/
 uv run bench/run.py --browsers chromium --repeats 1 --json scores.json
 ```
 
-The bench extracts the demo shop and scores it against `fixtures/buggy-shop/manifest.yaml`: found, extra, wrong, id
+The bench extracts the demo shop and scores it against `testbed/sites/buggy-shop/manifest.yaml`: found, extra, wrong, id
 stability and time. It exits non-zero when a score falls short.

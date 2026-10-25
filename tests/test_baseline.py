@@ -1,7 +1,7 @@
 """`traceqa baseline`, `traceqa diff --against` and the `github` and `sarif` formats.
 
 Most tests build run folders by hand from spec/examples (no browser), so they are quick and every
-change is exact. Two tests run the real Buggy Shop: `baseline init` must list what fixtures/buggy-shop/
+change is exact. Two tests run the real Buggy Shop: `baseline init` must list what testbed/sites/buggy-shop/
 manifest.yaml lists, and a real run must pass `diff --against` against itself.
 """
 
@@ -21,7 +21,7 @@ from jsonschema import Draft4Validator
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "spec" / "examples"
-SHOP = ROOT / "fixtures" / "buggy-shop"
+SHOP = ROOT / "testbed" / "sites" / "buggy-shop"
 SARIF_SCHEMA = ROOT / "tests" / "data" / "sarif-schema-2.1.0.json"
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")

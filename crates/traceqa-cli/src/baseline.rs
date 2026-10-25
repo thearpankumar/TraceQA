@@ -4,7 +4,7 @@
 //! - `promote` replaces a baseline with a run, only with `--yes`. Without it the command shows what
 //!   would change and exits 2, so a CI job can never move the reference by accident.
 //! - `alias` records that a component was renamed, so a diff reports the pair as renamed.
-//! - `init` writes a manifest (the format of `fixtures/buggy-shop/manifest.yaml`) from a run.
+//! - `init` writes a manifest (the format of `testbed/sites/buggy-shop/manifest.yaml`) from a run.
 //!
 //! `extract` and `diff` never write a baseline.
 

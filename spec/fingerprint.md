@@ -37,8 +37,8 @@ path in the id, 48 of 1069 components got a different id between 1280x800 and
 keeps its full path.
 
 Measured before the rule was adopted (old and new engine, same pages, Chromium):
-the Buggy Shop (37 components), every page in `fixtures/patterns` and
-`fixtures/collector-cases`, and the responsive fixture all keep the same
+the Buggy Shop (37 components), every page in `testbed/sites/patterns` and
+`testbed/sites/collector-cases`, and the responsive fixture all keep the same
 component and instance counts. Wikipedia "Web browser": 1069 components became
 1068 (one merge, 0.1%) and the ids that differed between the two viewports fell
 from 48 to 0. MDN: 274 components both before and after, and the ids that
@@ -132,7 +132,7 @@ one, is not seen to change.
   `spec/fingerprint-vectors.json` holds the test vectors.
 
 A change that alters any id raises `fingerprintVersion` (`fingerprint::VERSION`)
-and regenerates `fixtures/buggy-shop/golden-ids.json`.
+and regenerates `testbed/sites/buggy-shop/golden-ids.json`.
 
 ## What is left out on purpose
 

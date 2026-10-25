@@ -33,7 +33,9 @@ COMPONENT_ID = re.compile(r"^c_[0-9a-f]{12}$")
 @pytest.fixture(scope="session")
 def shop_url() -> Iterator[str]:
     """The Buggy Shop, served on free ports for the whole test session."""
-    spec = importlib.util.spec_from_file_location("buggy_shop_serve", ROOT / "fixtures" / "buggy-shop" / "serve.py")
+    spec = importlib.util.spec_from_file_location(
+        "buggy_shop_serve", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py"
+    )
     shop = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(shop)
     port, servers = shop.start_on_free_ports()
@@ -44,8 +46,8 @@ def shop_url() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def trouble() -> Iterator[str]:
-    """fixtures/trouble/serve.py, a site that fails on purpose, on a free port for the whole session."""
-    spec = importlib.util.spec_from_file_location("trouble_serve", ROOT / "fixtures" / "trouble" / "serve.py")
+    """testbed/sites/trouble/serve.py, a site that fails on purpose, on a free port for the whole session."""
+    spec = importlib.util.spec_from_file_location("trouble_serve", ROOT / "testbed" / "sites" / "trouble" / "serve.py")
     site = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(site)
     server = site.start()

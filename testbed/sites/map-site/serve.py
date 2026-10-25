@@ -1,6 +1,6 @@
 """Serve the map fixture: a small site to crawl with `traceqa map`.
 
-    python fixtures/map-site/serve.py [--port 4177] [--robots none|disallow|error|empty]
+    python testbed/sites/map-site/serve.py [--port 4177] [--robots none|disallow|error|empty]
 
 Every page has the same header and footer (the shared chrome). The link graph, from the home page:
 

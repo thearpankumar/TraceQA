@@ -110,7 +110,7 @@ browser. `sdks/python/tests/test_transcripts.py` and
 `sdks/typescript/test/transcripts.test.ts` are worked examples.
 
 **2. The real engine.** Run an extraction against the Buggy Shop
-(`python fixtures/buggy-shop/serve.py --port 0` prints its address) and check
+(`python testbed/sites/buggy-shop/serve.py --port 0` prints its address) and check
 the result, as `sdks/python/tests/test_sdk.py` does. This proves the client
 works end to end.
 

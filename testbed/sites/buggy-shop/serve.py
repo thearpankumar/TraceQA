@@ -1,6 +1,6 @@
 """Serve the Buggy Shop.
 
-    python fixtures/buggy-shop/serve.py [--port 4173]
+    python testbed/sites/buggy-shop/serve.py [--port 4173]
 
 The shop is on PORT. The "third party" payment frame is on PORT + 1, which
 makes it a different origin. With --port 0 any free pair of ports is used; the

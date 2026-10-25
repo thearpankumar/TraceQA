@@ -1,6 +1,6 @@
 """What TraceQA does when a page, the network, a driver or the person running it gets in the way.
 
-Each case runs the real `traceqa extract` against fixtures/trouble/serve.py, a site that fails
+Each case runs the real `traceqa extract` against testbed/sites/trouble/serve.py, a site that fails
 on purpose in one way per address, and checks the result, the warnings, the exit code and
 that the run folder is still valid.
 """

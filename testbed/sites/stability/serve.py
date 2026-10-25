@@ -1,6 +1,6 @@
 """Serve the stability fixture: a page whose "Flaky" button exists on every other request.
 
-    python fixtures/stability/serve.py [--port 4176]
+    python testbed/sites/stability/serve.py [--port 4176]
 
 A server-side counter counts the requests for the page. The first request gets the page without
 the button, the second with it, and so on. "Steady" is on every response. So `traceqa extract

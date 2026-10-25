@@ -246,7 +246,7 @@ To try TraceQA without a site of your own, serve the bundled demo shop from the
 repository and extract it:
 
 ```sh
-uv run python fixtures/buggy-shop/serve.py
+uv run python testbed/sites/buggy-shop/serve.py
 traceqa extract http://127.0.0.1:4173/
 ```
 
@@ -433,10 +433,10 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `sdks/typescript/` | The TypeScript SDK. |
 | `python/traceqa-protocol/` | Python types generated from `spec/`, shared by the drivers and the SDK. |
 | `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
-| `fixtures/buggy-shop/` | Demo site with a manifest of its expected components. |
-| `fixtures/collector-cases/` | Small pages that test the collector one behaviour at a time. |
-| `fixtures/patterns/` | Pages built like real sites (menus, carousels, forms, grids, tables, dialogs) that test the whole engine. |
-| `fixtures/trouble/` | A site that fails on purpose, for the failure tests. |
+| `testbed/sites/buggy-shop/` | Demo site with a manifest of its expected components. |
+| `testbed/sites/collector-cases/` | Small pages that test the collector one behaviour at a time. |
+| `testbed/sites/patterns/` | Pages built like real sites (menus, carousels, forms, grids, tables, dialogs) that test the whole engine. |
+| `testbed/sites/trouble/` | A site that fails on purpose, for the failure tests. |
 | `bench/` | Scores extraction against the demo site. |
 | `tests/` | End-to-end tests of the MCP server and the installer. |
 | `scripts/` | Code generation and transcript recording. |

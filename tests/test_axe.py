@@ -83,7 +83,7 @@ def axe_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(scope="session")
 def site() -> Iterator[str]:
-    spec = importlib.util.spec_from_file_location("axe_serve", ROOT / "fixtures" / "axe" / "serve.py")
+    spec = importlib.util.spec_from_file_location("axe_serve", ROOT / "testbed" / "sites" / "axe" / "serve.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -1,6 +1,6 @@
 """Serve the visual fixture: one still page whose ?theme=b changes two components.
 
-    python fixtures/visual/serve.py [--port 4176]
+    python testbed/sites/visual/serve.py [--port 4176]
 
 With --port 0 any free port is used; the first line printed names the address either way.
 Used by tests/test_visual.py.

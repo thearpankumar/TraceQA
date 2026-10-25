@@ -1,6 +1,6 @@
 """The axe fixture: one page with a failure of each kind, used by tests/test_axe.py.
 
-    python fixtures/axe/serve.py [--port 0]
+    python testbed/sites/axe/serve.py [--port 0]
 
 | Address     | What it is |
 |-------------|------------|

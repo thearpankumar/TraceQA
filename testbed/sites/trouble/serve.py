@@ -1,6 +1,6 @@
 """A site that fails on purpose, one way per address. Used by tests/test_failures.py.
 
-    python fixtures/trouble/serve.py [--port 0]
+    python testbed/sites/trouble/serve.py [--port 0]
 
 | Address    | What it does |
 |------------|--------------|

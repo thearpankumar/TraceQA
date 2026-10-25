@@ -1,6 +1,6 @@
 """Serve the findings fixture: one page with a positive and a negative case for every rule.
 
-    python fixtures/findings/serve.py [--port 4175]
+    python testbed/sites/findings/serve.py [--port 4175]
 
 With --port 0 any free port is used; the first line printed names the address either way.
 Used by tests/test_findings.py.

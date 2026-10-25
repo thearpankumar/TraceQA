@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BINARY = Path(
     os.environ.get("TRACEQA_BIN") or ROOT / "target" / "debug" / ("traceqa.exe" if os.name == "nt" else "traceqa")
 )
-SHOP_MANIFEST = ROOT / "fixtures" / "buggy-shop" / "manifest.yaml"
+SHOP_MANIFEST = ROOT / "testbed" / "sites" / "buggy-shop" / "manifest.yaml"
 VIEWPORTS = "1280x800,390x844,768x1024,1920x1080"
 BROWSERS = "chromium,firefox,webkit"
 
@@ -144,7 +144,7 @@ def test_a_permanently_missing_script_is_reported(
 
 
 def test_fixture_servers_have_a_deep_backlog(shop_url: str, trouble: str) -> None:
-    shop = load_by_path("shop_backlog_check", ROOT / "fixtures" / "buggy-shop" / "serve.py")
+    shop = load_by_path("shop_backlog_check", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py")
     port, servers = shop.start_on_free_ports()
     try:
         assert [server.request_queue_size for server in servers] == [128, 128]
@@ -152,7 +152,7 @@ def test_fixture_servers_have_a_deep_backlog(shop_url: str, trouble: str) -> Non
         for server in servers:
             server.shutdown()
             server.server_close()
-    site = load_by_path("trouble_backlog_check", ROOT / "fixtures" / "trouble" / "serve.py")
+    site = load_by_path("trouble_backlog_check", ROOT / "testbed" / "sites" / "trouble" / "serve.py")
     server = site.start(0)
     try:
         assert server.request_queue_size == 128
@@ -169,7 +169,7 @@ def test_fixture_servers_start_without_a_reverse_dns_lookup(monkeypatch: pytest.
         raise AssertionError(f"socket.getfqdn({name!r}) was called")
 
     monkeypatch.setattr(socket, "getfqdn", no_lookup)
-    shop = load_by_path("shop_dns_check", ROOT / "fixtures" / "buggy-shop" / "serve.py")
+    shop = load_by_path("shop_dns_check", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py")
     port, servers = shop.start_on_free_ports()
     try:
         assert [(server.server_name, server.server_port) for server in servers] == [
@@ -180,7 +180,7 @@ def test_fixture_servers_start_without_a_reverse_dns_lookup(monkeypatch: pytest.
         for server in servers:
             server.shutdown()
             server.server_close()
-    site = load_by_path("trouble_dns_check", ROOT / "fixtures" / "trouble" / "serve.py")
+    site = load_by_path("trouble_dns_check", ROOT / "testbed" / "sites" / "trouble" / "serve.py")
     server = site.start(0)
     try:
         assert server.server_name == "127.0.0.1"

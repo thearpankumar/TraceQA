@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "manifest.schema.json",
   "title": "TraceQA manifest",
-  "description": "A manifest says which components a page should have. It is YAML on disk (see fixtures/buggy-shop/manifest.yaml) and this schema describes the parsed document. `traceqa baseline init` writes one from a run; `traceqa verify --manifest` and the benchmark compare a run with one, by role and name.",
+  "description": "A manifest says which components a page should have. It is YAML on disk (see testbed/sites/buggy-shop/manifest.yaml) and this schema describes the parsed document. `traceqa baseline init` writes one from a run; `traceqa verify --manifest` and the benchmark compare a run with one, by role and name.",
   "x-traceqa": { "contract": "manifest", "version": 1 },
   "$defs": {
     "ManifestFile": {

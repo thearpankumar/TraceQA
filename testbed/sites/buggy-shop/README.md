@@ -3,7 +3,7 @@
 A small shop page where the right answer is known. TraceQA is tested against it.
 
 ```
-python fixtures/buggy-shop/serve.py          # http://127.0.0.1:4173/
+python testbed/sites/buggy-shop/serve.py          # http://127.0.0.1:4173/
 ```
 
 The payment frame is served from the next port (4174), which makes it a
