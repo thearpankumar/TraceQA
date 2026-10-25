@@ -319,8 +319,44 @@ exits 130 as well. See the signal paragraphs under [Exit codes](#exit-codes).
 |---|---|
 | `extract` | Runs an extraction. Arguments: `url`, and optionally `browsers`, `viewports` (`WIDTHxHEIGHT`), `crops`, `settle_ms`, `max_scroll_steps`, `timeout_ms`, `include_hidden`, `storage_state` (the name of a state file in the operator's `--state-dir`; its contents are never shown). Answers with the run id and a summary per target. |
 | `list_runs` | The runs in the runs folder, newest first. It does not say where the folder is. |
-| `get_components` | The components of one run and target: a short line each, filtered by `role` or `name`, or one component in full with `component_id`. |
+| `describe_page` | Orient on a page: the components of one run and target grouped by landmark (`banner`, `navigation`, `main`, forms, dialogs, frames), a few hundred tokens for a whole page (the demo shop is under 4 KB). Repeated cards appear once with the name `*` and up to three `example_names`. Arguments: `run_id`, `target`, `max_per_group` (default 25), `response_format`. |
+| `find` | Search by `role`, `name`, `query` (a substring of the name, `href`, `placeholder` or `data-testid`; the page's visible text is not stored), `landmark` or `state` (`visible`, `hidden`, `enabled`, `disabled`, `covered`, `checked`, `unchecked`, `expanded`, `collapsed`, `required`) in every target of a run at once (at most 12 targets per call, or one with `target`). Each result has `found_in` (targets and instance counts) and `missing_in`, so one call answers whether a control is in every browser. Paged with `limit` and `offset`. |
+| `get_components` | The components of one run and target, one short row each, filtered by `role`, `name` or `landmark` and paged with `limit` and `offset`; or one component in full with `component_id`. |
 | `get_crop` | The picture of one component, for runs made with `crops`. |
+
+Which tool to call: `extract` to create a run, `describe_page` to orient,
+`find` to search across browsers, `get_components` to page through a target or
+fetch one id, `get_crop` to see a component.
+
+**Response formats.** `get_components`, `find` and `describe_page` take
+`response_format`. `concise` (the default) gives each component as `id`, `role`,
+`name` and `instances`, plus `hidden: true` or `template: true` when they apply.
+`detailed` adds `visible`, `path`, `selector`, `confidence` and `has_crop`, the
+fields `get_components` returned before concise became the default. A concise
+answer is under 40 % of the size of the detailed one for the same limit (3.0 KB
+against 7.8 KB for the 37 components of the demo shop). Answers are compact JSON.
+When a list is cut by `limit`, the answer says how to narrow it and carries
+`next_offset`: "Showing 100 of 240. Narrow with role (for example button), name
+(substring) or landmark, or continue with offset=100."
+
+**Structured content and resources.** With MCP 2025-06-18 or later (the version
+the host negotiates in `initialize`), every tool declares an `outputSchema` and
+answers with the same JSON as `structuredContent`, cleaned like the text; the
+text blocks are unchanged, with the notice first and the JSON last. Older hosts
+get neither, and no `resource_link` blocks. `extract` and `get_crop` add
+`resource_link` blocks that point at resources, and `get_crop` still returns the
+picture itself. The server offers resources (read-only, no subscriptions and no
+list-changed notices, `audience: ["assistant"]`):
+
+| URI | Content |
+|---|---|
+| `traceqa://runs/{run_id}` | The run's manifest as JSON. `resources/list` shows the newest 50 runs. |
+| `traceqa://runs/{run_id}/{target}/components` | The target's components file as JSON, cleaned, flagged and capped like a tool answer. |
+| `traceqa://runs/{run_id}/{target}/crops/{component_id}` | The component's picture as a base64 `blob` (`image/png`), up to 2 MiB. |
+
+Every segment must be a plain name, files are read only when they sit inside the
+runs folder (never through a link), and a run, target or picture that does not
+exist is answered with the JSON-RPC error `-32002`.
 
 A mistake in the arguments is answered as a tool error that says what was
 wrong, so the AI can correct itself. Progress is reported while an extraction
@@ -370,7 +406,7 @@ with an error (code `-32600`, id `null`); the server then reads the next line.
 At most `--max-concurrent-extracts` extractions run at once (default 2). A call
 beyond that is answered at once, without starting a browser, with a tool error:
 `busy: N extractions are already running. Wait for one to finish, then try
-again.` The reading tools (`list_runs`, `get_components`, `get_crop`) have a
+again.` The reading tools (`list_runs`, `get_components`, `describe_page`, `find`, `get_crop`) have a
 separate limit of 16 calls at once, so reading earlier results is never held up
 by a long extraction. A slot is free again before the answer to the call that
 used it is sent. Cancelling a call works at any time.
@@ -408,13 +444,13 @@ off-screen elements, where injected text hides, are left out unless
 Answers are kept small: `limit` is at most 500 (the answer says
 `limit_applied`), one component lookup shows at most 50 instances
 (`instances_total`, `instances_shown`), no answer is longer than 100 KB (when
-cut it says `truncated: true` with a note), `get_crop` refuses pictures over
+cut it says `truncated: true` with a note that names how to narrow it), `get_crop` refuses pictures over
 2 MiB (and only pictures that really sit inside the runs folder, never
 through a link), and error texts are cut to 500 characters. No answer, error or
 progress message shows a local path: the runs folder is never named, and other
 absolute paths in engine errors are replaced by `<path>`. The tools carry MCP
 annotations: `extract` opens pages (open world, not read-only); the other
-three are read-only.
+five are read-only.
 
 ## `traceqa install`
 

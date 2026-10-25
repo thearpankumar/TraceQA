@@ -260,7 +260,9 @@ tools itself:
 |---|---|
 | `extract` | Run an extraction and return a summary per browser and screen size. |
 | `list_runs` | List earlier runs. |
-| `get_components` | Read the components of a run, filtered by role or name, or one component in full. |
+| `describe_page` | Outline a page by landmark, in a few hundred tokens. |
+| `find` | Search by role, name, text or state in every browser of a run, and see where a control is missing. |
+| `get_components` | Page through the components of a run, filtered by role, name or landmark, or read one component in full. |
 | `get_crop` | Return the picture of a component, so the AI can see it. |
 
 ## Architecture

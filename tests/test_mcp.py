@@ -65,7 +65,7 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
         async with server(tmp_path / "runs") as client:
             assert client.server_info.name == "traceqa"
             tools = [tool.name for tool in (await client.list_tools()).tools]
-            assert tools == ["extract", "list_runs", "get_components", "get_crop"]
+            assert tools == ["extract", "list_runs", "get_components", "describe_page", "find", "get_crop"]
 
             arguments = {"url": shop_url, "viewports": ["1280x800", "390x844"], "crops": True, "include_hidden": True}
             summary = data(await client.call_tool("extract", arguments, progress_callback=on_progress))
@@ -77,7 +77,13 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
             run_id = summary["run_id"]
             found = data(
                 await client.call_tool(
-                    "get_components", {"run_id": run_id, "target": "chromium-1280x800", "name": "add to cart"}
+                    "get_components",
+                    {
+                        "run_id": run_id,
+                        "target": "chromium-1280x800",
+                        "name": "add to cart",
+                        "response_format": "detailed",
+                    },
                 )
             )
             (add_to_cart,) = found["components"]
@@ -103,6 +109,84 @@ def test_an_ai_host_extracts_reads_and_looks(shop_url: str, tmp_path: Path, run_
     anyio.run(conversation)
     (folder,) = (tmp_path / "runs").iterdir()
     run_folder_checker(folder)
+
+
+def structured(result) -> dict:
+    """The structured answer, which the client has already checked against the tool's output schema."""
+    assert not result.is_error, result.content[0].text
+    assert result.structured_content == data(result), "the JSON text and the structured content agree"
+    return result.structured_content
+
+
+def test_an_agent_orients_searches_and_reads_resources(shop_url: str, tmp_path: Path) -> None:
+    async def conversation() -> None:
+        async with server(tmp_path / "runs") as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            assert list(tools) == ["extract", "list_runs", "get_components", "describe_page", "find", "get_crop"]
+            for name, tool in tools.items():
+                assert tool.output_schema and tool.output_schema["type"] == "object", name
+                assert tool.annotations is not None
+                assert tool.annotations.read_only_hint is (name != "extract"), name
+                assert tool.annotations.open_world_hint is (name == "extract"), name
+
+            # 1. Create: two browsers, with pictures.
+            arguments = {"url": shop_url, "browsers": ["chromium", "firefox"], "crops": True, "include_hidden": True}
+            created = await client.call_tool("extract", arguments)
+            summary = structured(created)
+            assert summary["status"] == "completed", summary
+            run_id = summary["run_id"]
+            links = [block for block in created.content if block.type == "resource_link"]
+            assert str(links[0].uri) == f"traceqa://runs/{run_id}"
+            assert created.content[-1].type == "text", "the JSON stays the last block"
+
+            # 2. Orient: the layout in under 4 KB.
+            outline = await client.call_tool("describe_page", {"run_id": run_id, "target": "chromium-1280x800"})
+            layout = structured(outline)
+            size = len(outline.content[-1].text.encode())
+            print(f"describe_page: {size} bytes for {layout['total']} components in {len(layout['groups'])} groups")
+            assert size < 4096
+            assert layout["total"] == 37
+
+            # 3. Search across browsers: one call says where the control is.
+            found = structured(await client.call_tool("find", {"run_id": run_id, "query": "cart"}))
+            assert found["results"], found
+            assert sorted(found["targets_searched"]) == ["chromium-1280x800", "firefox-1280x800"]
+            for row in found["results"]:
+                assert {f["target"] for f in row["found_in"]} | set(row["missing_in"]) == set(found["targets_searched"])
+            add_to_cart = next(row for row in found["results"] if row["name"].lower() == "add to cart")
+            assert add_to_cart["missing_in"] == []
+
+            # 4. Fetch one component, then look at it, as a tool and as a resource.
+            one = structured(
+                await client.call_tool(
+                    "get_components",
+                    {"run_id": run_id, "target": "chromium-1280x800", "component_id": add_to_cart["id"]},
+                )
+            )
+            assert one["id"] == add_to_cart["id"] and one["instances"]
+            base = f"traceqa://runs/{run_id}/chromium-1280x800"
+            components = await client.read_resource(f"{base}/components")
+            body = json.loads(components.contents[0].text)
+            assert components.contents[0].mime_type == "application/json"
+            assert body["untrusted_page_content"] is True and len(body["components"]) == 37
+            crop = await client.read_resource(f"{base}/crops/{add_to_cart['id']}")
+            assert crop.contents[0].mime_type == "image/png"
+            assert base64.b64decode(crop.contents[0].blob).startswith(b"\x89PNG")
+
+            listed = await client.list_resources()
+            assert [str(resource.uri) for resource in listed.resources] == [f"traceqa://runs/{run_id}"]
+            templates = await client.list_resource_templates()
+            assert len(templates.resource_templates) == 3
+
+            # 5. Concise answers are a fraction of detailed ones for the same limit.
+            ask = {"run_id": run_id, "target": "chromium-1280x800", "limit": 37}
+            concise = await client.call_tool("get_components", ask)
+            detailed = await client.call_tool("get_components", {**ask, "response_format": "detailed"})
+            small, large = len(concise.content[-1].text.encode()), len(detailed.content[-1].text.encode())
+            print(f"get_components, 37 rows: concise {small} bytes, detailed {large} bytes ({small / large:.0%})")
+            assert small <= 0.4 * large
+
+    anyio.run(conversation)
 
 
 def test_hidden_elements_are_left_out_unless_asked_for(shop_url: str, tmp_path: Path) -> None:

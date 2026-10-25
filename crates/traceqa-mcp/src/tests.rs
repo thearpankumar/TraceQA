@@ -188,7 +188,7 @@ fn says_hello_in_the_hosts_version_when_it_knows_it() {
 }
 
 #[test]
-fn lists_four_tools_each_with_a_schema() {
+fn lists_six_tools_each_with_a_schema() {
     let mut host = Host::start(runs_folder("list"));
     let tools = host.request("tools/list", json!({}))["result"]["tools"].clone();
     let names: Vec<&str> = tools
@@ -197,7 +197,17 @@ fn lists_four_tools_each_with_a_schema() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["extract", "list_runs", "get_components", "get_crop"]);
+    assert_eq!(
+        names,
+        [
+            "extract",
+            "list_runs",
+            "get_components",
+            "describe_page",
+            "find",
+            "get_crop"
+        ]
+    );
     for tool in tools.as_array().unwrap() {
         assert_eq!(tool["inputSchema"]["type"], "object", "{}", tool["name"]);
         assert!(tool["description"].as_str().unwrap().len() > 40);
@@ -208,7 +218,7 @@ fn lists_four_tools_each_with_a_schema() {
 #[test]
 fn refuses_unknown_methods_and_tools_as_protocol_errors() {
     let mut host = Host::start(runs_folder("unknown"));
-    assert_eq!(host.request("resources/list", json!({}))["error"]["code"], -32601);
+    assert_eq!(host.request("prompts/list", json!({}))["error"]["code"], -32601);
     assert_eq!(
         host.request("tools/call", json!({ "name": "explode" }))["error"]["code"],
         -32602
@@ -231,7 +241,13 @@ fn reads_a_run_back() {
     let summary = text_of(&summary);
     assert_eq!(summary["components"][0]["id"], COMPONENT);
     assert_eq!(summary["components"][0]["instances"], 2);
-    assert_eq!(summary["components"][0]["has_crop"], true);
+    // The default answer is concise: no crop flag, path or selector.
+    assert!(summary["components"][0].get("has_crop").is_none());
+    let detailed = text_of(&host.call(
+        "get_components",
+        json!({ "run_id": RUN_ID, "response_format": "detailed" }),
+    ));
+    assert_eq!(detailed["components"][0]["has_crop"], true);
 
     let filtered = text_of(&host.call("get_components", json!({ "run_id": RUN_ID, "role": "link" })));
     assert_eq!(
@@ -424,7 +440,10 @@ fn page_strings_in_nested_json_are_cleaned() {
         component["instances"][0]["attrs"] = json!({ "data-x\u{E0041}": "v\u{0007}" });
     });
     let mut host = Host::start(runs.clone());
-    let list = text_of(&host.call("get_components", json!({ "run_id": RUN_ID })));
+    let list = text_of(&host.call(
+        "get_components",
+        json!({ "run_id": RUN_ID, "response_format": "detailed" }),
+    ));
     assert_eq!(list["title"], "Shop");
     assert_eq!(list["warnings"][0]["message"], "warning");
     assert_eq!(list["components"][0]["name"], "Buy now");
@@ -1042,7 +1061,7 @@ fn remote_targets_are_allowed_with_the_flag() {
 #[test]
 fn tools_list_hides_remote_browser_wording_unless_allowed() {
     let wording = |config: &Config| {
-        let tools = crate::tools::list(config);
+        let tools = crate::tools::list(config, false);
         tools[0]["inputSchema"]["properties"]["browsers"]["description"]
             .as_str()
             .unwrap()
@@ -1308,3 +1327,5 @@ fn png_content_is_standard_base64_with_padding() {
     host.stop();
     fs::remove_dir_all(runs).unwrap();
 }
+
+mod f3;
