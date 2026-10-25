@@ -190,7 +190,7 @@ def test_fixture_servers_start_without_a_reverse_dns_lookup(monkeypatch: pytest.
 
 
 def test_bench_frame_prefix_respects_step_name_escaping() -> None:
-    bench = load_by_path("bench_run", ROOT / "bench" / "run.py")
+    bench = load_by_path("bench_run", ROOT / "testbed" / "bench" / "run.py")
     assert bench.frame_prefix('frame "pay" > form "card"') == 'frame "pay"'
     # A frame called a" > main "b: the quotes are escaped, so the " > " inside is not a step boundary.
     escaped = r'frame "a\" > main \"b"'

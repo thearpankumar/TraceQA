@@ -727,7 +727,7 @@ traceqa extract https://example.com --settle-ms 5000
 
 ```sh
 uv run python testbed/sites/buggy-shop/serve.py     # http://127.0.0.1:4173/
-uv run bench/run.py --browsers chromium --repeats 1 --json scores.json
+uv run testbed/bench/run.py --browsers chromium --repeats 1 --json scores.json
 ```
 
 The bench extracts the demo shop and scores it against `testbed/sites/buggy-shop/manifest.yaml`: found, extra, wrong, id

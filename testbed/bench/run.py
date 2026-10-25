@@ -1,6 +1,6 @@
 """Score `traceqa extract` against the Buggy Shop.
 
-    uv run bench/run.py [--browsers chromium,firefox,webkit] [--repeats 3] [--json scores.json]
+    uv run testbed/bench/run.py [--browsers chromium,firefox,webkit] [--repeats 3] [--json scores.json]
 
 Starts the shop, runs extraction in every browser at every viewport in
 testbed/sites/buggy-shop/manifest.yaml, and compares what was found with what the
@@ -33,7 +33,7 @@ from typing import Any
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 SHOP = ROOT / "testbed" / "sites" / "buggy-shop"
 
 
