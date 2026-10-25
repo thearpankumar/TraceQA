@@ -91,7 +91,7 @@ function serve(script: string): Promise<Shop> {
 }
 
 /** What a fake engine does. `run` keeps a run going until it is cancelled; `hang` also ignores the end of its input. */
-export type FakeMode = "good" | "garbage" | "closed" | "badhello" | "refused" | "badevent" | "run" | "hang" | "needsshutdown" | "oldengine";
+export type FakeMode = "noisy" | "loud" | "chatty" | "good" | "garbage" | "closed" | "badhello" | "refused" | "badevent" | "run" | "hang" | "needsshutdown" | "oldengine";
 
 // A stand-in engine for the error tests: a node script that answers with canned lines.
 const FAKE_ENGINE = `
@@ -113,7 +113,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (request.method === "engine.hello") {
     if (mode === "garbage") return process.stdout.write("this is not json " + "x".repeat(500) + "\\n");
-    if (mode === "closed") return process.exit(3);
+    if (mode === "closed") { process.stderr.write("boom: no driver\\n"); return process.exit(3); }
+    if (mode === "chatty") { for (let i = 1; i <= 100; i++) process.stderr.write("line " + i + "\\n"); return process.exit(4); }
+    if (mode === "noisy") for (const text of ["one", "two", "three"]) process.stderr.write(text + "\\n");
+    if (mode === "loud") process.stderr.write("x".repeat(200 * 1024) + "\\n");
     if (mode === "badhello") return reply({ nothing: "useful" });
     return reply({ engineVersion: "0.1.0", protocolVersion: 1, features: ["extract"] });
   }
@@ -134,11 +137,12 @@ process.stdin.on("end", () => { if (mode !== "hang") process.exit(mode === "need
 if (mode === "hang") setInterval(() => {}, 1000);
 `;
 
-export type FakeEngine = ChildProcessByStdio<Writable, Readable, null>;
+export type FakeEngine = ChildProcessByStdio<Writable, Readable, Readable>;
 
 /** Starts the fake engine. The caller attaches an Engine to it; the child is killed when the process exits. */
 export function fakeEngine(mode: FakeMode): FakeEngine {
-  const child = spawn(process.execPath, ["-e", FAKE_ENGINE, mode], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+  process.setMaxListeners(50); // every fake engine adds an exit listener that kills it
+  const child = spawn(process.execPath, ["-e", FAKE_ENGINE, mode], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   process.on("exit", () => child.kill());
   return child;
 }

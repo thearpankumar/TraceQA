@@ -611,7 +611,7 @@ kills it.
 
 Errors are the Python ones, with the same names and camel-case fields:
 `TraceQAError` (a caller's mistake, and the base of the others),
-`EngineStartError`, `EngineExitedError` (`exitCode`), `EngineRefusedError`
+`EngineStartError`, `EngineExitedError` (`exitCode`, `stderrTail`), `EngineRefusedError`
 (`kind`, `code`) and `EngineProtocolError`. The original error is in `cause`.
 A protocol error fails the whole connection, because the stream can no longer be
 trusted. `components()` checks the file it reads and rejects with
@@ -627,7 +627,15 @@ The options are the Python ones in camel case: `browsers`, `viewports`
 | `onEvent` | As in Python. If it throws, the run is cancelled and `extract` rejects with that error. |
 
 `extract` and `Engine.start` also accept `binary` and `drivers`, found the same
-way as in Python. The result has `status`, `targets`, `manifest`, `runFolder`
+way as in Python.
+
+The SDK writes nothing to your standard error by default. The engine's and the
+drivers' log lines (`[driver info] opened chromium 128.0`) are read and dropped,
+so the engine never blocks on a full pipe. Pass `onLog: (line) => console.error(line)`
+to receive each line, already redacted by the engine; a handler that throws is
+ignored from then on. When the engine dies, `EngineExitedError.message` ends with
+its last stderr lines, and `stderrTail` holds them (at most 20 lines and 4000
+characters). The result has `status`, `targets`, `manifest`, `runFolder`
 and `components(targetDir)`, which returns a promise. The spec types are
 exported, the common ones by name and every one under `protocol`.
 

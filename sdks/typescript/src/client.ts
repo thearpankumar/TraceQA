@@ -49,6 +49,13 @@ export interface EngineOptions {
   binary?: string;
   /** Driver commands, passed to `traceqa serve --driver`. Default: the engine's own list. */
   drivers?: readonly string[];
+  /**
+   * Called with each line the engine and its drivers write to their standard error (progress and
+   * `[driver info] ...` lines, already redacted by the engine). Default: dropped, so a library
+   * never writes to the caller's stderr. To see them: `onLog: (line) => console.error(line)`.
+   * A handler that throws is ignored from then on; the engine is never held up by it.
+   */
+  onLog?: (line: string) => void;
 }
 
 export interface ExtractOptions {
@@ -180,8 +187,13 @@ interface RunListener {
   lost(error: Error): void;
 }
 
-/** The engine's stderr is left on ours: it holds human-readable logs only. */
-type EngineProcess = ChildProcessByStdio<Writable, Readable, null>;
+/** The engine's stderr is read here, never inherited: it holds human-readable logs only. */
+type EngineProcess = ChildProcessByStdio<Writable, Readable, Readable>;
+
+/** How much of the engine's stderr an exit error carries: the last lines, each cut short. */
+const TAIL_LINES = 20;
+const TAIL_LINE_CHARS = 500;
+const TAIL_CHARS = 4000;
 
 /** The pipe to one engine process: requests out, answers and run notifications in. @internal */
 export class Connection {
@@ -190,19 +202,49 @@ export class Connection {
   private readonly runs = new Map<string, RunListener>();
   private gone: Error | undefined;
   private readonly exited: Promise<void>;
+  private readonly tail: string[] = [];
 
-  constructor(private readonly process: EngineProcess) {
+  constructor(
+    private readonly process: EngineProcess,
+    onLog?: (line: string) => void,
+  ) {
     // The engine may already have gone when we write. That is reported through `gone` instead.
     process.stdin.on("error", () => {});
     createInterface({ input: process.stdout, crlfDelay: Infinity }).on("line", (line) => this.receive(line));
+    // The pipe is always read: an engine that writes more than the pipe holds would otherwise block.
+    process.stderr.on("error", () => {});
+    let log = onLog;
+    createInterface({ input: process.stderr, crlfDelay: Infinity }).on("line", (line) => {
+      this.remember(line);
+      if (!log) return;
+      try {
+        log(line);
+      } catch {
+        log = undefined; // a broken handler must not stop the draining
+      }
+    });
     this.exited = new Promise((done) => {
       process.on("close", (code) => {
         const exitCode = code ?? undefined;
         const suffix = exitCode === undefined ? "" : ` with code ${exitCode}`;
-        this.lose(new EngineExitedError(`the engine exited unexpectedly${suffix}`, exitCode));
+        const tail = this.stderrTail();
+        const why = tail === undefined ? "" : `\nengine stderr (last lines):\n  ${tail.split("\n").join("\n  ")}`;
+        this.lose(new EngineExitedError(`the engine exited unexpectedly${suffix}${why}`, exitCode, { stderrTail: tail }));
         done();
       });
     });
+  }
+
+  /** Keeps the last few lines of the engine's stderr for the error of an engine that dies. */
+  private remember(line: string): void {
+    this.tail.push(line.length > TAIL_LINE_CHARS ? `${line.slice(0, TAIL_LINE_CHARS)}...` : line);
+    if (this.tail.length > TAIL_LINES) this.tail.shift();
+  }
+
+  private stderrTail(): string | undefined {
+    let text = this.tail.join("\n");
+    if (text.length > TAIL_CHARS) text = text.slice(text.length - TAIL_CHARS);
+    return text === "" ? undefined : text;
   }
 
   /** Fails everything still waiting. The first reason wins. */
@@ -336,7 +378,7 @@ function startProcess(binary: string | undefined, drivers: readonly string[]): P
   const command = binary ?? process.env[BINARY_ENV] ?? "traceqa";
   const args = ["serve", ...drivers.flatMap((driver) => ["--driver", driver])];
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     child.once("spawn", () => resolve(child));
     child.once("error", (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT" && binary === undefined && !process.env[BINARY_ENV]) {
@@ -365,12 +407,12 @@ export class Engine {
   ) {}
 
   static async start(options: EngineOptions = {}): Promise<Engine> {
-    return Engine.attach(await startProcess(options.binary, options.drivers ?? []));
+    return Engine.attach(await startProcess(options.binary, options.drivers ?? []), options);
   }
 
   /** Talks to an engine process that is already running. For tests with a stand-in. @internal */
-  static async attach(process: EngineProcess): Promise<Engine> {
-    const connection = new Connection(process);
+  static async attach(process: EngineProcess, options: Pick<EngineOptions, "onLog"> = {}): Promise<Engine> {
+    const connection = new Connection(process, options.onLog);
     const hello: EngineHelloParams = { protocolVersion: CLIENT_PROTOCOL_VERSION, clientName: "traceqa-typescript" };
     try {
       const info = parseHelloResult(await connection.call<unknown>("engine.hello", hello));

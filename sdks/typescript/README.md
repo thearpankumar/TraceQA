@@ -24,6 +24,19 @@ for (const target of result.targets) {
 
 All options are in [docs/usage.md](../../docs/usage.md#typescript-sdk).
 
+## Logs
+
+The engine and its drivers log to their standard error (`[driver info] opened
+chromium ...`). The SDK reads that and drops it, so a library never writes to
+your stderr. Pass `onLog` to `extract` or `Engine.start` to see the lines:
+
+```ts
+await extract(url, { onLog: (line) => console.error(line) });
+```
+
+If the engine dies, `EngineExitedError.message` ends with its last stderr lines,
+also available as `error.stderrTail`.
+
 Errors are `TraceQAError` and its subclasses `EngineStartError`,
 `EngineExitedError`, `EngineRefusedError` and `EngineProtocolError`; the original
 error is kept in `cause`. `engine.close({ timeoutMs })` kills an engine that does
