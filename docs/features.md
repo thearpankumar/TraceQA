@@ -76,7 +76,7 @@ What you can do with TraceQA, one line each. How to use each one is in [usage.md
 ## 7. Tests from a run
 
 - **`traceqa codegen`**: writes a Playwright page object (TypeScript or Python) with one property per component.
-- **`traceqa heal`**: compares a run with a baseline and proposes locator fixes and renames; nothing is applied without `--accept`.
+- **`traceqa heal`**: compares a run with a baseline, patches moved locators in generated page objects, and applies a rename only with `--accept`.
 - **`traceqa visual`**: compares component pictures of two runs, in the same browser and size, to catch style changes.
 - **`traceqa verify`**: checks a run against a manifest of what must and must not be on the page.
 
