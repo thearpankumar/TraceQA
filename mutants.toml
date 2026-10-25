@@ -1,6 +1,0 @@
-# cargo-mutants configuration. Pass it with --config mutants.toml; see docs/testing.md.
-examine_globs = [
-  "crates/traceqa-engine/src/fingerprint.rs",
-  "crates/traceqa-engine/src/group.rs",
-]
-timeout_multiplier = 3

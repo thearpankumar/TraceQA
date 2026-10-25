@@ -13,17 +13,21 @@ Install once with `cargo install cargo-mutants`, then run it alone on an idle ma
 (a busy machine makes tests slow and turns real catches into timeouts):
 
 ```sh
-CARGO_BUILD_JOBS=2 cargo mutants -p traceqa-engine --config mutants.toml -j 2 -- --lib
+CARGO_BUILD_JOBS=2 cargo mutants -p traceqa-engine -j 2 -- --lib
 ```
 
-`mutants.toml` at the repository root limits the run to the two files and sets
-`timeout_multiplier = 3`. cargo-mutants only reads `.cargo/mutants.toml` on its own, so pass
-`--config mutants.toml` as shown. The run takes about 5 minutes on 8 cores and writes its
+`.cargo/mutants.toml` is read automatically. It limits the run to the two files and sets
+the time each mutant's tests may take: 5 times the baseline, never less than 120 seconds
+(`minimum_test_timeout`). The baseline is the whole `traceqa-engine --lib` test run, including
+the tests that start processes, and a loaded machine can be several times slower than an idle
+one; with cargo-mutants' default floor of 20 seconds that produced spurious timeouts. A real
+hang (a mutant that loops forever) is still caught, after 120 seconds, and shows as exit code 3
+and a line in `timeout.txt`. The run takes about 5 minutes on 8 cores and writes its
 report to `mutants.out/` (ignored by git; open `missed.txt` first).
 
 Expected result: 73 mutants, 69 caught, 4 unviable (they do not compile), 0 missed. Before
 the tests added with this file the score was 63 caught, 6 missed, 4 unviable. There are no
-equivalent mutants to exclude; if one appears, add a line to `exclude_re` in `mutants.toml`
+equivalent mutants to exclude; if one appears, add a line to `exclude_re` in `.cargo/mutants.toml`
 with a comment saying why no test can tell it apart.
 
 Exit codes ([reference](https://mutants.rs/exit-codes.html)):
