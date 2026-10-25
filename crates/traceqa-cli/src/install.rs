@@ -174,7 +174,7 @@ fn step(dry_run: bool, what: &str, program: &Path, args: &[String]) -> Result<()
     }
 }
 
-pub fn install(args: &InstallArgs) -> ExitCode {
+pub fn run(args: &InstallArgs) -> ExitCode {
     match try_install(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {

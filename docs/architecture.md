@@ -64,6 +64,8 @@ flowchart TB
 | SDKs | Any | Start the engine and exchange messages with it. They contain no logic. |
 | Contracts | JSON Schema | Define every message and file format. |
 
+The CLI keeps one module per subcommand in `crates/traceqa-cli/src/` (`extract.rs`, `serve.rs`, `mcp.rs`, `install.rs`, `doctor.rs`, `login.rs`). Each holds its own arguments struct and a `run` function that returns the exit code; options shared by several commands (`--driver`) are in `args.rs`, and `main.rs` only lists the commands and dispatches. To add a subcommand, create its file, then add one `mod` line, one `Command` variant and one `match` arm to `main.rs`. A command that starts a run calls `extract::execute_request`, so signal handling is set up once. A command that works on a finished run finds it with `traceqa_recorder::open_run`, which accepts a run folder, a target folder, a `components.json` path or a bare run id; it caps reads at 64 MiB and does not follow symbolic links.
+
 ## How programs communicate
 
 Programs in different languages cannot call each other's functions. They

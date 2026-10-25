@@ -13,9 +13,11 @@ use traceqa_protocol::types::{ComponentsFile, Event, Rect, RunManifest};
 
 mod clock;
 mod crops;
+mod read;
 
 pub use clock::{new_run_id, now_rfc3339};
 pub use crops::{save_crops, PageImage};
+pub use read::{open_run, read_components, ReadError, RunFolder, TargetRef, MAX_FILE_BYTES};
 
 /// Owns one run folder.
 pub struct RunWriter {

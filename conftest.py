@@ -53,15 +53,27 @@ def trouble() -> Iterator[str]:
     site.stop(server)
 
 
+def _all_validators() -> dict[str, Draft202012Validator]:
+    """One validator per type defined in any spec/*.schema.json, resolving references across the files.
+
+    A type name must be unique across the files, so a bare name is enough to ask for one.
+    """
+    schemas = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in sorted(SPEC.glob("*.schema.json"))}
+    registry = Registry().with_resources((name, Resource.from_contents(schema)) for name, schema in schemas.items())
+    validators: dict[str, Draft202012Validator] = {}
+    for file_name, schema in schemas.items():
+        for name in schema.get("$defs", {}):
+            if name in validators:
+                raise RuntimeError(f"spec type {name} is defined in more than one schema file")
+            validators[name] = Draft202012Validator({"$ref": f"{file_name}#/$defs/{name}"}, registry=registry)
+    return validators
+
+
 def _validators() -> dict[str, Draft202012Validator]:
     """One validator per type in run-folder.schema.json, resolving references into the other files."""
-    schemas = {path.name: json.loads(path.read_text(encoding="utf-8")) for path in SPEC.glob("*.schema.json")}
-    registry = Registry().with_resources((name, Resource.from_contents(schema)) for name, schema in schemas.items())
-    run_folder = schemas["run-folder.schema.json"]
-    return {
-        name: Draft202012Validator({"$ref": f"run-folder.schema.json#/$defs/{name}"}, registry=registry)
-        for name in run_folder["$defs"]
-    }
+    run_folder = json.loads((SPEC / "run-folder.schema.json").read_text(encoding="utf-8"))
+    everything = _all_validators()
+    return {name: everything[name] for name in run_folder["$defs"]}
 
 
 class RunFolderError(AssertionError):
@@ -169,6 +181,22 @@ def _check_target(
         raise RunFolderError(
             f"run.json says {reported} components and instances for {target.dir}, the file has {counted}"
         )
+
+
+@pytest.fixture(scope="session")
+def spec_validator() -> Callable[[str], Draft202012Validator]:
+    """`spec_validator("ComponentsFile")`: the validator for any type in spec/*.schema.json.
+
+    New test files use this instead of editing conftest.py.
+    """
+    validators = _all_validators()
+
+    def get(type_name: str) -> Draft202012Validator:
+        if type_name not in validators:
+            raise KeyError(f"no spec type {type_name}; known: {sorted(validators)}")
+        return validators[type_name]
+
+    return get
 
 
 @pytest.fixture(scope="session")
