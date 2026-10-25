@@ -52,11 +52,22 @@ def test_the_version_is_the_packages_version() -> None:
     assert (result.returncode, result.stdout.strip()) == (0, f"traceqa {expected}")
 
 
-@pytest.mark.parametrize("command", ["extract", "serve", "mcp", "install", "doctor"])
-def test_every_command_has_help(command: str) -> None:
-    result = traceqa(command, "--help")
-    assert result.returncode == 0
-    assert "Usage: traceqa" in result.stdout
+def listed_commands() -> list[str]:
+    """The command names in the Commands section of `traceqa --help`."""
+    out = subprocess.run([str(BINARY), "--help"], check=True, capture_output=True, text=True, encoding="utf-8")
+    section = out.stdout.split("Commands:\n", 1)[1].split("\n\n", 1)[0]
+    # A command line is indented two spaces; its wrapped description is indented further.
+    names = [m.group(1) for line in section.splitlines() if (m := re.match(r"^  (\S+)", line))]
+    return [name for name in names if name != "help"]
+
+
+def test_help_lists_every_command_with_a_help_page() -> None:
+    commands = listed_commands()
+    assert {"extract", "serve", "mcp", "install", "doctor", "login"} <= set(commands)
+    for command in commands:
+        result = traceqa(command, "--help")
+        assert result.returncode == 0, command
+        assert "Usage: traceqa" in result.stdout, command
 
 
 @pytest.mark.parametrize(

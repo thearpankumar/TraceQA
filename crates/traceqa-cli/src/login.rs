@@ -64,7 +64,7 @@ impl From<String> for LoginError {
     }
 }
 
-pub fn login(args: &LoginArgs) -> ExitCode {
+pub fn run(args: &LoginArgs) -> ExitCode {
     match try_login(args) {
         Ok(message) => {
             eprintln!("{message}");
