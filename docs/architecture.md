@@ -56,11 +56,11 @@ flowchart TB
 | CLI | Rust | Turns arguments into a request and prints the result. Compiled into the same binary as the engine. Also sets up the drivers (`install`, `doctor`). |
 | MCP server | Rust | Offers the engine to AI tools as MCP tools. Compiled into the same binary. |
 | Drivers | Python | Control browsers. Each does what it is asked and reports what happened. |
-| Collector | JavaScript | Runs inside the page and reports facts about its interactive elements. |
+| Page script | JavaScript | Runs inside the page and reports facts about its interactive elements. |
 | Clients | Any | Start the engine (`traceqa serve`) and exchange messages with it. They contain no logic. |
 | Contracts | JSON Schema | Define every message and file format. |
 
-The CLI keeps one module per subcommand in `crates/traceqa-cli/src/` (`extract.rs`, `serve.rs`, `mcp.rs`, `install.rs`, `doctor.rs`, `login.rs`). Each holds its own arguments struct and a `run` function that returns the exit code; options shared by several commands (`--driver`) are in `args.rs`, and `main.rs` only lists the commands and dispatches. To add a subcommand, create its file, then add one `mod` line, one `Command` variant and one `match` arm to `main.rs`. A command that starts a run calls `extract::execute_request`, so signal handling is set up once. A command that works on a finished run finds it with `traceqa_recorder::open_run`, which accepts a run folder, a target folder, a `components.json` path or a bare run id; it caps reads at 64 MiB and does not follow symbolic links.
+The CLI keeps one module per subcommand in `crates/traceqa-cli/src/` (`extract.rs`, `diff.rs`, `serve.rs`, `mcp.rs`, `install.rs` and so on). Each holds its own arguments struct and a `run` function that returns the exit code; options shared by several commands (`--driver`) are in `args.rs`, and `main.rs` only lists the commands and dispatches. To add a subcommand, create its file, then add one `mod` line, one `Command` variant and one `match` arm to `main.rs`. A command that starts a run calls `extract::execute_request`, so signal handling is set up once. A command that works on a finished run finds it with `traceqa_recorder::open_run`, which accepts a run folder, a target folder, a `components.json` path or a bare run id; it caps reads at 64 MiB and does not follow symbolic links.
 
 ## How programs communicate
 
@@ -119,7 +119,7 @@ the client.
 | Step | Direction | Message |
 |---|---|---|
 | 1 | AI tool to server | `initialize`, with the MCP version it wants. The server answers with that version if it knows it, else its newest. |
-| 2 | AI tool to server | `tools/list`. The server answers with four tools and a JSON Schema for each one's arguments. |
+| 2 | AI tool to server | `tools/list`. The server answers with eight tools and a JSON Schema for each one's arguments. |
 | 3 | AI tool to server | `tools/call`, for example `extract` with a URL. It runs on its own thread, so the AI tool can ping or cancel meanwhile. |
 | 4 | server to AI tool | `notifications/progress`, one per engine event, when the AI tool asked for progress. |
 | 5 | server to AI tool | The answer: text holding JSON, or a picture as base64. |
@@ -183,7 +183,7 @@ For each browser at each viewport:
    network, a stable page height, and no intro animation still running.
 3. It scrolls through the page a screen at a time, which loads content that
    only appears on scroll.
-4. Back at the top, it runs the collector in the main page and every frame.
+4. Back at the top, it runs the page script in the main page and every frame.
    This reading is the list of elements.
 5. It merges the frames. Elements in a frame are placed in page coordinates
    using the frame's position. A frame that cannot be read becomes a warning.
@@ -191,7 +191,7 @@ For each browser at each viewport:
 7. It writes `components.json` and closes the session.
 
 When pictures are asked for, step 3 does more. At every screen the engine also
-runs the collector and takes a screenshot, and it waits for the animations that
+runs the page script and takes a screenshot, and it waits for the animations that
 reveal sections. Afterwards it cuts one crop per component from the screen that
 showed the most of it, and saves an overview as `page.png`.
 
@@ -220,7 +220,7 @@ target was cancelled, timed out, failed in a driver, failed on disk or was refus
 Strings appear only at the edges: the CLI and the MCP server print what the errors
 say.
 
-## The collector
+## The page script
 
 `page-script/page-script.js` is a single JavaScript expression that evaluates to a
 function. A driver evaluates it in each frame and returns the result.
