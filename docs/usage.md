@@ -94,6 +94,8 @@ traceqa extract [OPTIONS] <URL>
 | `--headed` | off | Show the browser windows. |
 | `--crops` | off | Also save pictures: a screenshot of the page and one crop per component. Slower on long pages: see [Speed](#speed). |
 | `--visible-only` | off | Leave out elements that are not visible. |
+| `--axe` | off | Also check every page with axe-core and write `axe.json`. axe-core is not shipped: run `traceqa install --axe` first. See [Accessibility checks with axe-core](#accessibility-checks-with-axe-core). |
+| `--axe-file PATH` | none | Use this `axe.min.js` instead of the installed one. Implies `--axe`. |
 | `--max-scroll-steps N` | `50` | How many screens to scroll through on a long page. `0` reads the page without scrolling. |
 | `--timeout-ms MS` | `30000` | Time allowed for a page to load. At least 1. |
 | `--settle-ms MS` | `0` | Extra time to wait after the page has loaded, before reading it. For pages with a timed intro or splash screen. |
@@ -763,6 +765,7 @@ five are read-only.
 
 ```
 traceqa install [BROWSERS]... [--from FOLDER] [--ref REF] [--with-deps] [--dry-run]
+traceqa install --axe [--dry-run]
 ```
 
 Installs the browser drivers and browsers, so the binary is all a user needs
@@ -784,6 +787,7 @@ published checksum).
 | `--ref REF` | Branch, tag or commit on GitHub. Default: the commit the binary was released from (shown by `traceqa doctor`), so the binary and its drivers match and cannot be changed afterwards. Only a full 40-digit commit id is pinned: any other value is used but reported as not pinned. |
 | `--with-deps` | Also install the system libraries the browsers need. Linux only, may ask for `sudo`. |
 | `--dry-run` | Print the commands that would run, and write nothing. |
+| `--axe` | Install only axe-core, for `extract --axe`; drivers and browsers are left alone. See [Accessibility checks with axe-core](#accessibility-checks-with-axe-core). |
 
 A binary that was not built from a release commit (a debug build, a tree with
 uncommitted changes, a build without git) has no commit to install from. It
@@ -927,6 +931,10 @@ is often wrong costs more trust than it earns.
   shows as missing in one; `similar` then names the component of that browser at the
   same path that looks like it (`role_changed` or `name_changed`).
 
+### axe-core rules
+
+A run made with `traceqa extract --axe` also has `axe.json` in each target folder, and `traceqa findings` then adds one finding per axe rule and component. See [Accessibility checks with axe-core](#accessibility-checks-with-axe-core) below for how it works and what it cannot cover.
+
 ### Suppressions
 
 ```yaml
@@ -948,6 +956,66 @@ warning. An entry that matches no finding in any target gets a
 `suppression_unused` warning but does not fail the run, so the file does not rot.
 When a run has such warnings they are written to a run-level `findings.json` in the
 run folder itself (`scope: "run"`).
+
+## Accessibility checks with axe-core
+
+```sh
+traceqa install --axe
+traceqa extract https://example.com --axe
+traceqa findings runs/<runId>
+```
+
+[axe-core](https://github.com/dequelabs/axe-core) is Deque's open source accessibility rule engine. `--axe` runs it on every page
+(and in every frame the driver can reach) after the components have been found, and places each failing element on a component, so the
+result has the same ids as everything else in the run. It adds one file per target, `axe.json`; nothing changes in `components.json`
+except a warning when axe could not run. A run without `--axe` never reads an axe file.
+
+**What it is not.** Automated rules find on average about 57% of the WCAG issues in an audit (Deque). A page with no axe findings is not
+accessible, and nothing here is a conformance claim. Contrast over images and gradients, the meaning of text and alt text, keyboard
+order, focus visibility, time limits, caption quality and everything inside menus and dialogs that are closed when the page loads need a
+person. axe also leaves results it cannot decide as "incomplete" (needs review): `findings.json` counts them in `needsReview` and
+carries this note in `coverage`. Rules run: the tags `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa` and `best-practice`.
+
+**Where axe comes from.** axe-core is licensed under the Mozilla Public License 2.0 (a file-level copyleft licence). TraceQA does not
+include it in the repository, the binary or the release archives. `traceqa install --axe` downloads the pinned npm tarball
+(`axe-core` 4.14.0, from `registry.npmjs.org`) at your request, checks its SHA-512 against the value built into `traceqa`, and writes
+only `axe.min.js`, `LICENSE` and, when present, `LICENSE-3RD-PARTY.txt` to `~/.traceqa/axe/4.14.0/` (or `$TRACEQA_HOME/axe/4.14.0/`),
+unmodified. It prints the licence, the source location and that the file is unmodified. A download that does not match the hash is
+rejected and nothing is written. `--dry-run` prints the address and the hash and writes nothing. `TRACEQA_AXE_TARBALL_URL` moves the
+download to a mirror; the hash is still checked. See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+`--axe` without an installed file (and without `--axe-file PATH` or `TRACEQA_AXE_FILE`) exits with code 2 and the install hint, before
+any run folder exists. The SDKs and `traceqa serve` take `options.axe: true` and the same rule applies. The MCP server has no axe
+option in this version: it would let a model trigger a large script injection.
+
+**How it runs.** axe's source is sent through the driver's `page.eval` as part of an ordinary function, once per frame (with
+`awaitPromise`, because `axe.run` is asynchronous; a driver advertises that as the capability `evalAsync`, and both shipped drivers
+do). It is never run through the page's own `eval`, so a page with a Content-Security-Policy such as `script-src 'self'` still works.
+In the page only what is needed leaves it: the rule, impact, tags, help text and, for each failing element, axe's selector and its
+box. The page's HTML is dropped. A target where axe cannot run (a driver without `evalAsync`, a timeout, a frame that refuses
+scripts) gets the warning `axe_failed` and the run still completes.
+
+**Placing on components.** The element's box is measured the way the collector measures (position plus scroll, moved into
+top-level page coordinates for a frame), and then matched in Rust, in the element's own frame: an instance with the same box and tag is
+the element itself; otherwise the smallest instance whose box contains the element's centre is its nearest enclosing component
+(`viaAncestor: true`). An element in no component gets no `componentId` and its finding is about the page.
+
+### `axe.json`
+
+`AxeResults` in `spec/run-folder.schema.json`: `axeVersion`, `tags` (the rule tags that ran), `violations`, `incomplete` (how many
+results axe left for a person) and `errors` (frames where axe did not run, and rules whose list of elements was cut at 200). Each
+violation has `rule`, `impact`, `tags`, `help`, `helpUrl` and `nodes`; each node has `frameId`, `target` (axe's selector in its frame),
+`box` (page coordinates) and `componentId` / `viaAncestor` when a component contains it.
+
+### axe findings
+
+`traceqa findings` turns each rule and component into a finding with the rule `axe.<ruleId>` (for example `axe.color-contrast`) and the
+id `axe.<ruleId>:<componentId>`, or `axe.<ruleId>:page` when no component contains the elements (its `componentId` is `page`).
+Severity follows axe's impact: `critical` and `serious` are `error`, `moderate` is `warning`, `minor` is `info`. `wcag` lists the success
+criteria in axe's tags (`wcag143` is `1.4.3`), `helpUrl` is axe's page for the rule and `evidence` has `source: "axe-core"`,
+`axeVersion`, `impact`, the number of elements and up to five selectors. Confidence is `medium`. Suppressions work on these ids like
+any other. axe is not tamper-proof: a hostile page that replaces built-in functions can make it report wrongly (see
+`collector_tampered`), as it can any in-page script.
 
 ## `traceqa codegen`
 
@@ -1367,6 +1435,7 @@ runs/<runId>/
   events.jsonl
   <browser>-<width>x<height>/
     components.json
+    axe.json                  only with --axe
     findings.json             only after `traceqa findings`
     page.png                  only with --crops
     crops/<componentId>.png   only with --crops
@@ -1486,6 +1555,7 @@ Roles the collector reports but Playwright does not see (`summary` as a button, 
 | `signed_in_pictures` | The run used a stored session and `--crops`, so `page.png` and `crops/` may show personal data. Raised once per target; nothing else about what is saved changes. |
 | `collector_tampered` | The page replaced built-in functions such as `Array.prototype.map` or `getBoundingClientRect`, which can make a script read the page wrongly. The warning names them. With Playwright (Chromium, Firefox, WebKit) the driver captured the browser's own functions before the page's scripts ran and the page was read with those, so the result is right and the warning is for information. With a WebDriver browser (Safari, or any browser behind a WebDriver server) there is no way to run a script first, so the collector uses what it finds, spots functions that no longer look like native code, and says the result may be wrong. This check is best effort: a page can also fake how a function prints itself, and a few reads that are not captured (such as the `checked` state of an input) are not defended. |
 | `requests_failed` | Requests for scripts, styles, data (fetch or XHR) or frames failed while the page loaded, by a network error or an HTTP status of 400 or more. The warning gives the count and the first few addresses, without query strings, because parts of the page may then be missing from the list. Pictures, fonts and requests cancelled by a navigation are not counted. Only Playwright browsers (Chromium, Firefox, WebKit) report this; a WebDriver browser such as Safari cannot see failed requests and never raises it. |
+| `axe_failed` | `--axe` was asked for, but axe-core did not run (or not in every frame): the driver cannot wait for a script that returns a Promise, the script timed out, or a frame refused it. The message says which. The components are unaffected, and there is no `axe.json` when axe ran nowhere. |
 | `viewport_not_reached` | The browser could not give the viewport asked for, for example Safari in a window macOS will not resize. The page was read at the size it really had, which `components.json` records. The target keeps its name, such as `safari-390x844`. |
 
 ## Speed

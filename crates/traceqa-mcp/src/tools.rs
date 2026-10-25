@@ -870,6 +870,8 @@ fn build_request(config: &Config, args: ExtractArgs) -> Result<RunStartParams, T
             max_scroll_steps: args.max_scroll_steps,
             timeout_ms: args.timeout_ms,
             settle_ms: args.settle_ms,
+            // No axe option in v1: it would let a model trigger a large script injection (docs/backlog.md).
+            axe: None,
         }),
         storage_state,
     };
@@ -1123,7 +1125,7 @@ impl Call<'_> {
             targets: searched
                 .files
                 .into_iter()
-                .map(|(dir, file)| traceqa_findings::TargetInput { dir, file })
+                .map(|(dir, file)| traceqa_findings::TargetInput { dir, file, axe: None })
                 .collect(),
         };
         let detailed = args.response_format == Format::Detailed;

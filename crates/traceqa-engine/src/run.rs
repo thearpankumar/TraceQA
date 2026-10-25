@@ -15,6 +15,7 @@ use traceqa_protocol::types::{BrowserTarget, Event, RunManifest, RunStartParams,
 use traceqa_recorder::{new_run_id, now_rfc3339, write_manifest_in, RunWriter};
 
 use crate::driver::{DriverCommand, DriverError, Drivers, ErrorKind};
+use crate::extract::axe::AxeScript;
 use crate::extract::{extract_target, Job, Progress, Sink};
 use crate::url_policy::UrlPolicy;
 use crate::url_safety::{check_navigable, redact};
@@ -107,6 +108,8 @@ fn default_driver(name: &str) -> DriverCommand {
 pub struct Run {
     params: RunStartParams,
     writer: RunWriter,
+    /// axe-core's source, read before the run folder was made, when the request asked for it.
+    axe: Option<AxeScript>,
 }
 
 impl Run {
@@ -130,6 +133,13 @@ impl Run {
                 .check()
                 .map_err(|error| EngineError::invalid(error.to_string()))?;
         }
+        // axe-core is not shipped, so a request for it is refused here, before the run folder exists,
+        // when it is not on this machine.
+        let axe = if params.options.as_ref().and_then(|o| o.axe).unwrap_or(false) {
+            Some(AxeScript::load().map_err(EngineError::Invalid)?)
+        } else {
+            None
+        };
         let out_dir = PathBuf::from(params.out_dir.as_deref().unwrap_or("runs"));
         // An id that is already taken on disk (another process, same second) is simply drawn again.
         let mut attempts = 0;
@@ -139,7 +149,7 @@ impl Run {
                 other => break other?,
             }
         };
-        Ok(Self { params, writer })
+        Ok(Self { params, writer, axe })
     }
 
     pub fn id(&self) -> &str {
@@ -172,7 +182,7 @@ impl Run {
         abort: &Abort,
         listener: &mut (dyn FnMut(&Event) + Send),
     ) -> RunManifest {
-        let Self { params, writer } = self;
+        let Self { params, writer, axe } = self;
         let run_id = writer.run_id().to_string();
         let mut manifest = RunManifest {
             format_version: RUN_FOLDER_VERSION,
@@ -238,6 +248,7 @@ impl Run {
                     exclusive: &exclusive,
                     cancel: execution.cancel,
                     policy: execution.policy,
+                    axe: axe.as_ref(),
                 };
                 let worker_panic = run_workers(&jobs, workers, &shared, execution, &finished);
                 retry_timed_out(&jobs, &finished, workers, &shared, execution);
@@ -629,6 +640,7 @@ struct Shared<'a, 'b> {
     exclusive: &'a Exclusive,
     cancel: &'a AtomicBool,
     policy: Option<&'a UrlPolicy>,
+    axe: Option<&'a AxeScript>,
 }
 
 /// Every browser at every viewport, each with the folder name it will write to, and how many
@@ -810,6 +822,7 @@ fn run_target(job: &Planned, shared: &Shared, drivers: &mut Drivers) -> Finished
                 exclusive: shared.exclusive,
                 cancel: shared.cancel,
                 policy: shared.policy,
+                axe: shared.axe,
                 storage_state: shared.params.storage_state.as_ref(),
             };
             let (file, browser, timings) = extract_target(drivers, &extraction, progress)?;

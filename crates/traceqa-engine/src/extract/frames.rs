@@ -30,6 +30,7 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
         script: COLLECTOR.to_string(),
         arg: Some(json!({ "includeHidden": job.include_hidden })),
         all_frames: Some(session.capabilities.eval_all_frames),
+        await_promise: None,
         timeout_ms: Some(job.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
     })?;
 

@@ -63,6 +63,8 @@ CAPABILITIES = models.Capabilities(
     console_events=False,
     network_events=False,
     failed_requests=True,
+    # frame.evaluate always waits for a returned Promise, so params.await_promise needs no code here.
+    eval_async=True,
 )
 
 # Requests that change the list of components when they fail. Pictures, fonts and media do not, and a

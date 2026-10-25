@@ -120,6 +120,10 @@ class ExtractOptions(BaseModel):
         validation_alias="includeHidden", serialization_alias="includeHidden",
         description="List hidden elements too. Default true.",
     )
+    axe: bool | None = Field(
+        default=None,
+        description="Also run axe-core on every page and write axe.json next to components.json. axe-core is not part of TraceQA: the run is refused unless `traceqa install --axe` put it on this machine (or TRACEQA_AXE_FILE names a copy). A target where axe fails gets the warning axe_failed and still completes. Default false.",
+    )
 
 
 class RunStartResult(BaseModel):
@@ -648,6 +652,11 @@ class Capabilities(BaseModel):
         validation_alias="failedRequests", serialization_alias="failedRequests",
         description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
     )
+    eval_async: bool | None = Field(
+        default=None,
+        validation_alias="evalAsync", serialization_alias="evalAsync",
+        description="page.eval accepts awaitPromise. Absent means false.",
+    )
 
 
 class SessionStorageParams(BaseModel):
@@ -728,6 +737,11 @@ class PageEvalParams(BaseModel):
         default=None,
         validation_alias="allFrames", serialization_alias="allFrames",
         description="Run in every frame the driver can reach. Default false.",
+    )
+    await_promise: bool | None = Field(
+        default=None,
+        validation_alias="awaitPromise", serialization_alias="awaitPromise",
+        description="The function may return a Promise: wait for it and give its resolved value. A rejected Promise is an eval_failed error for that frame. Only drivers whose capabilities say evalAsync accept it; others refuse it with eval_failed. timeoutMs bounds the wait. Default false.",
     )
     timeout_ms: int | None = Field(default=None, validation_alias="timeoutMs", serialization_alias="timeoutMs", ge=0)
 
@@ -997,11 +1011,15 @@ class Finding(BaseModel):
     )
     rule: str = Field(
         ...,
-        description="Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only).",
+        description="Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only), and axe.RULE for every axe-core rule, for example axe.color-contrast (only when the run was made with `traceqa extract --axe`).",
     )
     severity: FindingSeverity
     confidence: FindingConfidence
-    component_id: str = Field(..., validation_alias="componentId", serialization_alias="componentId")
+    component_id: str = Field(
+        ...,
+        validation_alias="componentId", serialization_alias="componentId",
+        description="The component the finding is about. 'page' for an axe-core finding that no component contains.",
+    )
     instances: list[str] = Field(
         ..., description="Keys of the instances concerned, at most 20."
     )
@@ -1054,6 +1072,16 @@ class FindingsFile(BaseModel):
     warnings: list[Warning] = Field(
         ...,
         description="Known codes: name_source_missing, suppression_unused, suppression_expired.",
+    )
+    coverage: str | None = Field(
+        default=None,
+        description="Present when axe-core results were included. What automated checks cannot cover; never a conformance claim.",
+    )
+    needs_review: int | None = Field(
+        default=None,
+        validation_alias="needsReview", serialization_alias="needsReview",
+        description="Present when axe-core results were included: how many results axe could not decide and left for a person to review (its incomplete results). Not counted in counts.",
+        ge=0,
     )
 
 
@@ -1320,6 +1348,33 @@ class GroupRun(BaseModel):
     )
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     status: RunStatus
+
+
+class AxeNode(BaseModel):
+    """
+    One element an axe rule failed on.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    frame_id: str = Field(..., validation_alias="frameId", serialization_alias="frameId")
+    target: str = Field(
+        ..., description="axe's selector for the element inside its frame."
+    )
+    box: Rect = Field(
+        ..., description="In top-level page coordinates, as an instance's box is."
+    )
+    component_id: str | None = Field(
+        default=None,
+        validation_alias="componentId", serialization_alias="componentId",
+        description="The component the element is, or sits inside. Absent when no component contains it: the finding is then about the page.",
+    )
+    via_ancestor: bool | None = Field(
+        default=None,
+        validation_alias="viaAncestor", serialization_alias="viaAncestor",
+        description="True when the element is not itself a component and componentId is the smallest component whose box contains its centre.",
+    )
 
 
 class InstanceRange(BaseModel):
@@ -1885,6 +1940,27 @@ class RunGroup(BaseModel):
     )
 
 
+class AxeViolation(BaseModel):
+    """
+    One axe rule that failed, with the elements it failed on.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    rule: str = Field(..., description="axe's rule id, for example color-contrast.")
+    impact: str | None = Field(
+        default=None,
+        description="axe's impact. Known values: minor, moderate, serious, critical. Absent when axe gave none.",
+    )
+    tags: list[str] = Field(
+        ..., description="axe's tags for the rule, such as wcag143 and wcag2aa."
+    )
+    help: str
+    help_url: str = Field(..., validation_alias="helpUrl", serialization_alias="helpUrl")
+    nodes: list[AxeNode]
+
+
 class ComponentStability(BaseModel):
     """
     How steady one component was across the runs of a group.
@@ -2215,6 +2291,33 @@ class ComponentsFile(BaseModel):
     )
     components: list[Component]
     warnings: list[Warning]
+
+
+class AxeResults(BaseModel):
+    """
+    axe.json, written next to components.json only when the run asked for axe-core (`traceqa extract --axe`). The result of one axe-core run per frame, with every violation node placed on the component it belongs to. Automated rules find only part of the accessibility problems a page has; this is not a conformance result. The page's html is never kept.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    axe_version: str = Field(
+        ...,
+        validation_alias="axeVersion", serialization_alias="axeVersion",
+        description="The axe-core version that ran, as it reports itself.",
+    )
+    tags: list[str] = Field(
+        ..., description="The rule tags that were run, for example wcag2aa."
+    )
+    violations: list[AxeViolation]
+    incomplete: int = Field(
+        ...,
+        description="How many results axe could not decide and left for a person to review (axe's incomplete results), across all frames.",
+        ge=0,
+    )
+    errors: list[str] = Field(
+        ..., description="Frames in which axe did not run, each with the reason."
+    )
 
 
 class TargetStability(BaseModel):

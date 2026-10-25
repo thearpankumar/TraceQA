@@ -185,6 +185,10 @@ only package. `prepublishOnly` runs the type check and the build, so a publish
 from a clean checkout cannot ship a stale `dist/`. Every published package
 carries a copy of the root `LICENSE` (`tests/test_package_licenses.py`).
 
+## axe-core is not bundled
+
+axe-core is MPL-2.0. The repository, the binary and the release archives do not contain it, and a release must not start to: `traceqa install --axe` downloads the npm tarball pinned in `crates/traceqa-engine/src/extract/axe.rs` (version, address and SHA-512) and extracts the script and the licence unmodified. To move to a newer axe-core, read `npm view axe-core@VERSION dist.integrity`, change the three constants together, and run `tests/test_axe.py`. If bundling is ever wanted, MPL-2.0 needs the licence text kept, the notices in the file intact and the location of the source stated to recipients (Mozilla MPL 2.0 FAQ, questions 7 to 9). See `THIRD_PARTY_NOTICES.md`.
+
 ## Dependency audits and updates
 
 The Audit workflow (`.github/workflows/audit.yml`) runs every Monday, on demand,

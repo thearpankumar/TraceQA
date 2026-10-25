@@ -35,6 +35,9 @@ unicode-normalization = "0.1.25"
 url = "2"
 # robots.txt for `traceqa map`. HTTPS through rustls only (no gzip, no cookies, no JSON): the one request it makes is a plain GET.
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+# `traceqa install --axe` unpacks the npm tarball of axe-core: gzip, tar, nothing else.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # Default features off: the SIMD engines are the only part of the crate that uses unsafe code.
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }

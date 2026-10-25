@@ -5,6 +5,7 @@
 //! (plain data in, warnings out), `crops` takes the pictures and `progress` records events
 //! and time.
 
+pub mod axe;
 mod crops;
 mod frames;
 mod heuristics;
@@ -68,6 +69,8 @@ pub(crate) struct Job<'a> {
     pub cancel: &'a AtomicBool,
     /// Operator rules for where the page may lead, checked after the page has loaded.
     pub policy: Option<&'a UrlPolicy>,
+    /// axe-core's source when the run asked for it; the page is then also checked with axe.
+    pub axe: Option<&'a axe::AxeScript>,
 }
 
 fn warning(code: &str, message: String) -> Warning {
@@ -238,6 +241,7 @@ fn read_page(
 
     let mut components = group(elements);
     warnings.extend(covered_warning(&components));
+    axe::run(driver, session, job, &components, &mut warnings);
     let instance_count: usize = components.iter().map(|component| component.instances.len()).sum();
     progress.emit(
         "components.grouped",

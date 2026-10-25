@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{Map, Value};
-use traceqa_protocol::types::{ComponentsFile, Event, Rect, RunManifest};
+use traceqa_protocol::types::{AxeResults, ComponentsFile, Event, Rect, RunManifest};
 
 mod clock;
 mod crops;
@@ -17,7 +17,7 @@ mod read;
 
 pub use clock::{new_run_id, now_rfc3339};
 pub use crops::{save_crops, PageImage};
-pub use read::{open_run, read_components, ReadError, RunFolder, TargetRef, MAX_FILE_BYTES};
+pub use read::{open_run, read_axe, read_components, ReadError, RunFolder, TargetRef, MAX_FILE_BYTES};
 
 /// Owns one run folder.
 pub struct RunWriter {
@@ -88,6 +88,12 @@ impl RunWriter {
     pub fn write_components(&self, target: &str, file: &ComponentsFile) -> io::Result<()> {
         write_json(&self.dir.join(target).join("components.json"), file)
     }
+}
+
+/// Writes `axe.json` into a target's folder, next to its `components.json`. Only runs that asked
+/// for axe-core have one.
+pub fn write_axe(target_dir: &Path, file: &AxeResults) -> io::Result<()> {
+    write_json(&target_dir.join("axe.json"), file)
 }
 
 /// Writes `run.json` into `dir` the way [`RunWriter::write_manifest`] does, without the writer.
@@ -162,6 +168,29 @@ mod tests {
             RunWriter::create(&out, "r_test").err().map(|e| e.kind()),
             Some(io::ErrorKind::AlreadyExists)
         );
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn axe_results_are_written_next_to_the_components_and_read_back() {
+        let out = std::env::temp_dir().join(format!("traceqa-recorder-axe-{}", new_run_id()));
+        fs::create_dir_all(&out).unwrap();
+        let results: AxeResults = serde_json::from_value(serde_json::json!({
+            "axeVersion": "4.14.0", "tags": ["wcag2aa"], "incomplete": 2, "errors": [],
+            "violations": [{ "rule": "image-alt", "tags": ["wcag111"], "help": "h", "helpUrl": "u", "nodes": [
+                { "frameId": "main", "target": "img", "box": { "x": 1, "y": 2, "w": 3, "h": 4 } }
+            ]}]
+        }))
+        .unwrap();
+        write_axe(&out, &results).unwrap();
+        let target = TargetRef {
+            dir: "t".into(),
+            path: out.clone(),
+            summary: None,
+        };
+        assert_eq!(read_axe(&target).unwrap(), Some(results));
+        fs::remove_file(out.join("axe.json")).unwrap();
+        assert_eq!(read_axe(&target).unwrap(), None, "a run without axe has no axe.json");
         fs::remove_dir_all(out).unwrap();
     }
 

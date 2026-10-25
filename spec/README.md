@@ -80,6 +80,11 @@ Limits on what a driver sends:
   requests. The engine turns a non-zero count into the `requests_failed` warning.
   The WebDriver driver cannot observe the network, so it sends neither.
 
+- **Waiting for a Promise:** a driver whose capabilities say `evalAsync: true` (optional; absent means false) accepts
+  `awaitPromise: true` in `page.eval`: the function may return a Promise, and the driver waits for it, up to `timeoutMs`,
+  and gives the resolved value. A rejection is that frame's `eval_failed`. Playwright always waits; the WebDriver driver
+  uses `/execute/async` for it, because `/execute/sync` cannot wait. The engine needs this for `--axe` (axe-core is asynchronous).
+
 The method names, with their parameter and result types, are listed in the
 `x-traceqa` block at the top of each protocol file.
 
@@ -136,6 +141,7 @@ runs/<runId>/
   events.jsonl              one Event per line
   <browser>-<width>x<height>/
     components.json         ComponentsFile
+    axe.json                AxeResults                (only with `extract --axe`)
     page.png                screenshot of the page    (only with pictures)
     crops/<componentId>.png one crop per component    (only with pictures)
 ```

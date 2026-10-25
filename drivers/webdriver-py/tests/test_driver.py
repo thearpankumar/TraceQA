@@ -224,3 +224,51 @@ def test_a_hostile_page_makes_the_collector_report_tampering(
     clean = models.CollectorResult.model_validate(collect(driver, session_id)["main"].value)
     assert [warning.code for warning in clean.warnings if warning.code == "collector_tampered"] == []
     driver.call("session.close", {"sessionId": session_id})
+
+
+ASYNC_DOUBLE = "async (n) => { await new Promise((resolve) => setTimeout(resolve, 30)); return n * 2; }"
+
+
+def test_eval_waits_for_a_promise_when_asked(
+    driver: DriverClient, chrome_target: dict[str, Any], shop_url: str
+) -> None:
+    driver.call("driver.hello", HELLO)
+    session = driver.call("session.open", {"target": chrome_target, "viewport": VIEWPORT})
+    session_id = session["sessionId"]
+    assert session["capabilities"]["evalAsync"] is True
+    driver.call("page.goto", {"sessionId": session_id, "url": shop_url, "waitUntil": "settled"})
+
+    waited = driver.call(
+        "page.eval",
+        {"sessionId": session_id, "script": ASYNC_DOUBLE, "arg": 21, "awaitPromise": True, "allFrames": True},
+    )
+    values = {result["frame"]["id"]: result["value"] for result in waited["results"]}
+    assert len(values) == 3 and set(values.values()) == {42}
+    # Without the flag the old synchronous path runs.
+    plain = driver.call("page.eval", {"sessionId": session_id, "script": "(n) => n + 1", "arg": 1})
+    assert plain["results"][0]["value"] == 2
+
+    with pytest.raises(RpcFailure) as rejected:
+        driver.call(
+            "page.eval",
+            {
+                "sessionId": session_id,
+                "script": "async () => { throw new Error('nope from the page'); }",
+                "awaitPromise": True,
+            },
+        )
+    assert rejected.value.kind == "eval_failed"
+    assert "nope from the page" in str(rejected.value)
+    # A promise that never settles ends at the script timeout, not never.
+    with pytest.raises(RpcFailure) as hung:
+        driver.call(
+            "page.eval",
+            {
+                "sessionId": session_id,
+                "script": "() => new Promise(() => {})",
+                "awaitPromise": True,
+                "timeoutMs": 700,
+            },
+        )
+    assert hung.value.kind == "eval_failed"
+    driver.call("session.close", {"sessionId": session_id})

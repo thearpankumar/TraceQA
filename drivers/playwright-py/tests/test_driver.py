@@ -341,3 +341,36 @@ def test_failed_script_requests_are_counted_without_the_query(driver: DriverClie
     assert result is not None
     assert (result.count, result.urls) == (0, [])
     driver.call("session.close", {"sessionId": sid})
+
+
+ASYNC_DOUBLE = "async (n) => { await new Promise((resolve) => setTimeout(resolve, 30)); return n * 2; }"
+
+
+@pytest.mark.parametrize("browser", ["chromium", "firefox", "webkit"])
+def test_eval_waits_for_a_promise_when_asked(driver: DriverClient, shop_url: str, browser: str) -> None:
+    driver.call("driver.hello", HELLO)
+    session = driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
+    session_id = session["sessionId"]
+    assert session["capabilities"]["evalAsync"] is True
+    driver.call("page.goto", {"sessionId": session_id, "url": shop_url, "waitUntil": "settled"})
+
+    waited = driver.call(
+        "page.eval", {"sessionId": session_id, "script": ASYNC_DOUBLE, "arg": 21, "awaitPromise": True}
+    )
+    assert waited["results"][0]["value"] == 42
+    # A synchronous function is unchanged by the flag being absent.
+    plain = driver.call("page.eval", {"sessionId": session_id, "script": "(n) => n + 1", "arg": 1})
+    assert plain["results"][0]["value"] == 2
+
+    with pytest.raises(RpcFailure) as rejected:
+        driver.call(
+            "page.eval",
+            {
+                "sessionId": session_id,
+                "script": "async () => { throw new Error('nope from the page'); }",
+                "awaitPromise": True,
+            },
+        )
+    assert rejected.value.kind == "eval_failed"
+    assert "nope from the page" in str(rejected.value)
+    driver.call("session.close", {"sessionId": session_id})

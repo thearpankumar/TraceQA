@@ -7,12 +7,14 @@
 //!
 //! Every finding is an automated check, not a conformance claim.
 
+pub mod axe;
 mod cross_browser;
 pub mod rules;
 pub mod suppress;
 
 use traceqa_protocol::types::{
-    ComponentsFile, Finding, FindingCounts, FindingScope, FindingSeverity, FindingSuppression, FindingsFile, Warning,
+    AxeResults, ComponentsFile, Finding, FindingCounts, FindingScope, FindingSeverity, FindingSuppression,
+    FindingsFile, Warning,
 };
 
 pub use suppress::{SuppressionError, Suppressions};
@@ -38,6 +40,8 @@ pub struct TargetInput {
     /// Folder name inside the run folder.
     pub dir: String,
     pub file: ComponentsFile,
+    /// The target's `axe.json`, when the run was made with `--axe`. Its results become findings.
+    pub axe: Option<AxeResults>,
 }
 
 /// A whole run: every target that has a `components.json`.
@@ -76,7 +80,7 @@ pub fn clean(text: &str) -> String {
 /// this file alone; use [`analyse_run`] for a run, where an entry may match in another target.
 pub fn analyse_target(file: &ComponentsFile, options: &Options) -> FindingsFile {
     let mut usage = suppress::Usage::default();
-    let mut out = analyse_one(file, None, options, &mut usage);
+    let mut out = analyse_one(file, None, None, options, &mut usage);
     if let Some(suppressions) = &options.suppressions {
         out.warnings
             .extend(usage.warnings(suppressions, options.today.as_deref()));
@@ -92,7 +96,7 @@ pub fn analyse_run(run: &RunInput, options: &Options) -> Vec<FindingsFile> {
     let mut files: Vec<FindingsFile> = run
         .targets
         .iter()
-        .map(|t| analyse_one(&t.file, Some(t.dir.clone()), options, &mut usage))
+        .map(|t| analyse_one(&t.file, t.axe.as_ref(), Some(t.dir.clone()), options, &mut usage))
         .collect();
 
     let mut run_level = rules::run_findings(run);
@@ -120,11 +124,15 @@ pub fn analyse_run(run: &RunInput, options: &Options) -> Vec<FindingsFile> {
 
 fn analyse_one(
     file: &ComponentsFile,
+    axe: Option<&AxeResults>,
     target: Option<String>,
     options: &Options,
     usage: &mut suppress::Usage,
 ) -> FindingsFile {
     let mut found = rules::target_findings(file);
+    if let Some(axe) = axe {
+        found.extend(axe::findings(axe, file));
+    }
     sort(&mut found);
     let (kept, suppressed) = apply_suppressions(found, options, usage);
     let mut warnings = Vec::new();
@@ -144,7 +152,7 @@ fn analyse_one(
             message: "This components.json was written before instances recorded where their names came from, so the weak-name-source rule could not run. Extract the page again.".into(),
         });
     }
-    assemble(
+    let mut out = assemble(
         FindingScope::Target,
         &file.run_id,
         target,
@@ -153,7 +161,12 @@ fn analyse_one(
         suppressed,
         warnings,
         options,
-    )
+    );
+    if let Some(axe) = axe {
+        out.coverage = Some(axe::COVERAGE.to_string());
+        out.needs_review = Some(axe.incomplete);
+    }
+    out
 }
 
 fn sort(findings: &mut [Finding]) {
@@ -228,6 +241,8 @@ fn assemble(
         findings,
         suppressed,
         warnings,
+        coverage: None,
+        needs_review: None,
     }
 }
 
@@ -320,11 +335,13 @@ mod tests {
                 TargetInput {
                     dir: "chromium-1280x800".into(),
                     file: file_with(json!([unnamed("c_000000000001")])),
+                    axe: None,
                 },
                 TargetInput {
                     dir: "firefox-1280x800".into(),
                     // The same components in both browsers: no browsers-disagree finding.
                     file: file_with(json!([unnamed("c_000000000001")])),
+                    axe: None,
                 },
             ],
         };

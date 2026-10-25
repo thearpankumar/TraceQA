@@ -79,6 +79,10 @@
         "failedRequests": {
           "description": "Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
           "type": "boolean"
+        },
+        "evalAsync": {
+          "description": "page.eval accepts awaitPromise. Absent means false.",
+          "type": "boolean"
         }
       }
     },
@@ -179,6 +183,10 @@
         },
         "arg": { "description": "Any JSON value, passed to the function." },
         "allFrames": { "description": "Run in every frame the driver can reach. Default false.", "type": "boolean" },
+        "awaitPromise": {
+          "description": "The function may return a Promise: wait for it and give its resolved value. A rejected Promise is an eval_failed error for that frame. Only drivers whose capabilities say evalAsync accept it; others refuse it with eval_failed. timeoutMs bounds the wait. Default false.",
+          "type": "boolean"
+        },
         "timeoutMs": { "type": "integer", "minimum": 0 }
       }
     },
