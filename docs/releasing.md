@@ -101,7 +101,7 @@ sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
 The first command proves where the file came from; the second proves the
-download is complete. To report a vulnerability, see `SECURITY.md`.
+download is complete. To report a vulnerability, see `docs/SECURITY.md`.
 
 The first release made with this workflow is the first real test of the tag
 path, which cannot be run without tagging. After it, run both commands above on
@@ -223,7 +223,7 @@ MCP server and the lock files.
 
 Owner actions, under Settings:
 
-- Enable private vulnerability reporting (Code security), which `SECURITY.md` points to.
+- Enable private vulnerability reporting (Code security), which `docs/SECURITY.md` points to.
 - Enable Dependabot alerts and Dependabot security updates.
 - Protect `master`: require the `CI` check and review from code owners.
 

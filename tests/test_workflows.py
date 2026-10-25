@@ -191,14 +191,14 @@ def test_codeowners_gates_the_github_directory() -> None:
     lines = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8").splitlines()
     rules = dict(line.split(None, 1) for line in lines if line.strip() and not line.startswith("#"))
     assert rules["*"].startswith("@")
-    for path in ("/.github/", "/SECURITY.md", "/deny.toml", "/scripts/", "/Cargo.lock", "/crates/traceqa-mcp/"):
+    for path in ("/.github/", "/docs/SECURITY.md", "/deny.toml", "/scripts/", "/Cargo.lock", "/crates/traceqa-mcp/"):
         assert path in rules, path
 
 
 def test_the_security_policy_names_the_private_reporting_channel() -> None:
-    text = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    text = (ROOT / "docs" / "SECURITY.md").read_text(encoding="utf-8")
     assert "https://github.com/thearpankumar/TraceQA/security/advisories/new" in text
-    assert "SECURITY.md" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "(docs/SECURITY.md)" in (ROOT / "README.md").read_text(encoding="utf-8")
 
 
 def test_deny_policy_denies_unknown_sources_and_lists_its_licences() -> None:

@@ -3,7 +3,7 @@
 * @thearpankumar
 
 /.github/ @thearpankumar
-/SECURITY.md @thearpankumar
+/docs/SECURITY.md @thearpankumar
 /deny.toml @thearpankumar
 /scripts/ @thearpankumar
 /crates/traceqa-cli/driver-requirements.txt @thearpankumar
