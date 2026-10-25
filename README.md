@@ -196,6 +196,13 @@ conformance claim (see [docs/usage.md](docs/usage.md#traceqa-findings)):
 traceqa findings runs/<runId>
 ```
 
+Check a run against a manifest of what the page must have (`traceqa baseline init` writes a first
+one; see [docs/usage.md](docs/usage.md#traceqa-verify)). Exit 1 when something is missing:
+
+```sh
+traceqa verify runs/<runId> --manifest manifest.yaml --strict
+```
+
 Turn a run into a Playwright page object, in TypeScript or Python, with one property per
 component (role and exact name first, never `nth()`; see
 [docs/usage.md](docs/usage.md#traceqa-codegen)):

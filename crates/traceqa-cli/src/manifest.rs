@@ -215,6 +215,90 @@ pub fn to_yaml(manifest: &ManifestFile, source: &str) -> String {
     out
 }
 
+/// The largest manifest read. A hand-written list of components is far smaller.
+pub const MAX_BYTES: usize = 1024 * 1024;
+
+/// Reads a manifest from YAML (or JSON, which is YAML) and checks it. Unknown keys are an error,
+/// and so is a viewport name written twice. The error names the problem in words a person can fix.
+pub fn parse(text: &str) -> Result<ManifestFile, String> {
+    if text.len() > MAX_BYTES {
+        return Err(format!(
+            "the manifest is too large ({} bytes; the limit is {MAX_BYTES})",
+            text.len()
+        ));
+    }
+    // A mapping with a key twice is read by serde as the last one; reading into a generic value
+    // first makes it an error, so a repeated viewport name cannot silently replace the first.
+    serde_norway::from_str::<serde_norway::Value>(text).map_err(|e| e.to_string())?;
+    let manifest: ManifestFile = serde_norway::from_str(text).map_err(|e| e.to_string())?;
+    validate(&manifest)?;
+    Ok(manifest)
+}
+
+/// Checks what the schema cannot say: a supported version, viewports that differ in size, `hidden`
+/// lists that name known viewports, and counts that agree.
+pub fn validate(manifest: &ManifestFile) -> Result<(), String> {
+    if let Some(v) = manifest.format_version.filter(|v| *v != FORMAT_VERSION) {
+        return Err(format!(
+            "formatVersion {v} is not supported; this traceqa reads version {FORMAT_VERSION}"
+        ));
+    }
+    if manifest.viewports.is_empty() {
+        return Err("viewports is empty; name at least one, for example desktop: { width: 1280, height: 800 }".into());
+    }
+    let mut sizes: Vec<(&String, &Viewport)> = manifest.viewports.iter().collect();
+    sizes.sort_by_key(|(name, _)| *name);
+    for (i, (a, size_a)) in sizes.iter().enumerate() {
+        for (b, size_b) in &sizes[i + 1..] {
+            if (size_a.width, size_a.height) == (size_b.width, size_b.height) {
+                return Err(format!(
+                    "viewports {a} and {b} have the same size; a size must map to one name"
+                ));
+            }
+        }
+    }
+    for (i, c) in manifest.components.iter().enumerate() {
+        let at = format!("components[{i}] ({})", c.role);
+        if c.template == Some(true) && c.name.is_some() {
+            return Err(format!(
+                "{at}: a template component has no name; remove name or template"
+            ));
+        }
+        for h in &c.hidden {
+            if !manifest.viewports.contains_key(h) {
+                return Err(format!(
+                    "{at}: hidden names viewport {h:?}, which is not under viewports"
+                ));
+            }
+        }
+        if c.disabled.unwrap_or(0) > c.instances.unwrap_or(1) {
+            return Err(format!("{at}: disabled is larger than instances"));
+        }
+    }
+    Ok(())
+}
+
+/// A frame name as the fingerprint recipe writes it into a path: NFC, trimmed, inner white space
+/// collapsed and lower-cased (`spec/fingerprint.md`). Compare it with [`frame_of`].
+pub fn normalise_frame(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+    name.nfc()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// The manifest's name for a viewport size, when it has one.
+pub fn viewport_name_for(manifest: &ManifestFile, v: &Viewport) -> Option<String> {
+    manifest
+        .viewports
+        .iter()
+        .find(|(_, size)| (size.width, size.height) == (v.width, v.height))
+        .map(|(name, _)| name.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +351,69 @@ mod tests {
         assert_eq!(c.hidden, ["desktop"]);
         assert_eq!(c.disabled, Some(1));
         assert!(manifest.viewports.contains_key("desktop"));
+    }
+
+    fn viewports() -> &'static str {
+        "viewports:\n  desktop: { width: 1280, height: 800 }\n  mobile: { width: 390, height: 844 }\n"
+    }
+
+    #[test]
+    fn a_valid_manifest_parses() {
+        let text = format!(
+            "{}components:\n  - {{ role: button, name: Go, hidden: [mobile] }}\n",
+            viewports()
+        );
+        let m = parse(&text).unwrap();
+        assert_eq!(m.components[0].hidden, ["mobile"]);
+    }
+
+    #[test]
+    fn unknown_keys_are_an_error_at_every_level() {
+        for bad in [
+            format!("{}components:\n  - {{ role: button, nmae: Go }}\n", viewports()),
+            format!("{}comps: []\ncomponents: []\n", viewports()),
+            format!(
+                "{}absent:\n  - {{ role: button, name: X, extra: 1 }}\ncomponents: []\n",
+                viewports()
+            ),
+        ] {
+            let why = parse(&bad).unwrap_err();
+            assert!(why.contains("unknown field"), "{why}");
+        }
+    }
+
+    #[test]
+    fn duplicate_viewport_names_and_sizes_are_an_error() {
+        let names = "viewports:\n  a: { width: 1, height: 2 }\n  a: { width: 3, height: 4 }\ncomponents: []\n";
+        assert!(parse(names).is_err());
+        let sizes = "viewports:\n  a: { width: 1, height: 2 }\n  b: { width: 1, height: 2 }\ncomponents: []\n";
+        assert!(parse(sizes).unwrap_err().contains("same size"));
+    }
+
+    #[test]
+    fn hidden_must_name_a_viewport_and_counts_must_agree() {
+        let hidden = format!(
+            "{}components:\n  - {{ role: button, name: Go, hidden: [tablet] }}\n",
+            viewports()
+        );
+        assert!(parse(&hidden).unwrap_err().contains("tablet"));
+        let disabled = format!(
+            "{}components:\n  - {{ role: button, name: Go, disabled: 2 }}\n",
+            viewports()
+        );
+        assert!(parse(&disabled).unwrap_err().contains("disabled"));
+        let template = format!(
+            "{}components:\n  - {{ role: link, name: Go, template: true }}\n",
+            viewports()
+        );
+        assert!(parse(&template).unwrap_err().contains("template"));
+        let version = format!("formatVersion: 9\n{}components: []\n", viewports());
+        assert!(parse(&version).unwrap_err().contains("formatVersion"));
+    }
+
+    #[test]
+    fn frame_names_are_normalised_like_the_path() {
+        assert_eq!(normalise_frame("  New  Lett\u{65}\u{301} "), "new lett\u{e9}");
+        assert_eq!(normalise_frame("pay"), "pay");
     }
 }

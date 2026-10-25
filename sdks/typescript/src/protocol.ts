@@ -134,6 +134,10 @@ HealSummary?: HealSummary
 ManifestFile?: ManifestFile
 ManifestAbsent?: ManifestAbsent
 ManifestComponent?: ManifestComponent
+VerifyReport?: VerifyReport
+VerifyTarget?: VerifyTarget
+VerifyIssue?: VerifyIssue
+VerifySkipped?: VerifySkipped
 RunManifest?: RunManifest
 TargetSummary?: TargetSummary
 Timings?: Timings
@@ -1408,7 +1412,7 @@ accepted?: number
 failed: boolean
 }
 /**
- * The whole manifest.
+ * The whole manifest. Unknown keys are an error (typo protection): the manifest is the one place in the spec where additionalProperties is false.
  */
 export interface ManifestFile {
 /**
@@ -1479,6 +1483,82 @@ hidden?: string[]
  * How many instances are disabled. Default 0.
  */
 disabled?: number
+}
+/**
+ * What `traceqa verify --format json` prints: a run checked against a manifest, per target.
+ */
+export interface VerifyReport {
+formatVersion: number
+runId: string
+/**
+ * The manifest file as it was named on the command line.
+ */
+manifest: string
+/**
+ * True when extras (components found but not in the manifest) fail the check.
+ */
+strict: boolean
+/**
+ * True when no target has a failure.
+ */
+passed: boolean
+targets: VerifyTarget[]
+/**
+ * Targets whose viewport size is not in the manifest.
+ */
+skipped: VerifySkipped[]
+/**
+ * Unused manifest entries and other remarks that do not fail the check.
+ */
+notes: string[]
+}
+/**
+ * The check of one target.
+ */
+export interface VerifyTarget {
+/**
+ * The target folder, for example chromium-1280x800.
+ */
+target: string
+url: string
+/**
+ * The manifest's name for the target's viewport.
+ */
+viewport: string
+size: Viewport
+/**
+ * How many manifest components were checked.
+ */
+checked: number
+passed: boolean
+issues: VerifyIssue[]
+}
+/**
+ * One thing the check found.
+ */
+export interface VerifyIssue {
+/**
+ * fail, warning or note. An extra is a warning, or a fail with --strict.
+ */
+severity: ("fail" | "warning" | "note")
+/**
+ * missing, present, instances, confidence, visible, hidden, disabled, frame, shadow, warning or extra.
+ */
+check: string
+/**
+ * A sentence, with the page's words cleaned and cut.
+ */
+message: string
+role?: string
+name?: string
+componentId?: string
+}
+/**
+ * A target that was not checked.
+ */
+export interface VerifySkipped {
+target: string
+reason: string
 }
 /**
  * components.json: every interactive component found on one page, in one browser, at one viewport.

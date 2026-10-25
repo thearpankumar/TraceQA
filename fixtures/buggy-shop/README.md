@@ -13,7 +13,7 @@ different origin.
 |---|---|
 | `site/` | The shop. Plain HTML, CSS and JavaScript, no build step. |
 | `third-party/` | The page inside the cross-origin payment frame. |
-| `manifest.yaml` | Every interactive component the page has. `bench/run.py` scores TraceQA against it. |
+| `manifest.yaml` | Every interactive component the page has. `bench/run.py` scores TraceQA against it, and `traceqa verify --manifest` checks a run against it. |
 
 Each hard case is marked with a comment in `site/index.html`: a grid of 12 cards,
 shadow DOM, same-origin and cross-origin frames, a list that loads on scroll,

@@ -962,6 +962,7 @@ dependencies = [
  "traceqa-protocol",
  "traceqa-recorder",
  "traceqa-visual",
+ "unicode-normalization",
  "ureq",
  "url",
 ]
