@@ -6,6 +6,7 @@ share a console with the command. A test process often has none (CI runners, IDE
 console of its own, starts the command in a new process group, and sends CTRL_BREAK_EVENT to
 that group only. It writes its result as JSON. On Unix the same `run` is called in-process and
 sends SIGINT to the command's session, which is what a terminal does to a foreground command.
+The spec can ask for `signal` (SIGINT, SIGTERM or SIGHUP) and `target` ("group" or "process").
 
     python console_runner.py SPEC.json RESULT.json
 """
@@ -35,8 +36,8 @@ def _pump(stream, sink: list[str], marker: str | None, found: threading.Event) -
             found.set()
 
 
-def _snapshot() -> dict[int, int]:
-    """Windows: every process and its parent, from a toolhelp snapshot."""
+def _snapshot() -> dict[int, tuple[int, str]]:
+    """Windows: every process with its parent and executable name, from a toolhelp snapshot."""
     import ctypes
     from ctypes import wintypes
 
@@ -60,13 +61,13 @@ def _snapshot() -> dict[int, int]:
     kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
     kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    parents: dict[int, int] = {}
+    parents: dict[int, tuple[int, str]] = {}
     handle = kernel.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
     entry = ProcessEntry()
     entry.dwSize = ctypes.sizeof(ProcessEntry)
     ok = kernel.Process32FirstW(handle, ctypes.byref(entry))
     while ok:
-        parents[entry.th32ProcessID] = entry.th32ParentProcessID
+        parents[entry.th32ProcessID] = (entry.th32ParentProcessID, entry.szExeFile)
         ok = kernel.Process32NextW(handle, ctypes.byref(entry))
     kernel.CloseHandle(handle)
     return parents
@@ -90,47 +91,59 @@ def _windows_alive(pid: int) -> bool:
     return code.value == 259  # STILL_ACTIVE
 
 
-def descendants(pid: int) -> set[int]:
-    """Windows: the processes that `pid` started, directly or not, as far as they are alive now."""
+def descendants(pid: int) -> dict[int, str]:
+    """Windows: the processes that `pid` started, directly or not (pid to executable name)."""
     parents = _snapshot()
-    found: set[int] = set()
+    found: dict[int, str] = {}
     todo = [pid]
     while todo:
         parent = todo.pop()
-        for child, its_parent in parents.items():
+        for child, (its_parent, name) in parents.items():
             if its_parent == parent and child not in found and child != pid:
-                found.add(child)
+                found[child] = name
                 todo.append(child)
     return found
 
 
-def _still_running(pid: int, group: set[int]) -> list[int]:
-    """What of the command's processes is still alive. POSIX: the members of its group."""
+def _still_running(pid: int, group: dict[int, str]) -> list[str]:
+    """What of the command's processes is still alive, as "PID COMMAND" so a failure names them.
+
+    POSIX: the members of its group, with their command line. Windows: the processes in `group`
+    (pid to executable name) that have not ended.
+    """
     if WINDOWS:
-        return sorted(p for p in group if _windows_alive(p))
+        return [f"{p} {name}" for p, name in sorted(group.items()) if _windows_alive(p)]
     # A zombie has exited and only waits for its parent. A driver orphaned by an exit that did not
     # wait for it stays one for good where the first process never reaps (a container's, as on
     # the Linux CI runner), so zombies do not count.
-    done = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat="], check=True, capture_output=True, text=True)
+    done = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat=,command="], check=True, capture_output=True, text=True)
     left = []
     for line in done.stdout.splitlines():
-        fields = line.split()
-        if len(fields) == 3 and int(fields[1]) == pid and not fields[2].startswith("Z"):
-            left.append(int(fields[0]))
+        fields = line.split(None, 3)
+        if len(fields) >= 3 and int(fields[1]) == pid and not fields[2].startswith("Z"):
+            left.append(f"{fields[0]} {fields[3] if len(fields) == 4 else ''}".strip())
     return left
 
 
-def _send(process: subprocess.Popen) -> None:
+def _send(process: subprocess.Popen, name: str = "SIGINT", target: str = "group") -> None:
+    """Sends a signal: to the command's whole group (what a terminal does) or to its process alone
+    (what `timeout` or `docker stop` do). Windows only knows the console break event."""
     if WINDOWS:
         import ctypes
 
+        if name != "SIGINT":
+            raise NotImplementedError(f"{name} cannot be sent to a Windows console command")
         # CTRL_BREAK_EVENT to the child's own group only. CTRL_C_EVENT with a group id of 0 would
         # reach every process of the console, this one included.
         if not ctypes.windll.kernel32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, process.pid):
             raise OSError(f"GenerateConsoleCtrlEvent failed: {ctypes.GetLastError()}")
     else:
+        number = getattr(signal, name)
         try:
-            os.killpg(process.pid, signal.SIGINT)
+            if target == "process":
+                os.kill(process.pid, number)
+            else:
+                os.killpg(process.pid, number)
         except (ProcessLookupError, PermissionError):
             # The command has already exited; macOS answers EPERM when only zombies are left in
             # the group, Linux ESRCH when nothing is.
@@ -180,7 +193,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         time.sleep(0.02)
     was_ready = process.poll() is None and (found.is_set() or ("glob" in ready and bool(glob.glob(ready["glob"]))))
 
-    group: set[int] = descendants(process.pid) if WINDOWS and was_ready else set()
+    group = descendants(process.pid) if WINDOWS and was_ready else {}
     started = None
     returncode: Any = None
     if was_ready:
@@ -189,7 +202,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         for index in range(spec.get("signals", 1)):
             if index:
                 time.sleep(spec.get("gap", 0.5))
-            _send(process)
+            _send(process, spec.get("signal", "SIGINT"), spec.get("target", "group"))
         try:
             returncode = process.wait(timeout=spec.get("exit_timeout", 60))
         except subprocess.TimeoutExpired:
@@ -201,7 +214,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     for thread in threads:
         thread.join(timeout=10)
 
-    left: list[int] = []
+    left: list[str] = []
     if was_ready:
         # Browsers close a moment after the command is gone; give them that moment.
         settle = time.monotonic() + spec.get("settle", 10)

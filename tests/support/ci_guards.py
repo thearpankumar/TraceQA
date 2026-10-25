@@ -23,6 +23,7 @@ import pytest
 ALLOWED_SKIPS = [
     r"the WebDriver driver has no hook to run a script before the page's",
     r"set TRACEQA_TEST_SAFARI=1 to drive real Safari",
+    r"SIGTERM and SIGHUP cannot be sent to a Windows console command",
 ]
 
 MISSING_BINARY = re.compile(r"build the (stand-in )?engine first.*", re.DOTALL)

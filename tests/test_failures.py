@@ -25,6 +25,7 @@ BINARY = Path(
 SUPPORT = ROOT / "tests" / "support"
 CRASHING_DRIVER = SUPPORT / "crashing_driver.py"
 STUCK_DRIVER = SUPPORT / "stuck_driver.py"
+DEAF_DRIVER = SUPPORT / "deaf_driver.py"
 
 
 def _load(name: str):
@@ -255,3 +256,43 @@ def test_second_ctrl_c_quits_at_once_with_a_valid_folder(trouble: str, tmp_path:
     assert last["type"] == "run.finished"
     assert not [p.name for p in folder.iterdir() if p.name.endswith(".tmp")]
     assert result.left == [], f"left processes running: {result.left}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGTERM and SIGHUP cannot be sent to a Windows console command")
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGHUP"])
+def test_sigterm_and_sighup_cancel_the_run_like_ctrl_c(
+    trouble: str, tmp_path: Path, run_folder_checker, signal_name: str
+) -> None:
+    # `timeout`, `docker stop` and a closed terminal signal the traceqa process alone, not its
+    # drivers, so the engine itself must stop the run and close its browsers.
+    out = tmp_path / "runs"
+    extra = ["--browser", "chromium,firefox", "--viewport", "1280x800,390x844", "--parallel", "1"]
+    result = _interrupted_extract(
+        trouble, out, signals=1, extra=extra, signal_name=signal_name, target="process", exit_timeout=60
+    )
+    assert result.returncode == 130, result.stderr
+    (folder,) = out.iterdir()
+    manifest = run_folder_checker(folder)
+    assert manifest.status.value == "cancelled"
+    statuses = [target.status.value for target in manifest.targets]
+    assert "failed" not in statuses, statuses
+    last = json.loads((folder / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.finished" and last["data"]["status"] == "cancelled"
+    assert result.left == [], f"{signal_name} left processes running: {result.left}"
+
+
+def test_second_signal_kills_a_driver_that_ignores_signals_and_input(
+    trouble: str, tmp_path: Path, run_folder_checker
+) -> None:
+    # The driver ignores every signal and does not end when its input closes. Only the traceqa
+    # process can end it, and it must do so before it exits.
+    out = tmp_path / "runs"
+    driver = f'"{sys.executable}" "{DEAF_DRIVER}"'
+    result = _interrupted_extract(
+        trouble, out, signals=2, extra=["--driver", driver, "--settle-ms", "60000"], delay=0.5, gap=0.5, exit_timeout=20
+    )
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 10, f"quit after {result.seconds} s"
+    (folder,) = out.iterdir()
+    assert run_folder_checker(folder).status.value == "cancelled"
+    assert result.left == [], f"the driver outlived the command: {result.left}"

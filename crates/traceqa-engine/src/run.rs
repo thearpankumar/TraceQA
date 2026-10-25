@@ -156,7 +156,9 @@ impl Run {
     /// a watcher writes the final `run.json` (status `cancelled`, targets that had not finished
     /// cancelled) and the closing `run.finished` event within about a second, without waiting
     /// for the drivers, and then closes `abort`. The caller then exits. Use it where the person
-    /// can insist on quitting while a driver does not answer.
+    /// can insist on quitting while a driver does not answer. A caller that then exits should call
+    /// [`kill_all_drivers`](crate::driver::kill_all_drivers) first: exiting runs no `Drop`, so a
+    /// driver that ignores its input would otherwise outlive the command.
     pub fn execute_abortable(
         self,
         execution: &Execution,

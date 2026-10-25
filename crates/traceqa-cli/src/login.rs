@@ -17,11 +17,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::interrupt;
 use clap::Args;
+use traceqa_engine::driver::DriverError;
 use traceqa_engine::driver::Drivers;
 use traceqa_engine::driver_commands;
 use traceqa_protocol::sync::LockExt;
@@ -52,6 +54,8 @@ pub struct LoginArgs {
 enum LoginError {
     Usage(String),
     Failed(String),
+    /// Ctrl-C, SIGTERM or SIGHUP arrived. Exits with 130.
+    Interrupted,
 }
 
 impl From<String> for LoginError {
@@ -70,12 +74,58 @@ pub fn login(args: &LoginArgs) -> ExitCode {
             eprintln!("traceqa login: {why}");
             ExitCode::from(2)
         }
+        Err(LoginError::Interrupted) => interrupted(),
         Err(LoginError::Failed(why)) => {
             if interrupt_may_be_arriving() {
-                return ExitCode::from(INTERRUPT_EXIT);
+                return interrupted();
             }
             eprintln!("traceqa login: {why}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// The end of a login that was stopped: nothing was saved, the temporary file is gone (the
+/// `Pending` that held it was dropped, and this removes any that is left).
+fn interrupted() -> ExitCode {
+    remove_pending();
+    interrupt::say("traceqa login: interrupted; nothing was saved");
+    ExitCode::from(interrupt::INTERRUPTED)
+}
+
+/// How long closing the session may take after the first signal. The whole orderly stop is
+/// bounded by [`STOP_BOUND`].
+const CLOSE_BOUND: Duration = Duration::from_secs(5);
+
+/// How long after the first signal the command may take to stop before it is ended anyway.
+const STOP_BOUND: Duration = Duration::from_secs(10);
+
+/// An error from the driver: an interrupt when one was asked for, otherwise a failure.
+fn failed(error: &DriverError) -> LoginError {
+    if interrupt::CANCEL.load(Ordering::SeqCst) {
+        LoginError::Interrupted
+    } else {
+        LoginError::Failed(error.to_string())
+    }
+}
+
+/// Waits for the person to press Enter, or for an interrupt. The read happens on a thread of its
+/// own because a blocked read cannot be cancelled; the thread may stay blocked when the command ends.
+fn wait_for_enter() -> Result<(), LoginError> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = sender.send(io::stdin().lock().read_line(&mut line).map(drop));
+    });
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(read) => return read.map_err(|e| LoginError::Failed(e.to_string())),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if interrupt::CANCEL.load(Ordering::SeqCst) {
+                    return Err(LoginError::Interrupted);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
         }
     }
 }
@@ -84,13 +134,23 @@ fn try_login(args: &LoginArgs) -> Result<String, LoginError> {
     check_address(&args.url)?;
     // Before a browser opens: a file that cannot be written is found now, not after signing in.
     let pending = Pending::prepare(&args.save)?;
-    remove_pending_on_interrupt();
+    interrupt::install(interrupt::Hooks {
+        first_message: "
+traceqa login: interrupted; closing the browser. Press Ctrl-C again to quit at once.",
+        waits_for_run_folder: false,
+        on_exit: || {
+            remove_pending();
+            interrupt::say("traceqa login: interrupted; nothing was saved");
+        },
+        first_signal_bound: Some(STOP_BOUND),
+    });
 
     let mut drivers = Drivers::new(driver_commands(&args.drivers));
     let driver = drivers.for_browser(&args.browser.browser).map_err(|e| e.to_string())?;
     let mut target = args.browser.clone();
     target.headless = Some(args.headless);
     let session = driver
+        .until(&interrupt::CANCEL)
         .open_session(&SessionOpenParams {
             target,
             viewport: Viewport {
@@ -100,26 +160,31 @@ fn try_login(args: &LoginArgs) -> Result<String, LoginError> {
             locale: None,
             storage_state: None,
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| failed(&e))?;
 
-    let outcome = (|| -> Result<StorageState, String> {
+    let outcome = (|| -> Result<StorageState, LoginError> {
         driver
+            .until(&interrupt::CANCEL)
             .goto(&PageGotoParams {
                 session_id: session.session_id.clone(),
                 url: args.url.clone(),
                 wait_until: Some(WaitUntil::Load),
                 timeout_ms: None,
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| failed(&e))?;
         if !args.headless {
             eprintln!("A {} window has opened on {}.", args.browser.browser, args.url);
             eprintln!("Sign in there as you always do, then come back here and press Enter.");
-            let mut line = String::new();
-            io::stdin().lock().read_line(&mut line).map_err(|e| e.to_string())?;
+            wait_for_enter()?;
         }
-        driver.storage(&session.session_id).map_err(|e| e.to_string())
+        driver.storage(&session.session_id).map_err(|e| failed(&e))
     })();
-    let _ = driver.close_session(&session.session_id);
+    // After an interrupt the driver may be busy with the call that was given up on: wait a short,
+    // fixed time for it, then let `drivers` drop, which ends the process.
+    let _ = match outcome {
+        Err(LoginError::Interrupted) => driver.close_session_within(&session.session_id, CLOSE_BOUND),
+        _ => driver.close_session(&session.session_id),
+    };
 
     let state = outcome?;
     pending.commit(&state)?;
@@ -239,13 +304,6 @@ impl Drop for Pending {
 /// More than one only in tests; a login has a single one.
 static PENDING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-/// Set when Ctrl-C arrives, so a login that fails because the driver died with it reports the
-/// interrupt (exit 130) and not the driver's error.
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
-
-/// Exit code of a login stopped with Ctrl-C, as shells report an interrupted command.
-const INTERRUPT_EXIT: u8 = 130;
-
 /// Removes the temporary files that were not moved into place. Returns how many it removed.
 fn remove_pending() -> usize {
     let mut pending = PENDING.lock_ok();
@@ -256,36 +314,17 @@ fn remove_pending() -> usize {
     removed
 }
 
-/// On Ctrl-C (or Ctrl-Break) removes the temporary file and exits with 130. The handler runs on
-/// a thread of its own, so removing a file there is safe.
-fn remove_pending_on_interrupt() {
-    let handler = || {
-        INTERRUPTED.store(true, Ordering::SeqCst);
-        if remove_pending() > 0 {
-            eprintln!("\ntraceqa login: interrupted; nothing was saved");
-        } else {
-            eprintln!("\ntraceqa login: interrupted");
-        }
-        std::process::exit(i32::from(INTERRUPT_EXIT));
-    };
-    if let Err(error) = ctrlc::set_handler(handler) {
-        eprintln!("traceqa login: Ctrl-C will not clean up the temporary file: {error}");
-    }
-}
-
 /// A browser window shares the console with this command, so Ctrl-C can end the driver a moment
 /// before it reaches the handler. Gives the handler that moment before an error is reported.
 fn interrupt_may_be_arriving() -> bool {
     let deadline = Instant::now() + Duration::from_millis(500);
     while Instant::now() < deadline {
-        if INTERRUPTED.load(Ordering::SeqCst) {
-            // The handler is ending the process.
-            std::thread::sleep(Duration::from_secs(5));
+        if interrupt::CANCEL.load(Ordering::SeqCst) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    INTERRUPTED.load(Ordering::SeqCst)
+    interrupt::CANCEL.load(Ordering::SeqCst)
 }
 
 /// Makes a new file that only its owner can open, before any secret is written to it.
@@ -389,6 +428,7 @@ mod tests {
         match Pending::prepare(path) {
             Ok(pending) => pending.commit(&state()),
             Err(LoginError::Usage(why) | LoginError::Failed(why)) => Err(why),
+            Err(LoginError::Interrupted) => Err("interrupted".into()),
         }
     }
 
@@ -505,7 +545,7 @@ mod tests {
     fn usage(url: &str) -> Option<String> {
         match check_address(url) {
             Err(LoginError::Usage(why)) => Some(why),
-            Err(LoginError::Failed(_)) => panic!("an address problem is a usage error"),
+            Err(LoginError::Failed(_) | LoginError::Interrupted) => panic!("an address problem is a usage error"),
             Ok(()) => None,
         }
     }

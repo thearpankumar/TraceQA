@@ -135,7 +135,7 @@ second target's folder ends in `-2` (`chromium-1280x800-2`).
 | `0` | Every target completed. |
 | `1` | At least one target failed. |
 | `2` | The request was invalid, for example a malformed URL or viewport. Nothing was run. |
-| `130` | The run was stopped with Ctrl-C. |
+| `130` | The run was stopped with Ctrl-C, or on Unix with SIGTERM or SIGHUP. |
 
 Ctrl-C stops the run within about a second, even while a page is loading or a
 target waits for a browser that only one target may use at a time. It closes the
@@ -149,7 +149,15 @@ A second Ctrl-C quits at once, without waiting for the browsers: `run.json` is
 written first (status `cancelled`, `finishedAt` set, targets that had not
 finished `cancelled`), `events.jsonl` ends with `run.finished`, and the exit
 code is 130, within about two seconds. The run folder is valid, as after a
-single Ctrl-C.
+single Ctrl-C. The drivers TraceQA started are killed before it exits, so a
+driver that ignores signals and its input closing cannot outlive the command.
+
+On Unix, SIGTERM (`timeout`, `docker stop`, a CI timeout) and SIGHUP (a closed
+terminal) take the same path as Ctrl-C: the first one cancels the run cleanly,
+a second one quits at once. The exit code is 130 for all three, because the
+program cannot tell them apart. On Windows, closing the console window ends the
+process as soon as the handler returns, so that case cannot be cancelled
+cleanly: use Ctrl-C or Ctrl-Break.
 
 ### Examples
 
@@ -415,9 +423,11 @@ Safari, only the cookies and stored values of the site the window ends on are
 saved. `--headless` saves as soon as the page has loaded, for scripts and tests
 where the page signs in by itself.
 
-Ctrl-C (Ctrl-Break on Windows) while the command waits stops it with exit code
-130 and removes the hidden temporary file, so nothing is saved; an existing FILE
-is left as it was.
+Ctrl-C (Ctrl-Break on Windows), or SIGTERM or SIGHUP on Unix, while the command
+waits stops it with exit code 130: the page is closed, the driver is shut down
+(within about 10 seconds), and the hidden temporary file is removed, so nothing
+is saved; an existing FILE is left as it was. A second signal quits at once and
+kills the driver.
 
 How FILE is written:
 

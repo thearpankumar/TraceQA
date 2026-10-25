@@ -2,17 +2,16 @@
 //! request every other client sends, and hands it to the engine.
 
 mod install;
+mod interrupt;
 mod login;
 
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use traceqa_engine::driver::Drivers;
-use traceqa_engine::{driver_commands, serve, Abort, EngineError, Execution, Run};
+use traceqa_engine::{driver_commands, serve, EngineError, Execution, Run};
 use traceqa_protocol::types::{
     BrowserTarget, Event, ExtractOptions, RunManifest, RunStartParams, RunStatus, StorageState, Viewport,
 };
@@ -277,18 +276,24 @@ fn extract(args: ExtractArgs) -> ExitCode {
     let folder = run.folder().to_path_buf();
 
     let commands = driver_commands(&args.drivers.drivers);
-    cancel_on_ctrl_c();
+    interrupt::install(interrupt::Hooks {
+        first_message: "
+Cancelling: closing the browsers. Press Ctrl-C again to quit at once.",
+        waits_for_run_folder: true,
+        on_exit: || {},
+        first_signal_bound: None,
+    });
     let execution = Execution {
         drivers: &|| Drivers::new(commands.clone()),
-        cancel: &CANCEL,
+        cancel: &interrupt::CANCEL,
         policy: None,
     };
     // Browsers run side by side, so each line says which one it is about.
     let mut show_progress = |event: &Event| match &event.target {
-        Some(target) => eprintln!("[{target}] {}", event.message),
-        None => eprintln!("{}", event.message),
+        Some(target) => interrupt::say(&format!("[{target}] {}", event.message)),
+        None => interrupt::say(&event.message),
     };
-    let manifest = run.execute_abortable(&execution, &ABORT, &mut show_progress);
+    let manifest = run.execute_abortable(&execution, &interrupt::ABORT, &mut show_progress);
 
     if args.json {
         println!(
@@ -305,7 +310,7 @@ fn extract(args: ExtractArgs) -> ExitCode {
     }
     match manifest.status {
         RunStatus::Completed => ExitCode::SUCCESS,
-        RunStatus::Cancelled => ExitCode::from(INTERRUPTED),
+        RunStatus::Cancelled => ExitCode::from(interrupt::INTERRUPTED),
         _ => ExitCode::FAILURE,
     }
 }
@@ -319,48 +324,6 @@ fn read_storage_state(path: &Path) -> Result<StorageState, String> {
             path.display()
         )
     })
-}
-
-/// Set by the first Ctrl-C. The run then stops at the next step, closes its browsers and
-/// writes a run folder that says it was cancelled.
-static CANCEL: AtomicBool = AtomicBool::new(false);
-
-/// Exit code of a run stopped with Ctrl-C, as shells report an interrupted command.
-const INTERRUPTED: u8 = 130;
-
-/// Set by the second Ctrl-C. The engine then writes the final run folder at once, without
-/// waiting for the browsers, and the watchdog below ends the process.
-static ABORT: Abort = Abort::new();
-
-/// How long the process waits for the run folder to be closed after a second Ctrl-C.
-const ABORT_WAIT: Duration = Duration::from_secs(2);
-
-fn cancel_on_ctrl_c() {
-    // The handler only sets flags. The folder is written by the engine and the process is ended
-    // by the watchdog, so no file work happens inside the handler.
-    let handler = || {
-        if CANCEL.swap(true, Ordering::SeqCst) {
-            ABORT.request();
-            return;
-        }
-        eprintln!("\nCancelling: closing the browsers. Press Ctrl-C again to quit at once.");
-    };
-    if let Err(error) = ctrlc::set_handler(handler) {
-        eprintln!("traceqa: Ctrl-C will stop the run without closing it cleanly: {error}");
-        return;
-    }
-    let watchdog = std::thread::Builder::new().name("abort-watchdog".into()).spawn(|| {
-        while !ABORT.is_requested() {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        // A second Ctrl-C: the person does not want to wait for the browsers to close.
-        eprintln!("\nQuitting at once.");
-        ABORT.wait_closed(ABORT_WAIT);
-        std::process::exit(i32::from(INTERRUPTED));
-    });
-    if let Err(error) = watchdog {
-        eprintln!("traceqa: a second Ctrl-C will not quit at once: {error}");
-    }
 }
 
 fn print_summary(manifest: &RunManifest) {
