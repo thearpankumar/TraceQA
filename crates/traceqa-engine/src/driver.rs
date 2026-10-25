@@ -202,6 +202,8 @@ pub struct ProcessTransport {
     next_id: u64,
     /// Set once the driver stopped answering, so dropping it does not wait on it again.
     unresponsive: bool,
+    /// Whether `driver.log` notifications are printed to standard error. They are always read.
+    log_to_stderr: bool,
 }
 
 /// The longest line the engine accepts from a driver. A collector result for a very large
@@ -268,6 +270,14 @@ fn read_messages<R: BufRead>(
 }
 
 impl ProcessTransport {
+    /// Stops printing the driver's `driver.log` lines. They are still read, so the pipe never fills.
+    /// The driver's own standard error is left alone: it says why a driver does not start.
+    #[must_use]
+    pub fn quiet(mut self) -> Self {
+        self.log_to_stderr = false;
+        self
+    }
+
     pub fn spawn(command: &DriverCommand) -> Result<Self, DriverError> {
         Self::spawn_with_limit(command, MAX_DRIVER_LINE)
     }
@@ -304,6 +314,7 @@ impl ProcessTransport {
             incoming,
             next_id: 0,
             unresponsive: false,
+            log_to_stderr: true,
         })
     }
 }
@@ -388,7 +399,9 @@ impl ProcessTransport {
                 }
                 Ok(Ok(Message::Notification { method, params })) if method == notification::DRIVER_LOG => {
                     if let Ok(log) = serde_json::from_value::<DriverLogParams>(params) {
-                        eprintln!("{}", log_line(&log));
+                        if self.log_to_stderr {
+                            eprintln!("{}", log_line(&log));
+                        }
                     }
                 }
                 // An answer to a request we gave up on, or a notification we do not know.
@@ -776,6 +789,30 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::Arc;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_quiet_transport_still_reads_the_log_notification() {
+        // A driver that logs, then answers: `printf` prints both lines at once.
+        let script = r#"printf '%s
+%s
+' '{"jsonrpc":"2.0","method":"driver.log","params":{"level":"info","message":"hi"}}' '{"jsonrpc":"2.0","id":1,"result":{}}'; sleep 5"#;
+        let mut process = Command::new("sh");
+        process.args(["-c", script]);
+        let command = DriverCommand::parse("sh").unwrap();
+        let mut transport = ProcessTransport::start(process, &command, MAX_DRIVER_LINE)
+            .unwrap()
+            .quiet();
+        assert!(!transport.log_to_stderr);
+        let answer = transport
+            .call("anything", Value::Null, Duration::from_secs(10))
+            .unwrap();
+        assert_eq!(
+            answer,
+            json!({}),
+            "the notification was consumed and the answer delivered"
+        );
+    }
 
     #[test]
     fn kill_registered_ends_a_driver_that_ignores_its_input() {
