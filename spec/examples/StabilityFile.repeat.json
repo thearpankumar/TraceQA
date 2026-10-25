@@ -1,0 +1,41 @@
+{
+  "formatVersion": 1,
+  "groupId": "g_20261013_210500_c3d4",
+  "url": "https://shop.test",
+  "repeat": 4,
+  "runs": [
+    "r_20261013_210500_0001",
+    "r_20261013_210508_0002",
+    "r_20261013_210516_0003",
+    "r_20261013_210524_0004"
+  ],
+  "targets": [
+    {
+      "dir": "chromium-1280x800",
+      "runsCompleted": 4,
+      "components": [
+        {
+          "id": "c_9f2a41c07b3e",
+          "role": "button",
+          "name": "Add to cart",
+          "runsPresent": 4,
+          "rate": 1.0,
+          "instances": { "min": 2, "max": 2 },
+          "nameVariants": ["Add to cart"],
+          "flags": []
+        },
+        {
+          "id": "c_5b1d77a0e2c4",
+          "role": "button",
+          "name": "Chat with us",
+          "runsPresent": 2,
+          "rate": 0.5,
+          "instances": { "min": 1, "max": 1 },
+          "nameVariants": ["Chat with us"],
+          "flags": ["unstable"]
+        }
+      ],
+      "unstableCount": 1
+    }
+  ]
+}

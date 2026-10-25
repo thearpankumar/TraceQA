@@ -1209,6 +1209,30 @@ class Instance(BaseModel):
     in_shadow_dom: bool = Field(..., validation_alias="inShadowDom", serialization_alias="inShadowDom")
 
 
+class GroupRun(BaseModel):
+    """
+    One member of a RunGroup.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    status: RunStatus
+
+
+class InstanceRange(BaseModel):
+    """
+    Fewest and most instances of a component in the runs that had it.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    min: int = Field(..., ge=0)
+    max: int = Field(..., ge=0)
+
+
 class BaselineTarget(BaseModel):
     """
     One saved browser-and-viewport folder.
@@ -1432,6 +1456,66 @@ class Component(BaseModel):
     instances: list[Instance]
 
 
+class RunGroup(BaseModel):
+    """
+    group.json, in runs/g_<id>/. An index over ordinary run folders that belong together, such as the N runs of `traceqa extract --repeat N`. It is not a layout: every member is a normal run folder next to it in the same --out folder, so tools that list runs (MCP list_runs, the SDKs, the run-folder checker) see them unchanged. A group folder has no run.json.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    group_id: str = Field(
+        ...,
+        validation_alias="groupId", serialization_alias="groupId",
+        description="g_ followed by the same shape as a run id. Equals the folder name.",
+    )
+    kind: str = Field(
+        ...,
+        description="What the group is. Known values: repeat (the same page read several times, to find unstable components), site (the pages of one site).",
+    )
+    url: str = Field(..., description="The page that was asked for.")
+    runs: list[GroupRun] = Field(..., description="The member runs, oldest first.")
+    started_at: str = Field(
+        ..., validation_alias="startedAt", serialization_alias="startedAt", description="RFC 3339 timestamp in UTC."
+    )
+    finished_at: str | None = Field(
+        default=None,
+        validation_alias="finishedAt", serialization_alias="finishedAt",
+        description="RFC 3339 timestamp in UTC. Absent while the group is still being written.",
+    )
+
+
+class ComponentStability(BaseModel):
+    """
+    How steady one component was across the runs of a group.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(..., description="The component id.")
+    role: str
+    name: str = Field(
+        ..., description="The name in the newest run that had the component."
+    )
+    runs_present: int = Field(..., validation_alias="runsPresent", serialization_alias="runsPresent", ge=0)
+    rate: float = Field(
+        ...,
+        description="runsPresent divided by the target's runsCompleted, from 0 to 1.",
+    )
+    instances: InstanceRange
+    name_variants: list[str] = Field(
+        ...,
+        validation_alias="nameVariants", serialization_alias="nameVariants",
+        description="The different names seen, sorted. Only one entry unless the component's name changes between runs.",
+    )
+    flags: list[str] = Field(
+        ...,
+        description="Known values: unstable (0 < rate < 1), count_varies (the instance count differs between the runs that had it), state_flaps (visible or enabled differs between those runs), name_varies (more than one name).",
+    )
+
+
 class BaselineFile(BaseModel):
     """
     baseline.json. Holds no storage state, no run.json and no error text, so the folder is safe to commit.
@@ -1622,6 +1706,35 @@ class ComponentsFile(BaseModel):
     warnings: list[Warning]
 
 
+class TargetStability(BaseModel):
+    """
+    Stability of the components of one target folder (browser and viewport) across the runs.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    dir: str = Field(
+        ...,
+        description="Folder name inside each run folder, for example chromium-1280x800.",
+    )
+    runs_completed: int = Field(
+        ...,
+        validation_alias="runsCompleted", serialization_alias="runsCompleted",
+        description="In how many runs this target completed. The denominator of every rate below.",
+        ge=0,
+    )
+    components: list[ComponentStability] = Field(
+        ..., description="Every component seen in at least one run, by id."
+    )
+    unstable_count: int = Field(
+        ...,
+        validation_alias="unstableCount", serialization_alias="unstableCount",
+        description="How many components carry at least one flag.",
+        ge=0,
+    )
+
+
 class BaselineTargetReport(BaseModel):
     """
     The comparison of one baseline target. Exactly one of diff and error is set.
@@ -1693,6 +1806,26 @@ class CollectorResult(BaseModel):
         ..., description="Interactive elements in document order."
     )
     warnings: list[Warning]
+
+
+class StabilityFile(BaseModel):
+    """
+    stability.json, in runs/g_<id>/ of a `repeat` group. For each target folder name, how often each component was found across the runs. Only targets that completed count: a failed or cancelled target is not a run in which the component was missing.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    group_id: str = Field(..., validation_alias="groupId", serialization_alias="groupId")
+    url: str
+    repeat: int = Field(
+        ...,
+        description="How many runs were asked for. The runs array is shorter when the group was cancelled.",
+        ge=0,
+    )
+    runs: list[str] = Field(..., description="Run ids, oldest first.")
+    targets: list[TargetStability]
 
 
 class BaselineReport(BaseModel):

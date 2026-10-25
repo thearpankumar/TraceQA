@@ -18,7 +18,9 @@ mod interrupt;
 mod login;
 mod manifest;
 mod mcp;
+mod runs;
 mod serve;
+mod stability;
 
 use std::process::ExitCode;
 
@@ -72,6 +74,10 @@ enum Command {
     ///
     /// Then run: traceqa extract URL --storage-state FILE
     Login(login::LoginArgs),
+    /// List, count and delete the runs in the runs folder.
+    ///
+    /// Then: traceqa runs prune --keep 20 --dry-run
+    Runs(runs::RunsArgs),
 }
 
 fn main() -> ExitCode {
@@ -85,6 +91,7 @@ fn main() -> ExitCode {
         Command::Install(args) => install::run(&args),
         Command::Login(args) => login::run(&args),
         Command::Mcp(args) => mcp::run(&args),
+        Command::Runs(args) => runs::run(&args),
         Command::Serve(args) => serve::run(&args),
     }
 }

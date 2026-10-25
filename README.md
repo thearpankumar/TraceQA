@@ -179,6 +179,15 @@ Each run writes a self-contained run folder under `./runs`, holding a summary,
 an event log, and the components found for each browser and screen size. The
 formats are described in [docs/usage.md](docs/usage.md#output-files).
 
+Find components that come and go (a chat widget, a banner that loads late) by reading the page
+several times, and keep the runs folder in check (see
+[docs/usage.md](docs/usage.md#--repeat-find-unstable-components)):
+
+```sh
+traceqa extract https://example.com --repeat 5 --fail-on-unstable
+traceqa runs prune --keep 20 --older-than 14d --dry-run
+```
+
 Then run automated checks over the run: controls with no name, buttons that are
 not buttons, targets too small to hit. They are automated checks, not a
 conformance claim (see [docs/usage.md](docs/usage.md#traceqa-findings)):

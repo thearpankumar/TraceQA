@@ -138,6 +138,19 @@ runs/<runId>/
     crops/<componentId>.png one crop per component    (only with pictures)
 ```
 
+A run group is an index over ordinary runs, not a nested layout. `traceqa extract --repeat N`
+writes its N runs as normal sibling folders and one group folder next to them:
+
+```
+runs/g_<id>/
+  group.json                RunGroup (kind: repeat; later also site)
+  stability.json            StabilityFile (repeat groups)
+```
+
+A group folder has no `run.json`, so everything that lists runs by `runs/*/run.json` (MCP
+`list_runs`, the SDKs, the run-folder checker) skips it and sees the member runs unchanged.
+`traceqa runs prune` removes a group folder when none of its runs is left.
+
 Status of a stopped run: a cancel (Ctrl-C, `run.cancel`) turns every target that
 was in flight, and every target not yet started, into `cancelled`, also when the
 cancel took the target's browser or driver down first. A cancelled target has no
