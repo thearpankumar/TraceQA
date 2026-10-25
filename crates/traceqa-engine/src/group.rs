@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use traceqa_protocol::types::{Component, Confidence, Instance, RawElement, Rect};
 
 use crate::fingerprint::{self, CHANGING, REPEAT_THRESHOLD, TEMPLATE};
+use crate::locator::{self, Place};
 
 /// Repeated items under these roles are distinct controls (menu entries, tabs), never one template.
 const NEVER_TEMPLATED: [&str; 5] = ["navigation", "menu", "menubar", "tablist", "toolbar"];
@@ -148,13 +149,15 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
     // Unnamed elements seen so far at each place. Three icon buttons in a row are three controls,
     // while the one icon button in each card of a grid is the same control twelve times.
     let mut unnamed_seen: HashMap<(String, String, String, String), usize> = HashMap::new();
+    // Where each instance was found, in the order of `components[..].instances`, for the locators.
+    let mut places: Vec<Vec<Place>> = Vec::new();
     for (located, info) in elements.into_iter().zip(analysed) {
         let Located {
             element,
             frame_id,
             page_box,
             name_changes,
-            ..
+            frame_step,
         } = located;
         let template_ordinal = info
             .slot
@@ -197,6 +200,7 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
                 signals: Vec::new(),
                 path: info.path_key.clone(),
                 crop: None,
+                locator: None,
                 instances: Vec::new(),
             });
             components.len() - 1
@@ -210,6 +214,14 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
                 component.signals.push(signal);
             }
         }
+        if places.len() <= index {
+            places.resize_with(index + 1, Vec::new);
+        }
+        places[index].push(Place {
+            frame_step,
+            path: element.path.clone(),
+            text_name: element.name_source.as_deref() == Some("content"),
+        });
         component.instances.push(Instance {
             key: format!("{id}:{}", component.instances.len()),
             name: element.name,
@@ -223,6 +235,7 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
             in_shadow_dom: element.in_shadow_dom,
         });
     }
+    locator::assign(&mut components, &places);
     components
 }
 

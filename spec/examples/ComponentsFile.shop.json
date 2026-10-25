@@ -26,6 +26,17 @@
       ],
       "path": "list \"products\" > listitem",
       "crop": "crops/c_9f2a41c07b3e.png",
+      "locator": {
+        "strategy": "role",
+        "role": "button",
+        "name": "Add to cart",
+        "exact": true,
+        "unique": true,
+        "matches": 2,
+        "own": 2,
+        "forced": false,
+        "needsIncludeHidden": false
+      },
       "instances": [
         {
           "key": "c_9f2a41c07b3e:0",

@@ -6,6 +6,10 @@ export type RunStatus = ("running" | "completed" | "failed" | "cancelled")
  */
 export type Confidence = ("high" | "low")
 /**
+ * How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.
+ */
+export type LocatorStrategy = ("role" | "testid" | "text" | "css")
+/**
  * load: the load event fired. settled: load fired and the network and DOM have been quiet for a short time.
  */
 export type WaitUntil = ("load" | "settled")
@@ -55,6 +59,9 @@ StorageItem?: StorageItem
 Warning?: Warning
 ElementState?: ElementState
 Confidence?: Confidence
+LocatorStrategy?: LocatorStrategy
+LocatorScope?: LocatorScope
+Locator?: Locator
 RunStatus?: RunStatus
 DiffFile?: DiffFile
 DiffSide?: DiffSide
@@ -517,6 +524,76 @@ cookies: StorageCookie[]
  * Values in each site's localStorage.
  */
 origins: StorageOrigin[]
+}
+/**
+ * One ancestor a locator searches inside, outermost first in Locator.scope.
+ */
+export interface LocatorScope {
+role: string
+/**
+ * The ancestor's accessible name, matched exactly.
+ */
+name?: string
+}
+/**
+ * How to find a component again with Playwright-style locators (getByRole, getByTestId, getByText). The counts are over the instances collected in the same file, so uniqueness is proven for one page in one browser; `traceqa codegen` combines the files of all browsers. Never uses nth(): a component that cannot be told apart is reported as not unique, or located by CSS with forced set.
+ */
+export interface Locator {
+strategy: LocatorStrategy
+/**
+ * ARIA role, for the role strategy.
+ */
+role?: string
+/**
+ * Accessible name (role strategy) or text (text strategy). Matched exactly: whitespace normalised, case sensitive. Absent when the name is a template or changes.
+ */
+name?: string
+/**
+ * True whenever a name is used.
+ */
+exact?: boolean
+/**
+ * Value of data-testid, for the testid strategy.
+ */
+testId?: string
+/**
+ * Ancestors to search inside, outermost first, each a descendant of the one before.
+ */
+scope?: LocatorScope[]
+/**
+ * Label of the frame the component is in, as written in its path: lower case, whitespace normalised. Absent for the main frame.
+ */
+frame?: string
+/**
+ * CSS selector, only for the css strategy.
+ */
+css?: string
+/**
+ * True when the locator matches the component's instances and nothing else collected (matches equals own).
+ */
+unique: boolean
+/**
+ * How many collected instances in this file the locator matches.
+ */
+matches: number
+/**
+ * How many of those are instances of this component.
+ */
+own: number
+/**
+ * Ids of other components the locator also matches, at most 5.
+ * 
+ * @maxItems 5
+ */
+ambiguousWith?: []|[string]|[string, string]|[string, string, string]|[string, string, string, string]|[string, string, string, string, string]
+/**
+ * True when no readable locator told the component apart and a structural CSS selector was used. Brittle: it breaks when the page layout changes.
+ */
+forced: boolean
+/**
+ * True when every instance is hidden, so a role locator only finds it with includeHidden.
+ */
+needsIncludeHidden: boolean
 }
 /**
  * Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).
@@ -1102,7 +1179,68 @@ path: string
  * Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.
  */
 crop?: string
+locator?: Locator1
 instances: Instance[]
+}
+/**
+ * How to find the component again with a Playwright-style locator. Uniqueness is within this file (one page, one browser); `traceqa codegen` combines the files of every browser.
+ */
+export interface Locator1 {
+strategy: LocatorStrategy
+/**
+ * ARIA role, for the role strategy.
+ */
+role?: string
+/**
+ * Accessible name (role strategy) or text (text strategy). Matched exactly: whitespace normalised, case sensitive. Absent when the name is a template or changes.
+ */
+name?: string
+/**
+ * True whenever a name is used.
+ */
+exact?: boolean
+/**
+ * Value of data-testid, for the testid strategy.
+ */
+testId?: string
+/**
+ * Ancestors to search inside, outermost first, each a descendant of the one before.
+ */
+scope?: LocatorScope[]
+/**
+ * Label of the frame the component is in, as written in its path: lower case, whitespace normalised. Absent for the main frame.
+ */
+frame?: string
+/**
+ * CSS selector, only for the css strategy.
+ */
+css?: string
+/**
+ * True when the locator matches the component's instances and nothing else collected (matches equals own).
+ */
+unique: boolean
+/**
+ * How many collected instances in this file the locator matches.
+ */
+matches: number
+/**
+ * How many of those are instances of this component.
+ */
+own: number
+/**
+ * Ids of other components the locator also matches, at most 5.
+ * 
+ * @maxItems 5
+ */
+ambiguousWith?: []|[string]|[string, string]|[string, string, string]|[string, string, string, string]|[string, string, string, string, string]
+/**
+ * True when no readable locator told the component apart and a structural CSS selector was used. Brittle: it breaks when the page layout changes.
+ */
+forced: boolean
+/**
+ * True when every instance is hidden, so a role locator only finds it with includeHidden.
+ */
+needsIncludeHidden: boolean
 }
 /**
  * One actual element on the page.

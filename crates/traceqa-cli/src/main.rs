@@ -7,6 +7,7 @@
 //! the variant order, which is the order `traceqa --help` lists commands in.
 
 mod args;
+mod codegen;
 mod diff;
 mod doctor;
 mod extract;
@@ -34,6 +35,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Write a Playwright page object (TypeScript or Python) for the components of a run.
+    ///
+    /// Then: traceqa codegen runs/RUN --lang ts
+    Codegen(codegen::CodegenArgs),
     /// Compare two runs (browsers, viewports, or builds) by component.
     ///
     /// Prints Markdown, or the DiffFile JSON with --format json. Exit 0 when the diff ran.
@@ -64,6 +69,7 @@ enum Command {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
+        Command::Codegen(args) => codegen::run(&args),
         Command::Diff(args) => diff::run(&args),
         Command::Doctor(args) => doctor::run(&args),
         Command::Extract(args) => extract::run(&args),

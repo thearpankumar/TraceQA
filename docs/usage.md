@@ -631,6 +631,73 @@ warning. An entry that matches no finding in any target gets a
 When a run has such warnings they are written to a run-level `findings.json` in the
 run folder itself (`scope: "run"`).
 
+## `traceqa codegen`
+
+Writes a Playwright page object from a finished run: one class, one property per
+component, in TypeScript or Python.
+
+```
+traceqa codegen runs/r_20261013_210455_a1b2 --lang ts
+traceqa codegen runs/r_20261013_210455_a1b2 --lang py --out tests/pages --target chromium
+```
+
+| Option | Meaning |
+|---|---|
+| `RUN` | A run folder made by `traceqa extract`. |
+| `--lang ts\|py` | TypeScript (`<name>.page.ts`, `@playwright/test`) or Python (`<name>_page.py`, the sync API). |
+| `--out DIR` | Where to write. Default `./traceqa-pages`. |
+| `--target NAME` | Use only this target, by folder (`chromium-1280x800`) or browser (`chromium`). Repeat for several. Default: every completed target. |
+| `--class-name NAME` | The class. Default: made from the page title, for example `BuggyShopPage`; `AppPage` when the title has no ASCII letters. |
+| `--include-hidden` | Also write components that are hidden in every target. They are found with `includeHidden`. Default: left out, and listed under `leftOutAsHidden` in `locators.json`. |
+
+It reads the `locator` of each component in every selected target (see
+[Output files](#output-files)) and writes only what holds in all of them. A component is
+`unique` in the page object only when it is unique, with the same descriptor, in every
+browser that has it. When the browsers disagree the descriptor with the most
+ancestors is used and the property says `DIFFERS`.
+
+What a property looks like (TypeScript; the Python class is the same with `@property`):
+
+```ts
+  // traceqa:id c_5e19c7...
+  // role: "button", name: "Add to cart"
+  /** A multi-match locator: the page had 12 of these. Use all(), count() or filter(). */
+  get addToCartButton(): Locator {
+    return this.page.getByRole("button", { name: "Add to cart", exact: true });
+  }
+```
+
+* **Order of preference:** role and exact name; the `data-testid` every instance shares;
+  role (and name) inside the nearest named ancestors that tell it apart; the exact visible
+  text for elements with no role; and last a CSS selector, marked `FORCED`. Names are
+  always `exact: true` because Playwright's default is a case-insensitive substring.
+* **`nth()` is never written.** A component that appears several times is a multi-match
+  locator, and its docstring says so. One that cannot be told apart from another component
+  says `AMBIGUOUS` (with the other ids) or is `FORCED` to CSS, never silently.
+* **Frames:** a component in an iframe goes through `frameByLabel(page, label)` /
+  `frame_by_label(page, label)`, written at the top of the file. The label is the iframe's
+  name, else the path of its address, lower case, as in the component's path.
+* **Markers:** every property has a `traceqa:id c_...` comment directly above it, so a tool
+  can find and rewrite it later. Property names are ASCII (`addToCartButton` /
+  `add_to_cart_button`); two components with the same name both get the first six hex
+  digits of their id (`homeLink_0f4b2a`). Names are stable from run to run.
+* **Locale:** names are matched exactly, so a page object is for the language it was read
+  in. The file says so in its header.
+* **Page content that loads on scroll or after a click** is not there until the test makes
+  it so; the counts in the run were taken after the extraction scrolled the page.
+* **Safety:** names, test ids, selectors and frame labels are page text. They are written
+  only as escaped string literals (quotes, backslashes, line breaks, U+2028 and U+2029 and
+  invisible or bidirectional characters become `\uXXXX`), never raw, and a comment holds
+  them only in that form. Class names and file names are ASCII, and a run folder that names
+  a target outside itself is refused.
+
+`locators.json` is written next to the page object. It maps each component id to its
+`property`, `role`, `name`, the merged `locator`, `presentIn` and `uniqueIn` (targets),
+`unique`, `forced`, `differsAcrossTargets` and `matchesAtMost`.
+
+Exit code 0 on success, 2 when the command is wrong, the run cannot be read, or the run was
+made by a `traceqa` from before locators existed (extract the page again).
+
 ## Pages behind a sign-in
 
 Extraction starts every browser empty, so a page behind a sign-in, an
@@ -956,6 +1023,7 @@ live to an SDK's `on_event` callback.
 | `signals` | Why the element is considered interactive: `native`, `role`, `contenteditable`, `tabindex`, `onclick-attr`, `cursor-pointer`. |
 | `path` | The structural path to the component, from its innermost named ancestor down (the whole path when none is named), for example `list "products" > listitem`. |
 | `crop` | Path of a crop of the component, relative to `components.json`. Absent without `--crops`, and when the component never appeared on screen. |
+| `locator` | How to find the component again with Playwright. See [Locator](#locator). |
 | `instances` | Every element that belongs to the component. |
 
 Each instance has a `key`, its own `name`, `nameSource` (where that name came
@@ -969,6 +1037,22 @@ and `inShadowDom`.
 A selector is a CSS selector within the element's frame. For an element inside
 shadow DOM it has parts joined by ` >>> `, each resolved inside the shadow root
 of the element the previous part matched.
+
+### Locator
+
+`locator` describes how to find the component with Playwright's locators, and is what
+[`traceqa codegen`](#traceqa-codegen) turns into code. `strategy` is `role` (`role`, and
+`name` matched exactly), `testid` (`testId`), `text` (`name`, exact) or `css` (`css`, only
+with `forced`). `scope` lists ancestors to search inside, outermost first (`role` and
+`name`), `frame` is the iframe's label, and `needsIncludeHidden` is true when every instance
+is hidden. `matches` is how many collected instances the locator finds in this file and
+`own` how many of them belong to the component; `unique` means they are equal and cover
+every instance, and `ambiguousWith` lists up to five other components it also finds. The
+counts follow Playwright: an exact name is compared with whitespace squashed and case kept,
+and hidden elements are not found unless `needsIncludeHidden`. They only cover this file, so
+a locator is proven unique for one page in one browser; `codegen` combines the browsers.
+Roles the collector reports but Playwright does not see (`summary` as a button, a
+`contenteditable` element as a textbox) are never looked up by role.
 
 ### Warnings
 

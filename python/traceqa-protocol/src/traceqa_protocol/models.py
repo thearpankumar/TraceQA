@@ -275,6 +275,95 @@ class Confidence(str, Enum):
     low = "low"
 
 
+class LocatorStrategy(str, Enum):
+    """
+    How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.
+    """
+
+    role = "role"
+    testid = "testid"
+    text = "text"
+    css = "css"
+
+
+class LocatorScope(BaseModel):
+    """
+    One ancestor a locator searches inside, outermost first in Locator.scope.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: str
+    name: str | None = Field(
+        default=None, description="The ancestor's accessible name, matched exactly."
+    )
+
+
+class Locator(BaseModel):
+    """
+    How to find a component again with Playwright-style locators (getByRole, getByTestId, getByText). The counts are over the instances collected in the same file, so uniqueness is proven for one page in one browser; `traceqa codegen` combines the files of all browsers. Never uses nth(): a component that cannot be told apart is reported as not unique, or located by CSS with forced set.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    strategy: LocatorStrategy
+    role: str | None = Field(
+        default=None, description="ARIA role, for the role strategy."
+    )
+    name: str | None = Field(
+        default=None,
+        description="Accessible name (role strategy) or text (text strategy). Matched exactly: whitespace normalised, case sensitive. Absent when the name is a template or changes.",
+    )
+    exact: bool | None = Field(
+        default=None, description="True whenever a name is used."
+    )
+    test_id: str | None = Field(
+        default=None,
+        validation_alias="testId", serialization_alias="testId",
+        description="Value of data-testid, for the testid strategy.",
+    )
+    scope: list[LocatorScope] | None = Field(
+        default=None,
+        description="Ancestors to search inside, outermost first, each a descendant of the one before.",
+    )
+    frame: str | None = Field(
+        default=None,
+        description="Label of the frame the component is in, as written in its path: lower case, whitespace normalised. Absent for the main frame.",
+    )
+    css: str | None = Field(
+        default=None, description="CSS selector, only for the css strategy."
+    )
+    unique: bool = Field(
+        ...,
+        description="True when the locator matches the component's instances and nothing else collected (matches equals own).",
+    )
+    matches: int = Field(
+        ...,
+        description="How many collected instances in this file the locator matches.",
+        ge=0,
+    )
+    own: int = Field(
+        ..., description="How many of those are instances of this component.", ge=0
+    )
+    ambiguous_with: list[str] | None = Field(
+        default=None,
+        validation_alias="ambiguousWith", serialization_alias="ambiguousWith",
+        description="Ids of other components the locator also matches, at most 5.",
+        max_length=5,
+    )
+    forced: bool = Field(
+        ...,
+        description="True when no readable locator told the component apart and a structural CSS selector was used. Brittle: it breaks when the page layout changes.",
+    )
+    needs_include_hidden: bool = Field(
+        ...,
+        validation_alias="needsIncludeHidden", serialization_alias="needsIncludeHidden",
+        description="True when every instance is hidden, so a role locator only finds it with includeHidden.",
+    )
+
+
 class RunStatus(str, Enum):
     running = "running"
     completed = "completed"
@@ -1118,6 +1207,10 @@ class Component(BaseModel):
     crop: str | None = Field(
         default=None,
         description="Path of a screenshot crop of the component, relative to this file. It is taken from the screen that showed the most of the component while the page was scrolled through. Absent when it never appeared.",
+    )
+    locator: Locator | None = Field(
+        default=None,
+        description="How to find the component again with a Playwright-style locator. Uniqueness is within this file (one page, one browser); `traceqa codegen` combines the files of every browser.",
     )
     instances: list[Instance]
 
