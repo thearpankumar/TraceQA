@@ -108,8 +108,16 @@ def _still_running(pid: int, group: set[int]) -> list[int]:
     """What of the command's processes is still alive. POSIX: the members of its group."""
     if WINDOWS:
         return sorted(p for p in group if _windows_alive(p))
-    done = subprocess.run(["pgrep", "-g", str(pid)], check=False, capture_output=True, text=True)
-    return [int(p) for p in done.stdout.split()]
+    # A zombie has exited and only waits for its parent. A driver orphaned by an exit that did not
+    # wait for it stays one for good where the first process never reaps (a container's, as on
+    # the Linux CI runner), so zombies do not count.
+    done = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat="], check=True, capture_output=True, text=True)
+    left = []
+    for line in done.stdout.splitlines():
+        fields = line.split()
+        if len(fields) == 3 and int(fields[1]) == pid and not fields[2].startswith("Z"):
+            left.append(int(fields[0]))
+    return left
 
 
 def _send(process: subprocess.Popen) -> None:
@@ -121,7 +129,13 @@ def _send(process: subprocess.Popen) -> None:
         if not ctypes.windll.kernel32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, process.pid):
             raise OSError(f"GenerateConsoleCtrlEvent failed: {ctypes.GetLastError()}")
     else:
-        os.killpg(process.pid, signal.SIGINT)
+        try:
+            os.killpg(process.pid, signal.SIGINT)
+        except (ProcessLookupError, PermissionError):
+            # The command has already exited; macOS answers EPERM when only zombies are left in
+            # the group, Linux ESRCH when nothing is.
+            if process.poll() is None:
+                raise
 
 
 def run(spec: dict[str, Any]) -> dict[str, Any]:
