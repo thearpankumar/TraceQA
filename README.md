@@ -204,7 +204,7 @@ conformance claim (see [docs/usage.md](docs/usage.md#traceqa-findings)):
 traceqa findings runs/<runId>
 ```
 
-Optionally add axe-core's rules to the same findings, placed on component ids. axe-core (MPL-2.0) is not shipped with TraceQA; `traceqa install --axe` downloads it, hash-checked, at your request ([docs/usage.md](docs/usage.md#accessibility-checks-with-axe-core), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)):
+Optionally add axe-core's rules to the same findings, placed on component ids. axe-core (MPL-2.0) is not shipped with TraceQA; `traceqa install --axe` downloads it, hash-checked, at your request ([docs/usage.md](docs/usage.md#accessibility-checks-with-axe-core), [docs/third-party-notices.md](docs/third-party-notices.md)):
 
 ```sh
 traceqa install --axe
