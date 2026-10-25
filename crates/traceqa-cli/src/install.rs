@@ -18,7 +18,7 @@ use traceqa_engine::{driver_commands, home};
 
 /// The Python packages that make up the drivers, and where they sit in the repository.
 const PACKAGES: [(&str, &str); 3] = [
-    ("traceqa-protocol", "python/traceqa-protocol"),
+    ("traceqa-protocol", "web-drivers/traceqa-protocol"),
     ("traceqa-driver-playwright", "web-drivers/playwright-py"),
     ("traceqa-driver-webdriver", "web-drivers/webdriver-py"),
 ];
@@ -474,7 +474,7 @@ mod tests {
         let remote = package_specs(None, "v0.2.0");
         assert_eq!(
             remote[0],
-            "traceqa-protocol @ git+https://github.com/thearpankumar/TraceQA@v0.2.0#subdirectory=python/traceqa-protocol"
+            "traceqa-protocol @ git+https://github.com/thearpankumar/TraceQA@v0.2.0#subdirectory=web-drivers/traceqa-protocol"
         );
         // The protocol package comes first, so the drivers' dependency on it is met by the same source.
         assert_eq!(remote.len(), 3);

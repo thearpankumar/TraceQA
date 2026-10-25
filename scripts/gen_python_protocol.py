@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "spec"
-PACKAGE = ROOT / "python" / "traceqa-protocol" / "src" / "traceqa_protocol"
+PACKAGE = ROOT / "web-drivers" / "traceqa-protocol" / "src" / "traceqa_protocol"
 HEADER = "# Generated from spec/ by scripts/gen_python_protocol.py. Do not edit.\n"
 
 
