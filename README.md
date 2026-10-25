@@ -529,7 +529,7 @@ The Rust types regenerate on build.
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
 | [docs/releasing.md](docs/releasing.md) | Version numbers and how to publish a release. |
 | [docs/backlog.md](docs/backlog.md) | Designed but unbuilt work: the explorer, interaction oracles, open gaps and scope cuts. |
-| [SECURITY.md](SECURITY.md) | How to report a vulnerability privately. |
+| [docs/SECURITY.md](docs/SECURITY.md) | How to report a vulnerability privately. |
 | [spec/README.md](spec/README.md) | The contracts and the rules for changing them. |
 | [spec/fingerprint.md](spec/fingerprint.md) | How component identifiers are built. |
 | [docs/PLAN.md](docs/PLAN.md) | Project plan, decisions and current status. |
