@@ -101,6 +101,8 @@ traceqa extract [OPTIONS] <URL>
 | `--timings` | off | Also print where each browser's time went. |
 | `--json` | off | Print the run manifest as JSON instead of a table. Standard output holds that one document and nothing else; progress and the `Run folder:` line go to standard error. |
 | `--storage-state FILE` | none | Start every browser with the cookies and stored values in FILE, for pages behind a sign-in. See [Pages behind a sign-in](#pages-behind-a-sign-in). |
+| `--repeat N` | `1` | Read the page N times (1 to 20) and report how often each component was found. See [`--repeat`](#--repeat-find-unstable-components). |
+| `--fail-on-unstable` | off | With `--repeat`: exit with 1 when any component carries a flag. |
 | `--driver COMMAND` | see above | Command that starts a browser driver. |
 
 Every browser is run at every viewport, several at a time. Progress is written
@@ -185,6 +187,71 @@ traceqa extract https://example.com --browser cdp=http://127.0.0.1:9222
 # Machine-readable result
 traceqa extract https://example.com --json > run.json
 ```
+
+### `--repeat`: find unstable components
+
+```sh
+traceqa extract https://example.com --repeat 5 --fail-on-unstable
+```
+
+Runs the whole extract N times, one after another. Every run is an ordinary run folder in `--out`,
+so `diff`, `findings`, `codegen`, MCP and the SDKs read them as before. Next to them a group
+folder `runs/g_<id>/` holds two files: `group.json` (a `RunGroup`: the member runs, oldest first)
+and `stability.json` (a `StabilityFile`). For each target folder (browser and viewport) it lists
+every component with `runsPresent` and `rate = runsPresent / runsCompleted`. Only targets that
+completed count, so a failed browser does not make every component look missing. A component gets
+flags:
+
+| Flag | Meaning |
+|---|---|
+| `unstable` | Found in some runs but not all (0 < rate < 1). |
+| `count_varies` | The number of instances differs between the runs that had it. |
+| `state_flaps` | `visible` or `enabled` differs between the runs that had it. |
+| `name_varies` | More than one name was seen. Only components that mark a changing name can have this: a different name is otherwise a different component id. |
+
+After the usual per-run summaries it prints `Stability over N runs: K unstable components` and the
+ten least steady. A rate keeps timing problems visible that a retry would hide: a component that is
+there in 3 of 5 runs is a page problem, however green each single run looked.
+
+- `--json` prints the `stability.json` document only (progress, run folders and the group folder go
+  to standard error).
+- `--fail-on-unstable` exits with 1 when any component carries a flag.
+- Ctrl-C stops after the run in flight (the engine cancels it as for a single run), finishes the
+  group with the runs there are, and exits 130.
+- `--repeat 1` (the default) is the plain command: one run, no group folder.
+- `--repeat N --crops` takes the pictures N times, which is the slowest step; a warning says so.
+
+A group folder holds no `run.json`, so tools that list runs (`list_runs` in MCP) do not see it as
+a run.
+
+## `traceqa runs`
+
+What is in the runs folder, and clearing it out. None of these starts a browser.
+
+```sh
+traceqa runs list  [--out runs] [--url URL] [--json]
+traceqa runs stats [--out runs] [--url URL] [--json]
+traceqa runs prune [--out runs] [--keep N] [--older-than AGE] [--url URL] [--dry-run] [--yes]
+```
+
+`list` shows the runs newest first (and the groups). `stats` shows, per page address, the number of
+runs, their statuses, disk use, and the oldest and newest start. `--url` limits either to one
+address, written as it was asked for.
+
+`prune` deletes a run when it is not among the newest `--keep N` runs of its address and/or started
+longer ago than `--older-than` (`12h`, `30d`, `2w`). With both it must satisfy both, so the newest
+N are always kept. At least one is required. Like `docker system prune` it lists what it will
+remove first, but there is no prompt, because a pipeline has no one to answer: without `--yes` it
+prints the plan, deletes nothing and exits with 2. `--dry-run` prints the plan and exits with 0.
+
+It is safe by construction. Only direct children of `--out` whose name starts with `r_` or `g_`
+and that hold a `run.json` (or `group.json`) naming that same folder are considered; a symlink or
+junction is never followed, and anything else in the folder is left alone and not even listed. A
+run that is `running` is kept, unless it started over 24 hours ago: then it is reported as stale
+and treated like any other. A group folder is deleted when none of its runs is left.
+
+A pipeline that runs `extract` on every push should end with
+`traceqa runs prune --keep 20 --older-than 14d --yes`, or the runs folder grows without end.
 
 ## `traceqa diff`
 

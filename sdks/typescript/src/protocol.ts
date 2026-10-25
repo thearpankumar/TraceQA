@@ -126,6 +126,12 @@ Event?: Event
 ComponentsFile?: ComponentsFile
 Component?: Component
 Instance?: Instance
+RunGroup?: RunGroup
+GroupRun?: GroupRun
+StabilityFile?: StabilityFile
+TargetStability?: TargetStability
+ComponentStability?: ComponentStability
+InstanceRange?: InstanceRange
 }
 /**
  * baseline.json. Holds no storage state, no run.json and no error text, so the folder is safe to commit.
@@ -1527,6 +1533,116 @@ box: Rect
 state: ElementState
 frameId: string
 inShadowDom: boolean
+}
+/**
+ * group.json, in runs/g_<id>/. An index over ordinary run folders that belong together, such as the N runs of `traceqa extract --repeat N`. It is not a layout: every member is a normal run folder next to it in the same --out folder, so tools that list runs (MCP list_runs, the SDKs, the run-folder checker) see them unchanged. A group folder has no run.json.
+ */
+export interface RunGroup {
+formatVersion: number
+/**
+ * g_ followed by the same shape as a run id. Equals the folder name.
+ */
+groupId: string
+/**
+ * What the group is. Known values: repeat (the same page read several times, to find unstable components), site (the pages of one site).
+ */
+kind: string
+/**
+ * The page that was asked for.
+ */
+url: string
+/**
+ * The member runs, oldest first.
+ */
+runs: GroupRun[]
+/**
+ * RFC 3339 timestamp in UTC.
+ */
+startedAt: string
+/**
+ * RFC 3339 timestamp in UTC. Absent while the group is still being written.
+ */
+finishedAt?: string
+}
+/**
+ * One member of a RunGroup.
+ */
+export interface GroupRun {
+runId: string
+status: RunStatus
+}
+/**
+ * stability.json, in runs/g_<id>/ of a `repeat` group. For each target folder name, how often each component was found across the runs. Only targets that completed count: a failed or cancelled target is not a run in which the component was missing.
+ */
+export interface StabilityFile {
+formatVersion: number
+groupId: string
+url: string
+/**
+ * How many runs were asked for. The runs array is shorter when the group was cancelled.
+ */
+repeat: number
+/**
+ * Run ids, oldest first.
+ */
+runs: string[]
+targets: TargetStability[]
+}
+/**
+ * Stability of the components of one target folder (browser and viewport) across the runs.
+ */
+export interface TargetStability {
+/**
+ * Folder name inside each run folder, for example chromium-1280x800.
+ */
+dir: string
+/**
+ * In how many runs this target completed. The denominator of every rate below.
+ */
+runsCompleted: number
+/**
+ * Every component seen in at least one run, by id.
+ */
+components: ComponentStability[]
+/**
+ * How many components carry at least one flag.
+ */
+unstableCount: number
+}
+/**
+ * How steady one component was across the runs of a group.
+ */
+export interface ComponentStability {
+/**
+ * The component id.
+ */
+id: string
+role: string
+/**
+ * The name in the newest run that had the component.
+ */
+name: string
+runsPresent: number
+/**
+ * runsPresent divided by the target's runsCompleted, from 0 to 1.
+ */
+rate: number
+instances: InstanceRange
+/**
+ * The different names seen, sorted. Only one entry unless the component's name changes between runs.
+ */
+nameVariants: string[]
+/**
+ * Known values: unstable (0 < rate < 1), count_varies (the instance count differs between the runs that had it), state_flaps (visible or enabled differs between those runs), name_varies (more than one name).
+ */
+flags: string[]
+}
+/**
+ * Fewest and most instances of a component in the runs that had it.
+ */
+export interface InstanceRange {
+min: number
+max: number
 }
 
 // Contract versions and method names.

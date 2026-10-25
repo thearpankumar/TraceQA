@@ -150,6 +150,77 @@
         "frameId": { "type": "string" },
         "inShadowDom": { "type": "boolean" }
       }
+    },
+    "RunGroup": {
+      "description": "group.json, in runs/g_<id>/. An index over ordinary run folders that belong together, such as the N runs of `traceqa extract --repeat N`. It is not a layout: every member is a normal run folder next to it in the same --out folder, so tools that list runs (MCP list_runs, the SDKs, the run-folder checker) see them unchanged. A group folder has no run.json.",
+      "type": "object",
+      "required": ["formatVersion", "groupId", "kind", "url", "runs", "startedAt"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "groupId": { "description": "g_ followed by the same shape as a run id. Equals the folder name.", "type": "string" },
+        "kind": { "description": "What the group is. Known values: repeat (the same page read several times, to find unstable components), site (the pages of one site).", "type": "string" },
+        "url": { "description": "The page that was asked for.", "type": "string" },
+        "runs": { "description": "The member runs, oldest first.", "type": "array", "items": { "$ref": "#/$defs/GroupRun" } },
+        "startedAt": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
+        "finishedAt": { "description": "RFC 3339 timestamp in UTC. Absent while the group is still being written.", "type": "string" }
+      }
+    },
+    "GroupRun": {
+      "description": "One member of a RunGroup.",
+      "type": "object",
+      "required": ["runId", "status"],
+      "properties": {
+        "runId": { "type": "string" },
+        "status": { "$ref": "common.schema.json#/$defs/RunStatus" }
+      }
+    },
+    "StabilityFile": {
+      "description": "stability.json, in runs/g_<id>/ of a `repeat` group. For each target folder name, how often each component was found across the runs. Only targets that completed count: a failed or cancelled target is not a run in which the component was missing.",
+      "type": "object",
+      "required": ["formatVersion", "groupId", "url", "repeat", "runs", "targets"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "groupId": { "type": "string" },
+        "url": { "type": "string" },
+        "repeat": { "description": "How many runs were asked for. The runs array is shorter when the group was cancelled.", "type": "integer", "minimum": 0 },
+        "runs": { "description": "Run ids, oldest first.", "type": "array", "items": { "type": "string" } },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/TargetStability" } }
+      }
+    },
+    "TargetStability": {
+      "description": "Stability of the components of one target folder (browser and viewport) across the runs.",
+      "type": "object",
+      "required": ["dir", "runsCompleted", "components", "unstableCount"],
+      "properties": {
+        "dir": { "description": "Folder name inside each run folder, for example chromium-1280x800.", "type": "string" },
+        "runsCompleted": { "description": "In how many runs this target completed. The denominator of every rate below.", "type": "integer", "minimum": 0 },
+        "components": { "description": "Every component seen in at least one run, by id.", "type": "array", "items": { "$ref": "#/$defs/ComponentStability" } },
+        "unstableCount": { "description": "How many components carry at least one flag.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "ComponentStability": {
+      "description": "How steady one component was across the runs of a group.",
+      "type": "object",
+      "required": ["id", "role", "name", "runsPresent", "rate", "instances", "nameVariants", "flags"],
+      "properties": {
+        "id": { "description": "The component id.", "type": "string" },
+        "role": { "type": "string" },
+        "name": { "description": "The name in the newest run that had the component.", "type": "string" },
+        "runsPresent": { "type": "integer", "minimum": 0 },
+        "rate": { "description": "runsPresent divided by the target's runsCompleted, from 0 to 1.", "type": "number" },
+        "instances": { "$ref": "#/$defs/InstanceRange" },
+        "nameVariants": { "description": "The different names seen, sorted. Only one entry unless the component's name changes between runs.", "type": "array", "items": { "type": "string" } },
+        "flags": { "description": "Known values: unstable (0 < rate < 1), count_varies (the instance count differs between the runs that had it), state_flaps (visible or enabled differs between those runs), name_varies (more than one name).", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "InstanceRange": {
+      "description": "Fewest and most instances of a component in the runs that had it.",
+      "type": "object",
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 }
+      }
     }
   }
 }
