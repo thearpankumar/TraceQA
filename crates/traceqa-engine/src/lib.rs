@@ -44,4 +44,4 @@ pub use url_safety::check_navigable;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The in-page script that lists a page's interactive elements.
-pub const COLLECTOR: &str = include_str!("../../../collector/collector.js");
+pub const COLLECTOR: &str = include_str!("../../../page-script/page-script.js");

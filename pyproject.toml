@@ -33,7 +33,7 @@ traceqa-driver-webdriver = { workspace = true }
 traceqa = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["python", "collector", "web-drivers", "sdks", "tests"]
+testpaths = ["python", "page-script", "web-drivers", "sdks", "tests"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]

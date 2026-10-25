@@ -29,7 +29,7 @@ from traceqa_protocol.testing import DriverClient
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "fixtures" / "collector-cases"
-COLLECTOR = (ROOT / "collector" / "collector.js").read_text(encoding="utf-8")
+COLLECTOR = (ROOT / "page-script" / "page-script.js").read_text(encoding="utf-8")
 # Real Safari runs only where it can: on a Mac with "Allow remote automation" switched on,
 # which CI machines are not. TRACEQA_TEST_SAFARI=1 adds it, as in the WebDriver driver's tests.
 BROWSERS = ["chromium", "firefox", "webkit"] + (["safari"] if os.environ.get("TRACEQA_TEST_SAFARI") == "1" else [])

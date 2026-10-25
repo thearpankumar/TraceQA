@@ -17,7 +17,7 @@ from playwright.sync_api import sync_playwright
 from traceqa_protocol import contracts, models
 from traceqa_protocol.testing import DriverClient, RpcFailure
 
-COLLECTOR = (Path(__file__).resolve().parents[3] / "collector" / "collector.js").read_text(encoding="utf-8")
+COLLECTOR = (Path(__file__).resolve().parents[3] / "page-script" / "page-script.js").read_text(encoding="utf-8")
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 VIEWPORT = {"width": 1280, "height": 800}
 

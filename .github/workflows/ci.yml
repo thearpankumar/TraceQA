@@ -120,7 +120,7 @@ jobs:
         run: uv run ruff format --check .
       - name: Every $ref in spec/ is #/$defs/Name
         run: python3 scripts/check_spec_refs.py
-      - name: The copies of collector/pristine.js are in sync
+      - name: The copies of page-script/pristine.js are in sync
         run: python3 scripts/sync_pristine.py --check
       - name: Python types (pyright)
         run: uv run pyright

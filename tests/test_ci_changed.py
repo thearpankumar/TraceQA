@@ -34,12 +34,12 @@ def test_documentation_only(paths: list[str]) -> None:
         ["crates/schema.md"],
         ["spec/fingerprint.md"],
         ["sdks/typescript/README.md"],
-        ["docs/collector.js"],
+        ["docs/page-script.js"],
         ["docs/x.png"],
         ["docs/run.sh"],
         ["docs/x.py"],
         ["docs/../crates/a.md"],
-        ["README.md", "collector/collector.js"],
+        ["README.md", "page-script/page-script.js"],
         ["docs"],
         ["docs.md"],
     ],
@@ -59,9 +59,9 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     git(tmp_path, "config", "user.email", "a@b")
     git(tmp_path, "config", "user.name", "t")
     git(tmp_path, "config", "commit.gpgsign", "false")
-    (tmp_path / "collector").mkdir()
+    (tmp_path / "page-script").mkdir()
     (tmp_path / "docs").mkdir()
-    (tmp_path / "collector" / "collector.js").write_text("function collect(){ return 1 }\n// pad\n// pad\n// pad\n")
+    (tmp_path / "page-script" / "page-script.js").write_text("function collect(){ return 1 }\n// pad\n// pad\n// pad\n")
     (tmp_path / "README.md").write_text("hi\n")
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "-qm", "base")
@@ -77,9 +77,9 @@ def commit(repo: Path, message: str = "change") -> str:
 
 def test_a_move_into_docs_is_code(repo: Path) -> None:
     base = git(repo, "rev-parse", "HEAD")
-    git(repo, "mv", "collector/collector.js", "docs/collector.js")
+    git(repo, "mv", "page-script/page-script.js", "docs/page-script.js")
     commit(repo)
-    assert ci_changed.changed_paths(base) == ["collector/collector.js", "docs/collector.js"]
+    assert ci_changed.changed_paths(base) == ["docs/page-script.js", "page-script/page-script.js"]
     assert ci_changed.decide("pull_request", base, "") is True
 
 

@@ -348,7 +348,7 @@ flowchart TB
         wd["WebDriver driver"]
     end
 
-    subgraph browsers["Browsers: collector.js runs inside the page"]
+    subgraph browsers["Browsers: page-script.js runs inside the page"]
         b1["Chromium, Chrome, Edge,<br/>Firefox, WebKit"]
         b2["Agent and cloud browsers<br/>over CDP"]
         b3["Safari,<br/>WebDriver grids"]
@@ -428,7 +428,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |
 | `web-drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |
 | `web-drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
-| `collector/` | The in-page script. |
+| `page-script/` | The script that runs inside each page and reads its elements (the collector). |
 | `sdks/python/` | The Python SDK. |
 | `sdks/typescript/` | The TypeScript SDK. |
 | `python/traceqa-protocol/` | Python types generated from `spec/`, shared by the drivers and the SDK. |

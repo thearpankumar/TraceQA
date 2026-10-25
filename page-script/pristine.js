@@ -5,7 +5,7 @@
   // of "uncurried" functions: table.getAttribute(element, "id") calls the original
   // Element.prototype.getAttribute without looking it up on the page-modifiable prototype.
   //
-  // This text exists in three places: this file, the capture block inside collector.js (used
+  // This text exists in three places: this file, the capture block inside page-script.js (used
   // when the page already ran its scripts), and the Playwright driver (which runs it before the
   // page's scripts, as an init script). THIS FILE IS THE ONLY ONE TO EDIT. Afterwards run
   // `python3 scripts/sync_pristine.py` to rewrite the other two; CI and a test run it with

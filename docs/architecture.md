@@ -28,7 +28,7 @@ flowchart TB
         wd["WebDriver driver"]
     end
 
-    subgraph browsers["Browsers: collector.js runs inside the page"]
+    subgraph browsers["Browsers: page-script.js runs inside the page"]
         b1["Chromium, Chrome, Edge,<br/>Firefox, WebKit"]
         b2["Agent and cloud browsers<br/>over CDP"]
         b3["Safari,<br/>WebDriver grids"]
@@ -228,7 +228,7 @@ say.
 
 ## The collector
 
-`collector/collector.js` is a single JavaScript expression that evaluates to a
+`page-script/page-script.js` is a single JavaScript expression that evaluates to a
 function. A driver evaluates it in each frame and returns the result.
 
 It walks the document, including open shadow roots, and reports each interactive
