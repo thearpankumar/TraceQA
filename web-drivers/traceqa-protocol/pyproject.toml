@@ -2,7 +2,7 @@
 name = "traceqa-protocol"
 version = "0.1.0"
 description = "TraceQA message and file types, generated from spec/."
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 readme = "README.md"
 keywords = ["traceqa", "protocol", "pydantic", "json-schema"]
@@ -10,8 +10,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",

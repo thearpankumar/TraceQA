@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +46,7 @@ def runs(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def stamp(age: timedelta) -> str:
-    return (datetime.now(timezone.utc) - age).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (datetime.now(UTC) - age).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def make_run(out: Path, name: str, url: str, age: timedelta, status: str = "completed", payload: int = 0) -> Path:

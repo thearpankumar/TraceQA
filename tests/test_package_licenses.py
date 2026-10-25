@@ -6,10 +6,10 @@ npm always ships LICENSE, so no packaging metadata is needed for them.
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = [
@@ -51,7 +51,7 @@ def test_python_package_metadata_is_complete(package: str) -> None:
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.14",
         "Topic :: Software Development :: Testing",
     ):

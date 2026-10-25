@@ -17,12 +17,12 @@ import os
 import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
-import tomllib
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]

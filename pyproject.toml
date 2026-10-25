@@ -2,7 +2,7 @@
 name = "traceqa-workspace"
 version = "0.1.0"
 description = "Python side of the TraceQA monorepo. Not published: the packages live in web-drivers/."
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = []
 
 [dependency-groups]
@@ -22,10 +22,6 @@ dev = [
 
 [tool.uv]
 package = false
-# pyee (a Playwright dependency) 14 needs Python 3.12, but the drivers support 3.10. Without this,
-# uv picks pyee 14 for 3.12+ and 13 below, and crates/traceqa-cli/driver-requirements.txt must be
-# one list for every Python (tests/test_driver_requirements.py). Lift it when the drivers need 3.12.
-constraint-dependencies = ["pyee<14"]
 
 [tool.uv.workspace]
 # members = ["python/*", "web-drivers/*", "sdks/python"]  # python/ moved into web-drivers/
@@ -87,5 +83,5 @@ exclude = [
     "web-drivers/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
     "web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
 ]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 typeCheckingMode = "standard"

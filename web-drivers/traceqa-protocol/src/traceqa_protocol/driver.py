@@ -11,12 +11,10 @@ from __future__ import annotations
 import importlib.metadata
 import struct
 from abc import ABC, abstractmethod
-from typing import ClassVar, Generic, TypeVar, cast
+from typing import ClassVar, cast
 
 from . import contracts, models
 from .rpc import Channel, Handler, RpcError
-
-S = TypeVar("S")
 
 # Version reported when the driver runs from a bare checkout, without its package installed.
 SOURCE_VERSION = "0.0.0+source"
@@ -35,7 +33,7 @@ def method_name(method: str) -> str:
     return method.removeprefix("driver.").replace(".", "_")
 
 
-class BaseDriver(ABC, Generic[S]):
+class BaseDriver[S](ABC):
     NAME: ClassVar[str]
     VERSION: ClassVar[str]
     BROWSERS: ClassVar[tuple[str, ...]]
@@ -69,7 +67,7 @@ class BaseDriver(ABC, Generic[S]):
     def _close(self, session_id: str) -> None:
         """Close one session and forget it."""
 
-    def _stop(self) -> None:
+    def _stop(self) -> None:  # noqa: B027 - an optional hook: drivers with nothing to release keep this no-op
         """Release what outlives the sessions. Called by `shutdown` after they are closed."""
 
     def hello(self, params: models.DriverHelloParams) -> models.DriverHelloResult:
