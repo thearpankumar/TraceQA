@@ -11,7 +11,7 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use serde::de::DeserializeOwned;
-use traceqa_protocol::types::{ComponentsFile, RunManifest, TargetSummary};
+use traceqa_protocol::types::{AxeResults, ComponentsFile, RunManifest, TargetSummary};
 
 /// The largest `run.json` or `components.json` that is read.
 pub const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -161,6 +161,15 @@ fn target_ref(run_dir: &Path, summary: TargetSummary) -> Result<TargetRef, ReadE
 /// Reads and parses a target's `components.json`.
 pub fn read_components(target: &TargetRef) -> Result<ComponentsFile, ReadError> {
     read_json(&target.path.join("components.json"))
+}
+
+/// Reads a target's `axe.json`. `None` when the run did not ask for axe-core, which is not an error.
+pub fn read_axe(target: &TargetRef) -> Result<Option<AxeResults>, ReadError> {
+    let path = target.path.join("axe.json");
+    if fs::symlink_metadata(&path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+        return Ok(None);
+    }
+    read_json(&path).map(Some)
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, ReadError> {

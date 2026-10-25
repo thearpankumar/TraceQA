@@ -389,6 +389,7 @@ fn prepare(args: &MapArgs) -> Result<(Url, RunStartParams), String> {
             settle_ms: None,
             crops: Some(false),
             include_hidden: Some(true),
+            axe: None,
         }),
         storage_state,
     };

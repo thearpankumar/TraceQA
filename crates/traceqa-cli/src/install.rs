@@ -5,6 +5,8 @@
 //! TraceQA's own, under `~/.traceqa` (see `traceqa_engine::home`), so they never touch the
 //! user's other Python projects. The engine finds them there by itself.
 
+mod axe;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -48,6 +50,11 @@ pub struct InstallArgs {
     /// Print what would be run and exit. Nothing is installed or written.
     #[arg(long)]
     dry_run: bool,
+    /// Install only axe-core, for `traceqa extract --axe`: the pinned npm tarball is downloaded, its
+    /// SHA-512 checked and axe.min.js and the licence extracted. axe-core is MPL-2.0 and is not
+    /// part of TraceQA. Drivers and browsers are left alone.
+    #[arg(long)]
+    axe: bool,
 }
 
 /// The commit this binary was built from, 40 hex digits, or empty when it was not built from a
@@ -185,6 +192,9 @@ pub fn run(args: &InstallArgs) -> ExitCode {
 }
 
 fn try_install(args: &InstallArgs) -> Result<(), String> {
+    if args.axe {
+        return axe::install(args.dry_run);
+    }
     let unknown: Vec<&String> = args
         .browsers
         .iter()
@@ -582,6 +592,7 @@ mod tests {
             git_ref: None,
             with_deps: false,
             dry_run: false,
+            axe: false,
         };
         assert!(try_install(&args).unwrap_err().contains("unknown browser"));
     }

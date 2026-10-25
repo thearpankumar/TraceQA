@@ -218,9 +218,17 @@ fn read_run(folder: &Path) -> Result<RunInput, String> {
         let text = std::fs::read_to_string(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
         let file: ComponentsFile =
             serde_json::from_str(&text).map_err(|e| format!("{}: not a components file: {e}", path.display()))?;
+        // axe.json exists only when the run was made with --axe.
+        let axe = traceqa_recorder::read_axe(&traceqa_recorder::TargetRef {
+            dir: target.dir.clone(),
+            path: folder.join(&target.dir),
+            summary: None,
+        })
+        .map_err(|e| e.to_string())?;
         targets.push(TargetInput {
             dir: target.dir.clone(),
             file,
+            axe,
         });
     }
     Ok(RunInput {
@@ -282,6 +290,9 @@ fn table(files: &[&FindingsFile]) -> String {
                 format!(", {} suppressed", file.suppressed.len())
             }
         );
+        if let (Some(coverage), Some(review)) = (&file.coverage, file.needs_review) {
+            let _ = writeln!(out, "axe-core: {review} results need review by a person. {coverage}");
+        }
         if !file.findings.is_empty() {
             let _ = writeln!(
                 out,
@@ -318,6 +329,13 @@ fn markdown(files: &[&FindingsFile]) -> String {
             file.counts.warning,
             file.counts.info
         );
+        if let (Some(coverage), Some(review)) = (&file.coverage, file.needs_review) {
+            let _ = writeln!(
+                out,
+                "axe-core: {review} results need review by a person. {}\n",
+                cell(coverage)
+            );
+        }
         if !file.findings.is_empty() {
             out.push_str("| Severity | Rule | Component | Name | WCAG | Finding |\n|---|---|---|---|---|---|\n");
         }

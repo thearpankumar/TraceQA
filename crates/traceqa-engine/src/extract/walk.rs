@@ -71,6 +71,7 @@ fn list_controls(
             script: LIST_CONTROLS.to_string(),
             arg: None,
             all_frames: Some(false),
+            await_promise: None,
             timeout_ms: Some(5_000),
         })
     });

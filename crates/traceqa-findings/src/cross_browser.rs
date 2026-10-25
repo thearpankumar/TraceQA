@@ -260,7 +260,11 @@ mod tests {
             "components": components, "warnings": []
         }))
         .unwrap();
-        TargetInput { dir: dir.into(), file }
+        TargetInput {
+            dir: dir.into(),
+            file,
+            axe: None,
+        }
     }
 
     fn rule(targets: Vec<TargetInput>) -> Vec<Finding> {

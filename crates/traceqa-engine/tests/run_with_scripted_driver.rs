@@ -283,6 +283,7 @@ fn run_case(case: Case) -> Outcome {
             max_scroll_steps: None,
             settle_ms: None,
             timeout_ms: None,
+            axe: None,
         }),
         storage_state: case.storage_state.clone(),
     };

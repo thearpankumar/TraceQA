@@ -45,10 +45,10 @@
       "required": ["id", "rule", "severity", "confidence", "componentId", "instances", "role", "name", "path", "message", "evidence", "wcag"],
       "properties": {
         "id": { "description": "The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is. The run-level rule browsers-disagree adds the viewport: browsers-disagree:c_9f2a41c07b3e@1280x800.", "type": "string" },
-        "rule": { "description": "Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only).", "type": "string" },
+        "rule": { "description": "Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only), and axe.RULE for every axe-core rule, for example axe.color-contrast (only when the run was made with `traceqa extract --axe`).", "type": "string" },
         "severity": { "$ref": "#/$defs/FindingSeverity" },
         "confidence": { "$ref": "#/$defs/FindingConfidence" },
-        "componentId": { "type": "string" },
+        "componentId": { "description": "The component the finding is about. 'page' for an axe-core finding that no component contains.", "type": "string" },
         "instances": { "description": "Keys of the instances concerned, at most 20.", "type": "array", "items": { "type": "string" } },
         "role": { "type": "string" },
         "name": { "type": "string" },
@@ -80,7 +80,9 @@
           "description": "Known codes: name_source_missing, suppression_unused, suppression_expired.",
           "type": "array",
           "items": { "$ref": "common.schema.json#/$defs/Warning" }
-        }
+        },
+        "coverage": { "description": "Present when axe-core results were included. What automated checks cannot cover; never a conformance claim.", "type": "string" },
+        "needsReview": { "description": "Present when axe-core results were included: how many results axe could not decide and left for a person to review (its incomplete results). Not counted in counts.", "type": "integer", "minimum": 0 }
       }
     }
   }

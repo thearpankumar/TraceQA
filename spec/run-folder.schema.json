@@ -174,6 +174,43 @@
         "status": { "$ref": "common.schema.json#/$defs/RunStatus" }
       }
     },
+    "AxeResults": {
+      "description": "axe.json, written next to components.json only when the run asked for axe-core (`traceqa extract --axe`). The result of one axe-core run per frame, with every violation node placed on the component it belongs to. Automated rules find only part of the accessibility problems a page has; this is not a conformance result. The page's html is never kept.",
+      "type": "object",
+      "required": ["axeVersion", "tags", "violations", "incomplete", "errors"],
+      "properties": {
+        "axeVersion": { "description": "The axe-core version that ran, as it reports itself.", "type": "string" },
+        "tags": { "description": "The rule tags that were run, for example wcag2aa.", "type": "array", "items": { "type": "string" } },
+        "violations": { "type": "array", "items": { "$ref": "#/$defs/AxeViolation" } },
+        "incomplete": { "description": "How many results axe could not decide and left for a person to review (axe's incomplete results), across all frames.", "type": "integer", "minimum": 0 },
+        "errors": { "description": "Frames in which axe did not run, each with the reason.", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "AxeViolation": {
+      "description": "One axe rule that failed, with the elements it failed on.",
+      "type": "object",
+      "required": ["rule", "tags", "help", "helpUrl", "nodes"],
+      "properties": {
+        "rule": { "description": "axe's rule id, for example color-contrast.", "type": "string" },
+        "impact": { "description": "axe's impact. Known values: minor, moderate, serious, critical. Absent when axe gave none.", "type": "string" },
+        "tags": { "description": "axe's tags for the rule, such as wcag143 and wcag2aa.", "type": "array", "items": { "type": "string" } },
+        "help": { "type": "string" },
+        "helpUrl": { "type": "string" },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/AxeNode" } }
+      }
+    },
+    "AxeNode": {
+      "description": "One element an axe rule failed on.",
+      "type": "object",
+      "required": ["frameId", "target", "box"],
+      "properties": {
+        "frameId": { "type": "string" },
+        "target": { "description": "axe's selector for the element inside its frame.", "type": "string" },
+        "box": { "description": "In top-level page coordinates, as an instance's box is.", "$ref": "common.schema.json#/$defs/Rect" },
+        "componentId": { "description": "The component the element is, or sits inside. Absent when no component contains it: the finding is then about the page.", "type": "string" },
+        "viaAncestor": { "description": "True when the element is not itself a component and componentId is the smallest component whose box contains its centre.", "type": "boolean" }
+      }
+    },
     "StabilityFile": {
       "description": "stability.json, in runs/g_<id>/ of a `repeat` group. For each target folder name, how often each component was found across the runs. Only targets that completed count: a failed or cancelled target is not a run in which the component was missing.",
       "type": "object",

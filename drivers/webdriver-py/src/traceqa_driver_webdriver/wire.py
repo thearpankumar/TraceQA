@@ -58,6 +58,11 @@ class WebDriverSession:
         """Run the body of a function in the current frame. `arguments` holds `args`."""
         return self._request("POST", "/execute/sync", {"script": script, "args": list(args)})
 
+    def execute_async(self, script: str, *args: Any) -> Any:
+        """Run the body of a function that ends by calling the callback it is given as its last
+        `arguments` entry. The server waits for that call, up to the session's script timeout."""
+        return self._request("POST", "/execute/async", {"script": script, "args": list(args)})
+
     def navigate(self, url: str) -> None:
         self._request("POST", "/url", {"url": url})
 

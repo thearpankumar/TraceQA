@@ -366,6 +366,19 @@ fn read_components(folder: &Path, dir: &str, name: &str) -> Result<ComponentsFil
     serde_json::from_str(&text).map_err(|e| invalid(format!("{what} is not a components file: {e}")))
 }
 
+/// The target's `axe.json`, when the run was made with `--axe`. Its absence is normal.
+fn read_axe(folder: &Path, dir: &str) -> Result<Option<traceqa_protocol::types::AxeResults>, RpcError> {
+    let path = folder.join(dir).join("axe.json");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let what = format!("{dir}/axe.json");
+    let text = read_capped(&path, &what, MAX_COMPONENTS_BYTES)?;
+    serde_json::from_str(&text)
+        .map(Some)
+        .map_err(|e| invalid(format!("{what} is not an axe file: {e}")))
+}
+
 fn target_names(manifest: &RunManifest) -> String {
     manifest
         .targets
@@ -446,6 +459,7 @@ fn findings_analyse(request: &FindingsAnalyseParams) -> Result<Value, RpcError> 
         targets.push(traceqa_findings::TargetInput {
             dir: target.dir.clone(),
             file: read_components(&dir, &target.dir, "run")?,
+            axe: read_axe(&dir, &target.dir)?,
         });
     }
     let options = traceqa_findings::Options {

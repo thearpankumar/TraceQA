@@ -147,6 +147,9 @@ Component?: Component
 Instance?: Instance
 RunGroup?: RunGroup
 GroupRun?: GroupRun
+AxeResults?: AxeResults
+AxeViolation?: AxeViolation
+AxeNode?: AxeNode
 StabilityFile?: StabilityFile
 TargetStability?: TargetStability
 ComponentStability?: ComponentStability
@@ -482,6 +485,10 @@ crops?: boolean
  * List hidden elements too. Default true.
  */
 includeHidden?: boolean
+/**
+ * Also run axe-core on every page and write axe.json next to components.json. axe-core is not part of TraceQA: the run is refused unless `traceqa install --axe` put it on this machine (or TRACEQA_AXE_FILE names a copy). A target where axe fails gets the warning axe_failed and still completes. Default false.
+ */
+axe?: boolean
 }
 /**
  * The engine runs every target at every viewport.
@@ -648,6 +655,14 @@ suppressed: Finding[]
  * Known codes: name_source_missing, suppression_unused, suppression_expired.
  */
 warnings: Warning[]
+/**
+ * Present when axe-core results were included. What automated checks cannot cover; never a conformance claim.
+ */
+coverage?: string
+/**
+ * Present when axe-core results were included: how many results axe could not decide and left for a person to review (its incomplete results). Not counted in counts.
+ */
+needsReview?: number
 }
 /**
  * Findings that are not suppressed, by severity.
@@ -666,11 +681,14 @@ export interface Finding {
  */
 id: string
 /**
- * Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only).
+ * Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete, browsers-disagree (run scope only), and axe.RULE for every axe-core rule, for example axe.color-contrast (only when the run was made with `traceqa extract --axe`).
  */
 rule: string
 severity: FindingSeverity
 confidence: FindingConfidence
+/**
+ * The component the finding is about. 'page' for an axe-core finding that no component contains.
+ */
 componentId: string
 /**
  * Keys of the instances concerned, at most 20.
@@ -1119,6 +1137,10 @@ networkEvents: boolean
  * Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.
  */
 failedRequests?: boolean
+/**
+ * page.eval accepts awaitPromise. Absent means false.
+ */
+evalAsync?: boolean
 }
 export interface SessionOpenParams {
 target: BrowserTarget
@@ -1211,6 +1233,10 @@ arg?: unknown
  * Run in every frame the driver can reach. Default false.
  */
 allFrames?: boolean
+/**
+ * The function may return a Promise: wait for it and give its resolved value. A rejected Promise is an eval_failed error for that frame. Only drivers whose capabilities say evalAsync accept it; others refuse it with eval_failed. timeoutMs bounds the wait. Default false.
+ */
+awaitPromise?: boolean
 timeoutMs?: number
 }
 /**
@@ -1745,6 +1771,76 @@ finishedAt?: string
 export interface GroupRun {
 runId: string
 status: RunStatus
+}
+/**
+ * axe.json, written next to components.json only when the run asked for axe-core (`traceqa extract --axe`). The result of one axe-core run per frame, with every violation node placed on the component it belongs to. Automated rules find only part of the accessibility problems a page has; this is not a conformance result. The page's html is never kept.
+ */
+export interface AxeResults {
+/**
+ * The axe-core version that ran, as it reports itself.
+ */
+axeVersion: string
+/**
+ * The rule tags that were run, for example wcag2aa.
+ */
+tags: string[]
+violations: AxeViolation[]
+/**
+ * How many results axe could not decide and left for a person to review (axe's incomplete results), across all frames.
+ */
+incomplete: number
+/**
+ * Frames in which axe did not run, each with the reason.
+ */
+errors: string[]
+}
+/**
+ * One axe rule that failed, with the elements it failed on.
+ */
+export interface AxeViolation {
+/**
+ * axe's rule id, for example color-contrast.
+ */
+rule: string
+/**
+ * axe's impact. Known values: minor, moderate, serious, critical. Absent when axe gave none.
+ */
+impact?: string
+/**
+ * axe's tags for the rule, such as wcag143 and wcag2aa.
+ */
+tags: string[]
+help: string
+helpUrl: string
+nodes: AxeNode[]
+}
+/**
+ * One element an axe rule failed on.
+ */
+export interface AxeNode {
+frameId: string
+/**
+ * axe's selector for the element inside its frame.
+ */
+target: string
+box: Rect1
+/**
+ * The component the element is, or sits inside. Absent when no component contains it: the finding is then about the page.
+ */
+componentId?: string
+/**
+ * True when the element is not itself a component and componentId is the smallest component whose box contains its centre.
+ */
+viaAncestor?: boolean
+}
+/**
+ * A rectangle in CSS pixels. Inside a RawElement it is relative to that frame's document. Everywhere else it is relative to the top-level page.
+ */
+export interface Rect1 {
+x: number
+y: number
+w: number
+h: number
 }
 /**
  * stability.json, in runs/g_<id>/ of a `repeat` group. For each target folder name, how often each component was found across the runs. Only targets that completed count: a failed or cancelled target is not a run in which the component was missing.

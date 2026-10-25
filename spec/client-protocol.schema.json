@@ -49,7 +49,8 @@
           "minimum": 0
         },
         "crops": { "description": "Also save pictures: a screenshot of the page and one crop per component. Slower, because the page is then read and photographed one screen at a time. Default false.", "type": "boolean" },
-        "includeHidden": { "description": "List hidden elements too. Default true.", "type": "boolean" }
+        "includeHidden": { "description": "List hidden elements too. Default true.", "type": "boolean" },
+        "axe": { "description": "Also run axe-core on every page and write axe.json next to components.json. axe-core is not part of TraceQA: the run is refused unless `traceqa install --axe` put it on this machine (or TRACEQA_AXE_FILE names a copy). A target where axe fails gets the warning axe_failed and still completes. Default false.", "type": "boolean" }
       }
     },
     "RunStartParams": {

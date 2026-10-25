@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Axe fixture</title>
+    <style>
+      body { margin: 0; font: 16px sans-serif; background: #fff; color: #111; }
+      /* Tall, so the elements below sit under the fold of a short viewport and their boxes need the page's scroll. */
+      .spacer { height: 900px; }
+      /* Light grey on white: fails colour contrast (WCAG 1.4.3). */
+      .faint { color: #bbb; background: #fff; border: 1px solid #ddd; font-size: 16px; padding: 8px 16px; }
+      iframe { width: 420px; height: 120px; border: 1px solid #999; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Axe fixture</h1>
+      <p>The page for tests/test_axe.py: one failure of each kind.</p>
+    </header>
+    <div class="spacer" aria-hidden="true"></div>
+    <main>
+      <!-- A component that fails colour contrast. -->
+      <button type="button" class="faint" id="buy">Buy now</button>
+
+      <!-- An image with no alternative text, in no component. -->
+      <p><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="60" height="60" /></p>
+
+      <!-- Two elements share an id that an aria reference points at. -->
+      <div id="dup">First</div>
+      <div id="dup">Second</div>
+      <button type="button" aria-labelledby="dup" id="labelled">Referenced</button>
+
+      <!-- A control inside a frame: an input without a label. -->
+      <iframe name="widget" src="/frame.html" title="Widget"></iframe>
+    </main>
+  </body>
+</html>

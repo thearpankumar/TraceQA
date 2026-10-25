@@ -20,6 +20,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,20 @@ CAPABILITIES = models.Capabilities(
     console_events=False,
     network_events=False,
     failed_requests=False,
+    eval_async=True,
 )
+
+# The body page.eval runs when the engine asks to wait for a Promise. /execute/sync cannot wait, so this
+# goes through /execute/async: the script's own callback is called with the outcome. A rejection is
+# reported as a value, because an error thrown inside a Promise reaction would not reach the server.
+AWAIT_BODY = """
+var arg = arguments[0], done = arguments[arguments.length - 1];
+Promise.resolve().then(function () { return (
+%s
+)(arg); }).then(
+  function (value) { done({ ok: true, value: value === undefined ? null : value }); },
+  function (error) { done({ ok: false, error: String((error && error.message) || error) }); }
+);"""
 
 LIST_FRAMES = """
 return Array.from(document.querySelectorAll("iframe, frame")).map(function (el) {
@@ -62,6 +76,15 @@ return Array.from(document.querySelectorAll("iframe, frame")).map(function (el) 
   return { element: el, name: el.getAttribute("name") || "", x: r.left, y: r.top, w: r.width, h: r.height };
 });"""
 SCROLL_STATE = "return { y: window.scrollY, height: document.documentElement.scrollHeight, view: window.innerHeight };"
+
+
+def _await_outcome(outcome: Any) -> Any:
+    """The value an AWAIT_BODY call reported, or the error the page's Promise rejected with."""
+    if not isinstance(outcome, dict) or "ok" not in outcome:
+        raise WebDriverError("javascript error", "the page's script gave no outcome")
+    if not outcome["ok"]:
+        raise WebDriverError("javascript error", str(outcome.get("error")))
+    return outcome["value"]
 
 
 @dataclass
@@ -306,14 +329,28 @@ class WebDriverDriver(BaseDriver[Session]):
         session = self._session(params.session_id)
         webdriver = session.webdriver
         # `script` is an expression that evaluates to a function. WebDriver wants a function body.
-        body = f"return (\n{params.script}\n)(arguments[0]);"
+        if params.await_promise:
+            awaiting = AWAIT_BODY % params.script
+
+            def run(arg: Any) -> Any:
+                return _await_outcome(webdriver.execute_async(awaiting, arg))
+
+            # The wait ends at the script timeout, so it is set for this call even when none was asked for.
+            script_ms = params.timeout_ms or DEFAULT_TIMEOUT_MS
+        else:
+            body = f"return (\n{params.script}\n)(arguments[0]);"
+
+            def run(arg: Any) -> Any:
+                return webdriver.execute(body, arg)
+
+            script_ms = params.timeout_ms
         try:
             webdriver.switch_to_frame(None)
-            if params.timeout_ms:
-                webdriver.set_timeouts(page_load_ms=params.timeout_ms, script_ms=params.timeout_ms)
+            if script_ms:
+                webdriver.set_timeouts(page_load_ms=params.timeout_ms or script_ms, script_ms=script_ms)
             url = webdriver.execute("return location.href;")
             scroll = webdriver.execute("return [window.scrollX, window.scrollY];")
-            value = webdriver.execute(body, params.arg)
+            value = run(params.arg)
         except WebDriverError as error:
             raise RpcError("eval_failed", error.message) from error
 
@@ -321,7 +358,7 @@ class WebDriverDriver(BaseDriver[Session]):
         results = [models.FrameEvalResult(frame=main, value=value)]
         if params.all_frames:
             try:
-                self._eval_child_frames(session, body, params.arg, "main", (scroll[0], scroll[1]), url, 1, results)
+                self._eval_child_frames(session, run, params.arg, "main", (scroll[0], scroll[1]), url, 1, results)
                 webdriver.switch_to_frame(None)
             except WebDriverError as error:
                 raise RpcError("eval_failed", error.message) from error
@@ -330,7 +367,7 @@ class WebDriverDriver(BaseDriver[Session]):
     def _eval_child_frames(
         self,
         session: Session,
-        body: str,
+        run: Callable[[Any], Any],
         arg: Any,
         parent_id: str,
         parent_at: tuple[float, float],
@@ -362,13 +399,13 @@ class WebDriverDriver(BaseDriver[Session]):
                 try:
                     info.url = webdriver.execute("return location.href;")
                     info.cross_origin = is_cross_origin(info.url, page_url)
-                    value = webdriver.execute(body, arg)
+                    value = run(arg)
                 except WebDriverError as error:
                     results.append(models.FrameEvalResult(frame=info, error=error.message))
                     continue
                 results.append(models.FrameEvalResult(frame=info, value=value))
                 if depth < MAX_FRAME_DEPTH:
-                    self._eval_child_frames(session, body, arg, info.id, (box.x, box.y), page_url, depth + 1, results)
+                    self._eval_child_frames(session, run, arg, info.id, (box.x, box.y), page_url, depth + 1, results)
             finally:
                 webdriver.switch_to_parent_frame()
 

@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Once;
 
 use clap::Args;
+use traceqa_engine::axe::{self, AxeScript};
 use traceqa_engine::driver::Drivers;
 use traceqa_engine::{driver_commands, EngineError, Execution, Run};
 use traceqa_protocol::types::{
@@ -44,6 +45,15 @@ pub struct ExtractArgs {
     /// Leave out elements that are not visible.
     #[arg(long)]
     visible_only: bool,
+    /// Also check every page with axe-core and write axe.json: violations placed on component
+    /// ids, which `traceqa findings` then reports with rule ids and WCAG numbers. axe-core is
+    /// MPL-2.0 and is not shipped; get it with `traceqa install --axe`. Automated rules find
+    /// only part of the accessibility problems a page has. This is not a conformance claim.
+    #[arg(long)]
+    axe: bool,
+    /// Use this axe.min.js instead of the installed one. Implies --axe.
+    #[arg(long, value_name = "PATH")]
+    axe_file: Option<PathBuf>,
     /// How many screens to scroll through on a long page. 0 reads the page without scrolling.
     #[arg(long, value_name = "N")]
     max_scroll_steps: Option<u64>,
@@ -125,6 +135,17 @@ fn build_request(args: &ExtractArgs) -> Result<RunStartParams, String> {
         target.headless = Some(!args.headed);
     }
     let storage_state = args.storage_state.as_deref().map(read_storage_state).transpose()?;
+    let axe = args.axe || args.axe_file.is_some();
+    if axe {
+        // Before any run folder exists: a missing or unusable file is a wrong command.
+        if let Some(file) = &args.axe_file {
+            AxeScript::from_file(file)?;
+            // The engine finds the file the way every client does, through this variable. Nothing else
+            // is running yet, so setting it here is safe.
+            std::env::set_var(axe::FILE_ENV, file);
+        }
+        AxeScript::load()?;
+    }
     // With the default drivers the browser names are known, so a typo fails here, before a run
     // folder exists. A driver the person configures may open other names.
     let custom_drivers = !args.drivers.drivers.is_empty()
@@ -147,6 +168,7 @@ fn build_request(args: &ExtractArgs) -> Result<RunStartParams, String> {
             settle_ms: args.settle_ms,
             crops: Some(args.crops),
             include_hidden: Some(!args.visible_only),
+            axe: axe.then_some(true),
         }),
         storage_state,
     })
