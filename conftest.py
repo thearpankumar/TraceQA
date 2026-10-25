@@ -17,10 +17,18 @@ from traceqa_protocol import models, to_wire
 ROOT = Path(__file__).resolve().parent
 SPEC = ROOT / "spec"
 
+
+def load_by_path(name: str, path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 # The CI guards against silently skipped tests (TRACEQA_REQUIRE_BINARY, TRACEQA_NO_UNEXPECTED_SKIPS).
-_guards_spec = importlib.util.spec_from_file_location("ci_guards", ROOT / "tests" / "support" / "ci_guards.py")
-_guards = importlib.util.module_from_spec(_guards_spec)
-_guards_spec.loader.exec_module(_guards)
+_guards = load_by_path("ci_guards", ROOT / "tests" / "support" / "ci_guards.py")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -33,11 +41,7 @@ COMPONENT_ID = re.compile(r"^c_[0-9a-f]{12}$")
 @pytest.fixture(scope="session")
 def shop_url() -> Iterator[str]:
     """The Buggy Shop, served on free ports for the whole test session."""
-    spec = importlib.util.spec_from_file_location(
-        "buggy_shop_serve", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py"
-    )
-    shop = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(shop)
+    shop = load_by_path("buggy_shop_serve", ROOT / "testbed" / "sites" / "buggy-shop" / "serve.py")
     port, servers = shop.start_on_free_ports()
     yield f"http://127.0.0.1:{port}/"
     for server in servers:
@@ -47,9 +51,7 @@ def shop_url() -> Iterator[str]:
 @pytest.fixture(scope="session")
 def trouble() -> Iterator[str]:
     """testbed/sites/trouble/serve.py, a site that fails on purpose, on a free port for the whole session."""
-    spec = importlib.util.spec_from_file_location("trouble_serve", ROOT / "testbed" / "sites" / "trouble" / "serve.py")
-    site = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(site)
+    site = load_by_path("trouble_serve", ROOT / "testbed" / "sites" / "trouble" / "serve.py")
     server = site.start()
     yield f"http://127.0.0.1:{server.server_address[1]}/"
     site.stop(server)
