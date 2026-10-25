@@ -163,7 +163,7 @@ webdriverCapabilities?: {
 headless?: boolean
 }
 /**
- * Size of the browser window content area, in CSS pixels.
+ * Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.
  */
 export interface Viewport {
 width: number
@@ -580,7 +580,7 @@ capabilities: Capabilities
 viewport?: Viewport1
 }
 /**
- * Size of the browser window content area, in CSS pixels.
+ * Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.
  */
 export interface Viewport1 {
 width: number
@@ -799,7 +799,7 @@ components: Component[]
 warnings: Warning[]
 }
 /**
- * Size of the browser window content area, in CSS pixels.
+ * Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.
  */
 export interface Viewport2 {
 width: number

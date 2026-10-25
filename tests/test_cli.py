@@ -101,6 +101,42 @@ def test_viewport_extremes_exit_2_fast(size: str, tmp_path: Path) -> None:
     assert not any(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize("size", [{"width": 99999, "height": 99999}, {"width": 0, "height": 0}])
+def test_serve_run_start_refuses_a_bad_viewport_at_once(size: dict[str, int], tmp_path: Path) -> None:
+    """The engine itself checks the size, so every client gets the same answer, before any browser starts."""
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "engine.hello", "params": {"protocolVersion": 1}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "run.start",
+            "params": {
+                "feature": "extract",
+                "url": "https://example.com/",
+                "targets": [{"browser": "chromium"}],
+                "viewports": [size],
+                "outDir": str(tmp_path / "runs"),
+            },
+        },
+        {"jsonrpc": "2.0", "id": 3, "method": "engine.shutdown", "params": {}},
+    ]
+    started = time.monotonic()
+    result = subprocess.run(
+        [str(BINARY), "serve"],
+        input="".join(json.dumps(request) + "\n" for request in requests),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    assert time.monotonic() - started < 5
+    replies = {reply["id"]: reply for reply in map(json.loads, result.stdout.splitlines()) if "id" in reply}
+    assert replies[2]["error"]["data"]["kind"] == "invalid_params", result.stdout
+    assert "each side must be between 1 and 10000" in replies[2]["error"]["message"]
+    assert not (tmp_path / "runs").exists(), "no run folder is made"
+
+
 def test_known_browsers_match_what_the_drivers_open() -> None:
     """The CLI's list of browser names must not drift from the names the drivers accept."""
     lib = (ROOT / "crates" / "traceqa-protocol" / "src" / "lib.rs").read_text(encoding="utf-8")

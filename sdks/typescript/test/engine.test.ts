@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { after, before, describe, test } from "node:test";
 
-import { Engine, extract, toTarget, TraceQAError, type Event, type RunManifest } from "../src/index.js";
+import { Engine, EngineRefusedError, extract, toTarget, TraceQAError, type Event, type RunManifest } from "../src/index.js";
 import { BINARY, HAVE_BINARY, startShop, startTrouble, tempDir, type Shop } from "./helpers.js";
 
 describe("against the real engine", { skip: HAVE_BINARY ? false : "build the engine first: cargo build" }, () => {
@@ -95,6 +95,26 @@ describe("against the real engine", { skip: HAVE_BINARY ? false : "build the eng
     assert.equal(logged.length, events.length);
 
     await assert.rejects(result.components(), (error: TraceQAError) => /several targets/.test(error.message));
+  });
+
+  test("a viewport out of range is refused at once, before any browser starts", async () => {
+    const out = tempDir();
+    const engine = await Engine.start({ binary: BINARY });
+    try {
+      for (const viewports of [[[99999, 99999]], [[0, 0]]] as const) {
+        const started = Date.now();
+        await assert.rejects(engine.extract(shop.url, { outDir: out, viewports }), (error: unknown) => {
+          assert.ok(error instanceof EngineRefusedError);
+          assert.equal(error.kind, "invalid_params");
+          assert.match(error.message, /each side must be between 1 and 10000/);
+          return true;
+        });
+        assert.ok(Date.now() - started < 5000, "refused without waiting for a driver");
+      }
+      assert.deepEqual(readdirSync(out), [], "no run folder is made");
+    } finally {
+      await engine.close();
+    }
   });
 
   test("one engine serves several calls and reports refusals", async () => {

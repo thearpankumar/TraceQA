@@ -158,6 +158,16 @@ def test_subclasses_are_TraceQAError() -> None:
     assert plain.kind is None
 
 
+@pytest.mark.parametrize("size", [(0, 0), (0, 800), (99999, 99999), (10001, 800)])
+def test_a_viewport_out_of_range_raises_TraceQAError_before_any_run_starts(install, size: tuple[int, int]) -> None:
+    process, engine = extract_with(good, install)
+    with pytest.raises(traceqa.TraceQAError) as raised:
+        engine.extract("http://127.0.0.1:1/", viewports=[(1280, 800), size])
+    assert type(raised.value) is traceqa.TraceQAError
+    assert f"viewport {size[0]}x{size[1]}: each side must be between 1 and 10000" in str(raised.value)
+    assert not [request for request in process.written if request["method"] == "run.start"]
+
+
 def test_a_garbage_line_raises_EngineProtocolError_not_JSONDecodeError(install) -> None:
     secret = "x" * 500
 

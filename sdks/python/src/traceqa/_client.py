@@ -88,6 +88,16 @@ class ExtractResult:
             raise EngineProtocolError(f"{path.name} in {target_dir} does not match the protocol") from error
 
 
+def _viewports(sizes: Sequence[tuple[int, int]]) -> list[models.Viewport]:
+    """The sizes as protocol viewports. A side outside 1 to 10000 is refused here, as the engine
+    would refuse it, before anything is started."""
+    try:
+        return [models.Viewport(width=width, height=height) for width, height in sizes]
+    except ValidationError as error:
+        size = next((f"{w}x{h}" for w, h in sizes if not (1 <= w <= 10000 and 1 <= h <= 10000)), "?")
+        raise TraceQAError(f"viewport {size}: each side must be between 1 and 10000") from error
+
+
 def _target(browser: Browser) -> models.BrowserTarget:
     """Accepts the same spellings as the CLI: "firefox", "cdp=ws://...", "webdriver=http://..."."""
     if isinstance(browser, models.BrowserTarget):
@@ -377,7 +387,7 @@ class Engine:
             feature="extract",
             url=url,
             targets=targets,
-            viewports=[models.Viewport(width=width, height=height) for width, height in viewports],
+            viewports=_viewports(viewports),
             out_dir=str(Path(out_dir).resolve()) if out_dir is not None else None,
             parallel=parallel,
             options=models.ExtractOptions(
