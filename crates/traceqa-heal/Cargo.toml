@@ -1,0 +1,20 @@
+[package]
+name = "traceqa-heal"
+description = "Healing as a diff query: classifies what a run lost against a baseline. Pure: no files, no browser."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+traceqa-diff.workspace = true
+traceqa-common.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+# The owner reviews everything, and anything that decides what runs in CI, what ships, or what
+# the MCP server may do is named so that a rule requiring code-owner review covers it.
+* @thearpankumar
+
+/.github/ @thearpankumar
+/docs/SECURITY.md @thearpankumar
+/deny.toml @thearpankumar
+/scripts/ @thearpankumar
+/crates/traceqa-cli/driver-requirements.txt @thearpankumar
+/crates/traceqa-mcp/ @thearpankumar
+/Cargo.lock @thearpankumar

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: visibility</title>
+<style>
+  body { font: 14px sans-serif; }
+  div { margin: 6px 0; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+</style>
+<body>
+<h1>Hidden in different ways</h1>
+<p>Hidden elements are still listed, with visible set to false, so a test can see what a user cannot.</p>
+
+<div><button id="vis-shown" data-expect="visible=true; inviewport=true">Shown</button></div>
+
+<div><button id="vis-display-none" style="display: none" data-expect="visible=false; inviewport=false">Display none</button></div>
+
+<div><button id="vis-visibility-hidden" style="visibility: hidden" data-expect="visible=false">Visibility hidden</button></div>
+
+<div><button id="vis-hidden-attribute" hidden data-expect="visible=false">Hidden attribute</button></div>
+
+<div><button id="vis-zero-size" style="width: 0; height: 0; padding: 0; border: 0; overflow: hidden"
+  data-expect="visible=false">Zero size</button></div>
+
+<div style="display: none"><button id="vis-hidden-parent" data-expect="visible=false">Inside a hidden parent</button></div>
+
+<div style="visibility: hidden"><button id="vis-visible-in-hidden-parent" style="visibility: visible"
+  data-expect="visible=true">Shown again inside a hidden parent</button></div>
+
+<div><button id="vis-off-screen" style="position: absolute; left: -9999px"
+  data-expect="visible=true; inviewport=false">Off screen to the left</button></div>
+
+<details><summary id="vis-summary" data-expect="role=button; visible=true">More</summary>
+  <button id="vis-in-closed-details" data-expect="visible=false">Inside closed details</button></details>
+
+<div><button id="vis-opacity-zero" style="opacity: 0" data-expect="visible=false">Opacity zero</button></div>
+
+<div style="opacity: 0"><button id="vis-in-transparent-parent" data-expect="visible=false">Inside a transparent parent</button></div>
+
+<div><a id="vis-skip-link" class="visually-hidden" href="#main" data-expect="visible=false">Skip to content</a></div>
+
+<div><button id="vis-clip-path" style="clip-path: inset(50%)" data-expect="visible=false">Clipped by clip-path</button></div>
+
+<div><button id="vis-clip-rect" style="position: absolute; clip: rect(0 0 0 0)" data-expect="visible=false">Clipped by clip</button></div>
+
+<div><button id="vis-partly-clipped" style="clip-path: inset(10%)" data-expect="visible=true">Only its edges clipped</button></div>
+
+<div><input id="vis-input-hidden" type="hidden" name="token" value="x" data-expect="absent"></div>
+
+<div style="height: 3000px"></div>
+<div><button id="vis-below-the-fold" data-expect="visible=true; inviewport=false">Far down the page</button></div>
+</body>
+</html>

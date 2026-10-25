@@ -1,0 +1,170 @@
+name: Release
+
+# Runs when a version tag is pushed:
+#
+#     git tag -a v0.1.0 -m "TraceQA 0.1.0"
+#     git push origin v0.1.0
+#
+# It checks that the tag is on master and matches the version in the files, audits the
+# dependencies, builds the release binary on each system, checks that each one starts and
+# reports that version, and publishes them all on the repository's Releases page with build
+# provenance attestations.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  # The compiler the release is built with. Raise it in a pull request, never by drift.
+  RUST_TOOLCHAIN: 1.99.1
+
+jobs:
+  check:
+    name: Check the version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Full history, so the check below can see master.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag points at a commit on master
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::Tag $GITHUB_REF_NAME does not point at a commit on master. Merge the change first, then tag the merged commit."
+            exit 1
+          fi
+      - id: version
+        name: The tag matches every package's version
+        run: echo "version=$(python3 scripts/check_version.py "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+
+  # Known vulnerabilities, licences and sources, before any binary is built.
+  audit:
+    name: Audit the dependencies
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned versions, installed with their checksums verified.
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+      - name: Known vulnerabilities
+        run: cargo audit --file Cargo.lock
+      - name: Licences, bans and sources
+        run: cargo deny --locked check
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: [check, audit]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            binary: traceqa
+          - os: macos-latest
+            name: macos-arm64
+            binary: traceqa
+          - os: windows-latest
+            name: windows-x86_64
+            binary: traceqa.exe
+    env:
+      ARCHIVE: traceqa-${{ github.ref_name }}-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      # The installer pins the commit this binary was built from. Name it here, so it never
+      # depends on the state of the checkout (build.rs falls back to git only without it).
+      - name: Build the release binary
+        env:
+          TRACEQA_RELEASE_COMMIT: ${{ github.sha }}
+        run: cargo build --release --locked --bin traceqa
+
+      - name: The binary starts and reports this version
+        shell: bash
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          reported="$(target/release/${{ matrix.binary }} --version)"
+          echo "$reported"
+          [ "$reported" = "traceqa $VERSION" ]
+          target/release/${{ matrix.binary }} extract --help > /dev/null
+          target/release/${{ matrix.binary }} mcp --help > /dev/null
+
+      # tar.gz keeps the binary executable on macOS and Linux. Windows users expect a zip.
+      - name: Package (macOS and Linux)
+        if: runner.os != 'Windows'
+        run: tar -czf "$ARCHIVE.tar.gz" -C target/release traceqa -C "$GITHUB_WORKSPACE" README.md LICENSE
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/release/traceqa.exe, README.md, LICENSE -DestinationPath "$env:ARCHIVE.zip"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ARCHIVE }}.*
+          if-no-files-found: error
+
+  # The only job that can write: it creates the release and the attestations. The build jobs
+  # compile third-party build scripts, so they hold read access only and cannot mint tokens.
+  publish:
+    name: Publish
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Add required reviewers to this environment (Settings, Environments) to gate publishing.
+    environment: release
+    permissions:
+      # Creating a release.
+      contents: write
+      # The signing identity for the attestations.
+      id-token: write
+      # Storing the attestations.
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      # Each archive and SHA256SUMS.txt get a signed statement of which workflow built them.
+      - name: Attest the build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+          create-storage-record: false
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # Until 1.0.0 every release is marked as a pre-release: early, and may still change.
+          prerelease=""
+          case "$VERSION" in 0.*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "TraceQA $VERSION" \
+            --generate-notes \
+            $prerelease

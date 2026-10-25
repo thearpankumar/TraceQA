@@ -1,0 +1,64 @@
+// The TraceQA development container: Rust, uv and Python 3.12, Node 24 and the three Playwright browsers,
+// ready for `make test`. Open the folder in VS Code and choose "Reopen in Container", or run `make devcontainer`.
+// Reference: https://containers.dev/implementors/json_reference/
+{
+  "name": "TraceQA",
+  "build": { "dockerfile": "Dockerfile" },
+  "features": {
+    // The same Rust as CI and the release build.
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "1.99.1",
+      "profile": "minimal",
+      "components": "rustfmt,clippy,rust-analyzer,rust-src"
+    },
+    // For the TypeScript codegen tests (tests/codegen_ts), as CI.
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "remoteUser": "vscode",
+  // Playwright's advice for browsers in containers: an init process reaps the browsers' children, and the
+  // host's IPC namespace keeps Chromium from running out of shared memory.
+  "init": true,
+  "runArgs": ["--ipc=host"],
+  "containerEnv": {
+    "UV_LINK_MODE": "copy",
+    "UV_CACHE_DIR": "/home/vscode/.cache/uv",
+    "PLAYWRIGHT_BROWSERS_PATH": "/home/vscode/.cache/ms-playwright"
+  },
+  // Linux builds, environments and caches live in volumes. The host's own target/, .venv and node_modules
+  // (built for Windows or macOS) are hidden from the container and never changed by it.
+  "mounts": [
+    "source=traceqa-target-${devcontainerId},target=${containerWorkspaceFolder}/target,type=volume",
+    "source=traceqa-venv-${devcontainerId},target=${containerWorkspaceFolder}/.venv,type=volume",
+    "source=traceqa-node-modules-${devcontainerId},target=${containerWorkspaceFolder}/tests/codegen_ts/node_modules,type=volume",
+    "source=traceqa-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+    "source=traceqa-cache,target=/home/vscode/.cache,type=volume"
+  ],
+  // New volumes belong to root. The workspace is mounted from the host with another owner, which git
+  // refuses ("dubious ownership"); trust this one folder in the system config, so VS Code can still copy
+  // your own ~/.gitconfig in.
+  "onCreateCommand": "sudo chown -R vscode:vscode target .venv tests/codegen_ts/node_modules /usr/local/cargo/registry /home/vscode/.cache && sudo git config --system --add safe.directory ${containerWorkspaceFolder}",
+  "updateContentCommand": "uv sync --locked && cargo fetch --locked && npm ci --prefix tests/codegen_ts",
+  // The browsers' system libraries need root; the browsers themselves are installed as vscode.
+  "postCreateCommand": "sudo .venv/bin/playwright install-deps chromium firefox webkit && .venv/bin/playwright install chromium firefox webkit",
+  "forwardPorts": [4173],
+  "portsAttributes": {
+    "4173": { "label": "Demo shop (make demo)", "onAutoForward": "notify" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+        "rust-analyzer.check.command": "clippy",
+        "[python]": { "editor.defaultFormatter": "charliermarsh.ruff" }
+      }
+    }
+  }
+}

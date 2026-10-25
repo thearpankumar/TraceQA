@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# The oldest compiler that builds the workspace with its locked dependencies (sha2 0.11, image and the
+# icu crates need 1.88). CI builds with exactly this version, so raise it deliberately.
+rust-version = "1.88"
+license = "Apache-2.0"
+# Nothing is published yet. Remove this when there is a plan to publish the crates.
+publish = false
+repository = "https://github.com/thearpankumar/TraceQA"
+
+[workspace.dependencies]
+traceqa-common = { path = "crates/traceqa-common" }
+traceqa-engine = { path = "crates/traceqa-engine" }
+traceqa-recorder = { path = "crates/traceqa-recorder" }
+traceqa-mcp = { path = "crates/traceqa-mcp" }
+traceqa-diff = { path = "crates/traceqa-diff" }
+traceqa-findings = { path = "crates/traceqa-findings" }
+traceqa-heal = { path = "crates/traceqa-heal" }
+traceqa-visual = { path = "crates/traceqa-visual" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# YAML for the suppression file. serde_yaml is archived and serde-saphyr needs rustc 1.89, above our 1.88.
+serde_norway = "0.9"
+thiserror = "2"
+clap = { version = "4.6.7", features = ["derive"] }
+# "termination": SIGTERM and SIGHUP take the same handler as Ctrl-C (Unix).
+ctrlc = { version = "3.5.2", features = ["termination"] }
+sha2 = "0.11.1"
+unicode-normalization = "0.1.25"
+url = "2"
+# robots.txt for `traceqa map`. HTTPS through rustls only (no gzip, no cookies, no JSON): the one request it makes is a plain GET.
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+# `traceqa install --axe` unpacks the npm tarball of axe-core: gzip, tar, nothing else.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+# Default features off: the SIMD engines are the only part of the crate that uses unsafe code.
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# A small, curated set on top of clippy's defaults. CI runs clippy with -D warnings, so these gate.
+# `expect("reason")` stays allowed; clippy.toml lets tests unwrap.
+[workspace.lints.clippy]
+unwrap_used = "warn"
+needless_pass_by_value = "warn"
+redundant_closure_for_method_calls = "warn"

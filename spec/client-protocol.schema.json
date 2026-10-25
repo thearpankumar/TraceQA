@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "client-protocol.schema.json",
+  "title": "TraceQA client protocol",
+  "description": "Messages between a client (an SDK in any language, the MCP server, a hosted worker) and the engine. JSON-RPC 2.0, one message per line, over the engine's stdin and stdout. The same messages are used over HTTP when the engine is hosted.",
+  "x-traceqa": {
+    "contract": "client-protocol",
+    "version": 1,
+    "methods": {
+      "engine.hello": { "params": "EngineHelloParams", "result": "EngineHelloResult" },
+      "run.start": { "params": "RunStartParams", "result": "RunStartResult" },
+      "run.cancel": { "params": "RunCancelParams", "result": "Empty" },
+      "engine.shutdown": { "params": "Empty", "result": "Empty" },
+      "diff.compare": { "params": "DiffCompareParams", "result": "DiffFile" },
+      "findings.analyse": { "params": "FindingsAnalyseParams", "result": "FindingsResult" }
+    },
+    "notifications": {
+      "run.event": { "params": "RunEventParams" },
+      "run.done": { "params": "RunDoneParams" }
+    }
+  },
+  "$defs": {
+    "EngineHelloParams": {
+      "type": "object",
+      "required": ["protocolVersion"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "minimum": 0 },
+        "clientName": { "type": "string" },
+        "clientVersion": { "type": "string" }
+      }
+    },
+    "EngineHelloResult": {
+      "type": "object",
+      "required": ["engineVersion", "protocolVersion", "features"],
+      "properties": {
+        "engineVersion": { "type": "string" },
+        "protocolVersion": { "type": "integer", "minimum": 0 },
+        "features": { "description": "Features this engine can run. Known values: extract, diff, findings. diff and findings are the methods diff.compare and findings.analyse; a client that needs them checks this list.", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ExtractOptions": {
+      "type": "object",
+      "properties": {
+        "maxScrollSteps": { "description": "How many screens to scroll through before giving up on a very long page. 0 reads the page without scrolling.", "type": "integer", "minimum": 0 },
+        "timeoutMs": { "description": "Per page.", "type": "integer", "minimum": 0 },
+        "settleMs": {
+          "description": "Extra time to wait after the page has loaded, before reading it. For pages that show a timed intro or splash screen. Default 0.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "crops": { "description": "Also save pictures: a screenshot of the page and one crop per component. Slower, because the page is then read and photographed one screen at a time. Default false.", "type": "boolean" },
+        "includeHidden": { "description": "List hidden elements too. Default true.", "type": "boolean" },
+        "axe": { "description": "Also run axe-core on every page and write axe.json next to components.json. axe-core is not part of TraceQA: the run is refused unless `traceqa install --axe` put it on this machine (or TRACEQA_AXE_FILE names a copy). A target where axe fails gets the warning axe_failed and still completes. Default false.", "type": "boolean" }
+      }
+    },
+    "RunStartParams": {
+      "description": "The engine runs every target at every viewport.",
+      "type": "object",
+      "required": ["feature", "url", "targets", "viewports"],
+      "properties": {
+        "feature": { "description": "Known values: extract.", "type": "string" },
+        "url": { "type": "string" },
+        "targets": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/BrowserTarget" } },
+        "viewports": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/Viewport" } },
+        "outDir": { "description": "Where to create the run folder. Default ./runs.", "type": "string" },
+        "parallel": {
+          "description": "How many browsers to run at the same time. 1 runs them one after another. 0 or absent lets the engine choose from the machine's cores.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "options": { "$ref": "#/$defs/ExtractOptions" },
+        "storageState": {
+          "description": "Start every browser with these cookies and stored values, for pages behind a sign-in or a first screen. Never written to the run folder.",
+          "$ref": "common.schema.json#/$defs/StorageState"
+        }
+      }
+    },
+    "RunStartResult": {
+      "description": "Returned as soon as the run is accepted. Progress and the result arrive as notifications.",
+      "type": "object",
+      "required": ["runId", "runFolder"],
+      "properties": {
+        "runId": { "type": "string" },
+        "runFolder": { "description": "Absolute path.", "type": "string" }
+      }
+    },
+    "DiffCompareParams": {
+      "description": "Compares one target of run folder a with one target of run folder b. Reads local files, at most 64 MiB per components.json, and answers when done; it does not start a browser.",
+      "type": "object",
+      "required": ["a", "b"],
+      "properties": {
+        "a": { "description": "Path of a run folder made by run.start (side A, the older or reference side).", "type": "string" },
+        "b": { "description": "Path of a run folder (side B, the newer or other side). May be the same folder as a, to compare two targets of one run.", "type": "string" },
+        "targetA": { "description": "Target folder name in a, for example chromium-1280x800. May be left out when the run has one target.", "type": "string" },
+        "targetB": { "description": "Target folder name in b. As targetA.", "type": "string" }
+      }
+    },
+    "FindingsAnalyseParams": {
+      "description": "Runs the automated checks over a finished run folder. Reads local files, at most 64 MiB per components.json; writes nothing.",
+      "type": "object",
+      "required": ["run"],
+      "properties": {
+        "run": { "description": "Path of a run folder.", "type": "string" },
+        "target": { "description": "Only this target's findings are returned (every target is still analysed, so a suppression used in another browser is not reported unused). Default: all targets, then the run-level findings.", "type": "string" },
+        "suppressions": { "description": "Path of a suppression file (YAML, at most 256 KiB), as `traceqa findings --suppressions` takes it. Default: none.", "type": "string" }
+      }
+    },
+    "FindingsResult": {
+      "description": "One FindingsFile per target, in the run's order, then a run-scope file when there is something for it.",
+      "type": "object",
+      "required": ["files"],
+      "properties": {
+        "files": { "type": "array", "items": { "$ref": "findings.schema.json#/$defs/FindingsFile" } }
+      }
+    },
+    "RunCancelParams": {
+      "type": "object",
+      "required": ["runId"],
+      "properties": { "runId": { "type": "string" } }
+    },
+    "RunEventParams": {
+      "type": "object",
+      "required": ["runId", "event"],
+      "properties": {
+        "runId": { "type": "string" },
+        "event": { "$ref": "run-folder.schema.json#/$defs/Event" }
+      }
+    },
+    "RunDoneParams": {
+      "description": "Sent exactly once per run, after the run folder is complete.",
+      "type": "object",
+      "required": ["runId", "status", "manifest"],
+      "properties": {
+        "runId": { "type": "string" },
+        "status": { "$ref": "common.schema.json#/$defs/RunStatus" },
+        "manifest": { "$ref": "run-folder.schema.json#/$defs/RunManifest" }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+[package]
+name = "traceqa-recorder"
+description = "Writes the run folder and the live event stream."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+traceqa-common.workspace = true
+
+[lints]
+workspace = true

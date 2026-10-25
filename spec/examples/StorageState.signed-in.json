@@ -1,0 +1,25 @@
+{
+  "cookies": [
+    {
+      "name": "session",
+      "value": "abc123",
+      "domain": ".example.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://app.example.com",
+      "localStorage": [
+        {
+          "name": "has_onboarded",
+          "value": "true"
+        }
+      ]
+    }
+  ]
+}

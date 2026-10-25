@@ -1,0 +1,14 @@
+{
+  "formatVersion": 1,
+  "groupId": "g_20261013_210500_c3d4",
+  "kind": "repeat",
+  "url": "https://shop.test",
+  "runs": [
+    { "runId": "r_20261013_210500_0001", "status": "completed" },
+    { "runId": "r_20261013_210508_0002", "status": "completed" },
+    { "runId": "r_20261013_210516_0003", "status": "completed" },
+    { "runId": "r_20261013_210524_0004", "status": "completed" }
+  ],
+  "startedAt": "2026-10-13T15:35:00Z",
+  "finishedAt": "2026-10-13T15:35:31Z"
+}

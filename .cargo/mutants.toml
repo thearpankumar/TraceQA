@@ -1,0 +1,10 @@
+# cargo-mutants configuration, read automatically from .cargo/mutants.toml; see docs/testing.md.
+examine_globs = [
+  "crates/traceqa-engine/src/fingerprint.rs",
+  "crates/traceqa-engine/src/group.rs",
+]
+# The baseline is the whole `traceqa-engine --lib` test run, and a loaded machine can be several
+# times slower than an idle one. cargo-mutants' default is 5 times the baseline with a floor of
+# 20 s, which produced spurious timeouts; the floor is raised so only a real hang times out.
+timeout_multiplier = 5
+minimum_test_timeout = 120

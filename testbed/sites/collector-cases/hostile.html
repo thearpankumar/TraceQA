@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: hostile</title>
+<style>
+  body { font: 14px sans-serif; margin: 8px; }
+  .box { position: relative; height: 44px; margin: 6px 0; }
+  .over { position: absolute; inset: 0; z-index: 2; background: #fff; }
+</style>
+<!-- The first script of the page replaces the built-ins a script would use to read it. The
+     collector must still report every element below correctly, and must say the page did it. -->
+<script>
+  Array.prototype.map = function () { return []; };
+  Element.prototype.getBoundingClientRect = function () {
+    return { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+  };
+  window.getComputedStyle = function () {
+    return { display: "block", visibility: "visible", cursor: "default", clip: "", clipPath: "", getPropertyValue: function () { return ""; } };
+  };
+  Set.prototype.has = function () { return false; };
+  String.prototype.trim = function () { throw new Error("page replaced trim"); };
+</script>
+<body>
+<h1>A page that replaces built-in functions</h1>
+
+<div class="box"><button id="host-save" data-expect="role=button; name=Save; source=content; visible=true; covered=false">Save</button></div>
+
+<div class="box"><label for="host-email">Email</label>
+  <input id="host-email" type="email" data-expect="role=textbox; name=Email; source=label; visible=true"></div>
+
+<div class="box"><span id="host-part-1">Delete</span> <span id="host-part-2">item</span>
+  <button id="host-labelledby" aria-labelledby="host-part-1 host-part-2"
+    data-expect="name=Delete item; source=aria-labelledby">D</button></div>
+
+<div class="box"><button id="host-hidden" style="display: none" data-expect="visible=false">Never shown</button></div>
+
+<div class="box"><button id="host-covered" data-expect="covered=true; coveredby=#host-banner">Under a banner</button>
+  <div id="host-banner" class="over">We use cookies</div></div>
+
+<div class="box"><a id="host-link" href="/next" data-expect="role=link; name=Next page; source=content">  Next
+  page  </a></div>
+
+<div id="host-plain" data-expect="absent">Plain text</div>

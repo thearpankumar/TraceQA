@@ -1,0 +1,84 @@
+name: Audit
+
+# Known vulnerabilities in the dependencies, found by looking them up, not by building anything.
+# It runs every week, because new advisories appear without any change here, and whenever a
+# lock file or the policy changes. It always runs on GitHub-hosted machines.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - Cargo.lock
+      - uv.lock
+      # - sdks/typescript/package-lock.json  # the TypeScript SDK was removed
+      - deny.toml
+      - .github/workflows/audit.yml
+  pull_request:
+    paths:
+      - Cargo.lock
+      - uv.lock
+      # - sdks/typescript/package-lock.json  # the TypeScript SDK was removed
+      - deny.toml
+      - .github/workflows/audit.yml
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PIP_AUDIT_VERSION: 2.10.1
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same pinned versions as the release workflow.
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
+      - name: Known vulnerabilities
+        run: cargo audit --file Cargo.lock
+      - name: Licences, bans and sources
+        run: cargo deny --locked check
+
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Audit the locked packages
+        run: |
+          # The lock file as a requirements list, without the workspace's own packages.
+          uv export --frozen --no-hashes --no-emit-workspace --no-header > "$RUNNER_TEMP/requirements.txt"
+          uvx "pip-audit==$PIP_AUDIT_VERSION" -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip
+
+  # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
+  # typescript:
+    # name: TypeScript
+    # runs-on: ubuntu-latest
+    # timeout-minutes: 10
+    # steps:
+      # - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # with:
+          # persist-credentials: false
+      # - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # with:
+          # node-version: 24
+      # - name: Audit the locked packages
+        # working-directory: sdks/typescript
+        # run: npm audit --audit-level=high --package-lock-only

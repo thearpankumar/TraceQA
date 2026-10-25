@@ -1,0 +1,19 @@
+[package]
+name = "traceqa-replay"
+description = "A stand-in engine that plays back a recorded conversation from spec/transcripts/, for testing clients."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "traceqa-replay"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

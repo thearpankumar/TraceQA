@@ -1,0 +1,24 @@
+[package]
+name = "traceqa-common"
+description = "The shared base of every TraceQA crate: the types generated from spec/, the JSON-RPC line format and shared helpers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+prettyplease = "0.3.0"
+schemars = "0.8"
+serde_json.workspace = true
+syn = "3.0.9"
+typify = "0.8.0"
+
+[lints]
+workspace = true

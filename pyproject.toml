@@ -1,0 +1,88 @@
+[project]
+name = "traceqa-workspace"
+version = "0.1.0"
+description = "Python side of the TraceQA monorepo. Not published: the packages live in web-drivers/."
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "traceqa-protocol",
+    "traceqa-driver-playwright",
+    "traceqa-driver-webdriver",
+    # "traceqa",  # the Python SDK (sdks/python) was removed
+    "datamodel-code-generator>=0.26",
+    "pytest>=8",
+    "pyyaml>=6",
+    "ruff>=0.6",
+    "mcp>=1.9",
+    "jsonschema>=4.18",
+    "pyright>=1.1.414",
+    "shellcheck-py>=0.11.0.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+# members = ["python/*", "web-drivers/*", "sdks/python"]  # python/ moved into web-drivers/
+# members = ["web-drivers/*", "sdks/python"]  # the Python SDK (sdks/python) was removed
+members = ["web-drivers/*"]
+
+[tool.uv.sources]
+traceqa-protocol = { workspace = true }
+traceqa-driver-playwright = { workspace = true }
+traceqa-driver-webdriver = { workspace = true }
+# traceqa = { workspace = true }  # the Python SDK (sdks/python) was removed
+
+[tool.pytest.ini_options]
+# testpaths = ["python", "page-script", "web-drivers", "sdks", "tests"]  # python/ moved into web-drivers/
+# testpaths = ["page-script", "web-drivers", "sdks", "tests"]  # the SDKs (sdks/) were removed
+testpaths = ["page-script", "web-drivers", "tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 120
+# Generated files.
+extend-exclude = [
+    # "python/traceqa-protocol/src/traceqa_protocol/models.py",
+    # "python/traceqa-protocol/src/traceqa_protocol/contracts.py",
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/models.py",
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py",
+]
+
+[tool.ruff.lint]
+# Stated here so a contributor's own ruff settings cannot change what CI checks.
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PT", "C4", "S", "PLE", "PLW"]
+ignore = [
+    "E501",  # line length is the formatter's job
+    "PT018",  # a composite assert (a and b) reads fine in a test; splitting it adds noise
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert by design and run the built binaries, fixture servers and local URLs.
+"**/tests/**" = ["S101", "S105", "S310", "S603", "S607"]
+# Code that starts a fixed command (the engine, a driver, chromedriver, uv, python) with an argument
+# list and no shell. Nothing here builds the command from untrusted input.
+# "sdks/python/src/**" = ["S603"]  # the Python SDK was removed
+"web-drivers/*/src/**" = ["S603", "S310"]  # S310: urlopen only talks to the local WebDriver / fixture server
+# "python/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
+"web-drivers/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
+"scripts/*.py" = ["S603"]
+"testbed/bench/*.py" = ["S603"]
+
+[tool.pyright]
+# include = ["python", "web-drivers", "sdks/python"]  # python/ moved into web-drivers/
+# include = ["web-drivers", "sdks/python"]  # the Python SDK was removed
+# include = ["web-drivers"]  # only web-drivers was checked
+include = ["web-drivers", "page-script", "tests", "scripts", "testbed", "conftest.py"]
+exclude = [
+    "**/node_modules",
+    "**/.venv",
+    # "python/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
+    # "python/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/models.py",  # generated
+    "web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py",  # generated
+]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"

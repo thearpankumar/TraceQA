@@ -1,0 +1,7 @@
+{
+  "engineVersion": "0.1.0",
+  "protocolVersion": 1,
+  "features": [
+    "extract"
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "about": "Shared test vectors for spec/fingerprint.md. The Rust engine reads this file in its unit tests (crates/traceqa-engine/src/fingerprint.rs) and tests/test_fingerprint_vectors.py checks the collector against the stableId section in real browsers.",
+  "stableId": [
+    { "id": "submit", "stable": true },
+    { "id": "nav-main", "stable": true },
+    { "id": ":r1:", "stable": false },
+    { "id": "_x", "stable": false },
+    { "id": "1abc", "stable": false },
+    { "id": "btn1234", "stable": false },
+    { "id": "btn123", "stable": true },
+    { "id": "btn-12-34", "stable": true },
+    { "id": "a1b2c3d4e5", "stable": false },
+    { "id": "deadbeef", "stable": false },
+    { "id": "deadbee", "stable": true },
+    { "id": "DEADBEEF", "stable": true },
+    { "id": "abcdefgh", "stable": true },
+    { "id": "radix-12345", "stable": false },
+    { "id": "ember-9f3a2b1c", "stable": false },
+    { "id": "x٣٤٥٦٧", "stable": true },
+    { "id": "", "stable": false, "domTestable": false },
+    { "id": "   ", "stable": false, "domTestable": false },
+    { "id": "  submit  ", "stable": true, "domTestable": false },
+    { "id": "  :r1:  ", "stable": false, "domTestable": false }
+  ],
+  "stepKey": [
+    { "step": { "role": "list", "tag": "ul", "name": "Products" }, "key": "list \"products\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Cart  Preview" }, "key": "region \"cart preview\"" },
+    { "step": { "role": "region", "tag": "section", "name": "cart preview" }, "key": "region \"cart preview\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Café" }, "key": "region \"café\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Café" }, "key": "region \"café\"" },
+    { "step": { "role": "region", "tag": "section", "name": "Line\tOne\nLINE   two" }, "key": "region \"line one line two\"" },
+    { "step": { "role": "group", "tag": "fieldset", "name": "Say \"Hi\"" }, "key": "group \"say \\\"hi\\\"\"" },
+    { "step": { "role": "group", "tag": "fieldset", "name": "a\\b" }, "key": "group \"a\\\\b\"" },
+    { "step": { "role": "list", "tag": "ul", "name": "a\" > list \"b" }, "key": "list \"a\\\" > list \\\"b\"" },
+    { "step": { "role": "list", "tag": "ul", "name": "a > b" }, "key": "list \"a > b\"" },
+    { "step": { "role": "generic", "tag": "div" }, "key": "div" },
+    { "step": { "role": "generic", "tag": "label", "repeatIndex": 1, "repeatCount": 3 }, "key": "label" },
+    { "step": { "role": "article", "tag": "article", "name": "Blue Shirt", "repeatIndex": 4, "repeatCount": 12 }, "key": "article" },
+    { "step": { "role": "region", "tag": "section", "name": "Founders", "repeatIndex": 2, "repeatCount": 5 }, "key": "region \"founders\"" }
+  ],
+  "frameStep": [
+    { "label": "pay", "key": "frame \"pay\"" },
+    { "label": "Pay  Frame", "key": "frame \"pay frame\"" },
+    { "label": "x\" > main \"y", "key": "frame \"x\\\" > main \\\"y\"" },
+    { "label": "/widget/v2", "key": "frame \"/widget/v2\"" }
+  ],
+  "pathKey": [
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }, { "role": "navigation", "tag": "nav", "name": "Contents" }, { "role": "list", "tag": "ul" }, { "role": "listitem", "tag": "li" }],
+      "key": "navigation \"contents\" > list > listitem"
+    },
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }, { "role": "main", "tag": "main" }, { "role": "navigation", "tag": "nav", "name": "Contents" }, { "role": "list", "tag": "ul" }, { "role": "listitem", "tag": "li" }],
+      "key": "navigation \"contents\" > list > listitem"
+    },
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }],
+      "key": "div > div"
+    },
+    {
+      "frame": "frame \"pay\"",
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "main", "tag": "main", "name": "Checkout" }, { "role": "form", "tag": "form", "name": "Card" }, { "role": "generic", "tag": "div" }],
+      "key": "frame \"pay\" > form \"card\" > div"
+    },
+    {
+      "frame": "frame \"pay\"",
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "generic", "tag": "div" }],
+      "key": "frame \"pay\" > div > div"
+    },
+    {
+      "steps": [{ "role": "navigation", "tag": "nav", "name": "Primary" }, { "role": "list", "tag": "ul" }, { "role": "article", "tag": "article", "name": "Blue Shirt", "repeatIndex": 4, "repeatCount": 12 }],
+      "key": "navigation \"primary\" > list > article"
+    },
+    {
+      "steps": [{ "role": "generic", "tag": "div" }, { "role": "article", "tag": "article", "name": "Blue Shirt", "repeatIndex": 4, "repeatCount": 12 }, { "role": "generic", "tag": "div" }],
+      "key": "div > article > div"
+    }
+  ]
+}

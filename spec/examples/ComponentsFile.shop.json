@@ -1,0 +1,102 @@
+{
+  "formatVersion": 1,
+  "fingerprintVersion": 2,
+  "runId": "r_20261013_210455_a1b2",
+  "url": "https://shop.test",
+  "finalUrl": "https://shop.test/",
+  "title": "Buggy Shop",
+  "browser": {
+    "name": "firefox",
+    "version": "143.0"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "capturedAt": "2026-10-13T15:34:55Z",
+  "components": [
+    {
+      "id": "c_9f2a41c07b3e",
+      "role": "button",
+      "name": "Add to cart",
+      "nameIsTemplate": false,
+      "confidence": "high",
+      "signals": [
+        "native"
+      ],
+      "path": "list \"products\" > listitem",
+      "crop": "crops/c_9f2a41c07b3e.png",
+      "locator": {
+        "strategy": "role",
+        "role": "button",
+        "name": "Add to cart",
+        "exact": true,
+        "unique": true,
+        "matches": 2,
+        "own": 2,
+        "forced": false,
+        "needsIncludeHidden": false
+      },
+      "instances": [
+        {
+          "key": "c_9f2a41c07b3e:0",
+          "name": "Add to cart",
+          "tag": "button",
+          "attrs": {
+            "type": "button",
+            "data-testid": "add-to-cart"
+          },
+          "selectors": [
+            "#grid > li:nth-of-type(1) > button",
+            "body > main > ul > li:nth-of-type(1) > button"
+          ],
+          "box": {
+            "x": 212,
+            "y": 480,
+            "w": 120,
+            "h": 36
+          },
+          "state": {
+            "visible": true,
+            "enabled": true,
+            "inViewport": true
+          },
+          "frameId": "main",
+          "inShadowDom": false
+        },
+        {
+          "key": "c_9f2a41c07b3e:1",
+          "name": "Add to cart",
+          "tag": "button",
+          "attrs": {
+            "type": "button",
+            "data-testid": "add-to-cart"
+          },
+          "selectors": [
+            "#grid > li:nth-of-type(2) > button",
+            "body > main > ul > li:nth-of-type(2) > button"
+          ],
+          "box": {
+            "x": 452,
+            "y": 480,
+            "w": 120,
+            "h": 36
+          },
+          "state": {
+            "visible": true,
+            "enabled": false,
+            "inViewport": true
+          },
+          "frameId": "main",
+          "inShadowDom": false
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "cross_origin_frame_skipped",
+      "message": "Could not read the frame at https://pay.example.com/widget"
+    }
+  ]
+}

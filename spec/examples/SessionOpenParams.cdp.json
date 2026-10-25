@@ -1,0 +1,10 @@
+{
+  "target": {
+    "browser": "cdp",
+    "cdpEndpoint": "wss://browser.example.com/session/abc"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  }
+}

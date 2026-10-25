@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Responsive re-parenting</title>
+<!--
+  A page whose layout re-parents a named landmark. Below 720px wide the "Contents"
+  navigation moves from the sidebar <div> into <main>, as the table of contents does on
+  Wikipedia. The component ids must be the same at both sizes: see
+  tests/test_golden_ids.py::test_ids_survive_a_responsive_reparent and spec/fingerprint.md.
+-->
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  .layout { display: flex; gap: 16px; }
+  aside { width: 220px; }
+  main { flex: 1; }
+  .grid { list-style: none; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 0; }
+  @media (max-width: 719px) { .layout { display: block; } aside { width: auto; } }
+</style>
+</head>
+<body>
+<header>
+  <nav aria-label="Main">
+    <ul>
+      <li><a href="#home">Home</a></li>
+      <li><a href="#docs">Docs</a></li>
+      <li><a href="#about">About</a></li>
+    </ul>
+  </nav>
+</header>
+<div class="layout">
+  <div id="sidebar-slot"><div class="sidebar-inner">
+    <aside>
+      <div id="toc-wrap"><div>
+        <nav id="toc" aria-label="Contents">
+          <ul>
+            <li><a href="#history">History</a></li>
+            <li><a href="#geography">Geography</a></li>
+            <li><a href="#climate">Climate</a></li>
+          </ul>
+          <button type="button">Expand all</button>
+          <button type="button">Collapse all</button>
+          <button type="button"><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5"></circle></svg></button>
+        </nav>
+      </div></div>
+    </aside>
+  </div></div>
+  <div class="content"><main id="content-main">
+    <h1>Products</h1>
+    <ul class="grid">
+      <li><a href="#p1">Blue shirt</a> <button type="button">Add to cart</button></li>
+      <li><a href="#p2">Red scarf</a> <button type="button">Add to cart</button></li>
+      <li><a href="#p3">Green hat</a> <button type="button">Add to cart</button></li>
+      <li><a href="#p4">Black belt</a> <button type="button">Add to cart</button></li>
+    </ul>
+  </main></div>
+</div>
+<script>
+  // Below 720px the contents move into <main>, above it they go back to the sidebar.
+  var toc = document.getElementById("toc");
+  var wrap = document.getElementById("toc-wrap").firstElementChild;
+  var main = document.getElementById("content-main");
+  var query = window.matchMedia("(max-width: 719px)");
+  function place() {
+    if (query.matches) main.insertBefore(toc, main.firstChild);
+    else wrap.appendChild(toc);
+  }
+  query.addEventListener("change", place);
+  place();
+</script>
+</body>
+</html>

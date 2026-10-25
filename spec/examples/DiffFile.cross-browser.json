@@ -1,0 +1,112 @@
+{
+  "a": {
+    "browser": {
+      "name": "chromium",
+      "version": "143.0"
+    },
+    "capturedAt": "2026-10-13T15:34:55Z",
+    "componentCount": 2,
+    "finalUrl": "https://shop.test/",
+    "fingerprintVersion": 2,
+    "label": "chromium-1280x800",
+    "runId": "r_20261013_210455_a1b2",
+    "target": "chromium-1280x800",
+    "url": "https://shop.test",
+    "viewport": {
+      "height": 800,
+      "width": 1280
+    }
+  },
+  "b": {
+    "browser": {
+      "name": "firefox",
+      "version": "143.0"
+    },
+    "capturedAt": "2026-10-13T15:34:55Z",
+    "componentCount": 1,
+    "finalUrl": "https://shop.test/",
+    "fingerprintVersion": 2,
+    "label": "firefox-1280x800",
+    "runId": "r_20261013_210455_a1b2",
+    "target": "firefox-1280x800",
+    "url": "https://shop.test",
+    "viewport": {
+      "height": 800,
+      "width": 1280
+    }
+  },
+  "entries": [
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 2,
+        "name": "Checkout",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 2
+      },
+      "fields": [],
+      "flags": [],
+      "id": "c_3d5e7f9a1b2c",
+      "kind": "removed"
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 2,
+        "name": "Add to cart",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 2
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Add to cart",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 1
+      },
+      "fields": [
+        "instances",
+        "visible"
+      ],
+      "flags": [
+        "count_down"
+      ],
+      "id": "c_9f2a41c07b3e",
+      "kind": "changed"
+    }
+  ],
+  "formatVersion": 1,
+  "mode": "cross-browser",
+  "summary": {
+    "added": 0,
+    "changed": 1,
+    "paired": 0,
+    "removed": 1,
+    "unchanged": 0
+  },
+  "warnings": []
+}

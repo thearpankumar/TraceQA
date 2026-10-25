@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "collector.schema.json",
+  "title": "TraceQA collector output",
+  "description": "What the in-page collector script returns from one call in one frame. The collector reports facts only. Grouping and fingerprinting happen in the engine.",
+  "x-traceqa": { "contract": "collector", "version": 1 },
+  "$defs": {
+    "CollectorResult": {
+      "type": "object",
+      "required": ["collectorVersion", "url", "title", "scroll", "elements", "warnings"],
+      "properties": {
+        "collectorVersion": { "type": "integer", "minimum": 0 },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "scroll": { "$ref": "#/$defs/ScrollInfo" },
+        "elements": {
+          "description": "Interactive elements in document order.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/RawElement" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/Warning" }
+        }
+      }
+    },
+    "ScrollInfo": {
+      "type": "object",
+      "required": ["y", "height", "viewportHeight"],
+      "properties": {
+        "y": { "type": "number" },
+        "height": { "description": "Full scrollable height of the document.", "type": "number" },
+        "viewportHeight": { "type": "number" }
+      }
+    },
+    "RawElement": {
+      "description": "One interactive element exactly as found on the page.",
+      "type": "object",
+      "required": ["role", "name", "tag", "attrs", "selectors", "box", "state", "inShadowDom", "path", "interactive"],
+      "properties": {
+        "role": {
+          "description": "ARIA role, explicit or implied by the tag. 'generic' when there is none.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Accessible name. Empty string when the element has none.",
+          "type": "string"
+        },
+        "nameSource": {
+          "description": "Where the name came from. Known values: aria-label, aria-labelledby, label, content, alt, title, placeholder, value.",
+          "type": "string"
+        },
+        "tag": { "description": "Lower-case tag name.", "type": "string" },
+        "attrs": {
+          "description": "A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder, tabindex, autocomplete, role.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "text": {
+          "description": "Visible text, trimmed and capped at 200 characters.",
+          "type": "string"
+        },
+        "selectors": {
+          "description": "Ways to find this exact element again, most stable first. Each is a CSS selector inside the element's frame. For an element in shadow DOM the selector has parts joined by ' >>> ': each part is resolved inside the shadow root of the element the previous part matched.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "box": { "$ref": "common.schema.json#/$defs/Rect" },
+        "state": { "$ref": "common.schema.json#/$defs/ElementState" },
+        "inShadowDom": { "type": "boolean" },
+        "path": {
+          "description": "Meaningful ancestors from the document root down to the parent. Only ancestors that have a non-generic role or that repeat among their siblings are listed.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/PathStep" }
+        },
+        "interactive": { "$ref": "#/$defs/InteractiveEvidence" }
+      }
+    },
+    "PathStep": {
+      "type": "object",
+      "required": ["role", "tag"],
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "description": "Accessible name of the ancestor, when it has one.", "type": "string" },
+        "tag": { "type": "string" },
+        "repeatIndex": {
+          "description": "Zero-based position among siblings with the same tag and role. Present only when repeatCount is 2 or more.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "repeatCount": {
+          "description": "How many siblings share this tag and role.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "InteractiveEvidence": {
+      "description": "Why the collector thinks this element can be interacted with.",
+      "type": "object",
+      "required": ["confidence", "signals"],
+      "properties": {
+        "confidence": { "$ref": "common.schema.json#/$defs/Confidence" },
+        "signals": {
+          "description": "Known values: native, role, tabindex, onclick-attr, cursor-pointer, contenteditable.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

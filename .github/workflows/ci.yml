@@ -1,0 +1,344 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # A manual run, and a weekly one on the default branch, test everything: the changes job cannot
+  # tell what changed for either and says so. The weekly run catches drift (new browser, toolchain
+  # or dependency releases) when nobody has pushed.
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+# A newer push to the same pull request makes the older run pointless. Pushes to master are never
+# cancelled, so every commit on master keeps its own result; scheduled and manual runs queue.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Decides whether the push changes anything that can break. A change to documentation only
+  # (README.md, LICENSE and Markdown files under docs/; see scripts/ci_changed.py) skips the jobs below, and the CI job still reports.
+  #
+  # It also decides where every other job runs, once, so that no other job names the self-hosted
+  # pool. The pool is a persistent machine; code from a fork, or freshly updated third-party
+  # code from Dependabot, must never reach it. This job itself always runs on a GitHub-hosted
+  # machine, so a pull request cannot influence where it runs.
+  #
+  #   event                          runner
+  #   push to master                 vars.RUNNER_LABELS
+  #   pull request from this repo    vars.RUNNER_LABELS
+  #   pull request from a fork       ubuntu-latest (GitHub-hosted)
+  #   pull request by Dependabot     ubuntu-latest (GitHub-hosted)
+  #   vars.RUNNER_LABELS not set     ubuntu-latest (GitHub-hosted)
+  #
+  # The value is JSON: the labels array of the variable, or the quoted string. Jobs read it with
+  # fromJSON. `!= 'pull_request'` rather than `== 'push'` keeps schedule and manual runs on the pool.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      runner: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.RUNNER_LABELS || '"ubuntu-latest"' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: python3 scripts/ci_changed.py
+
+  # Style and generated code. These do not depend on the operating system, so they run once.
+  lint:
+    name: Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner || '"ubuntu-latest"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A pull request on the self-hosted pool gets its own tool homes under the temporary folder,
+      # which the runner clears after the job. The pool is one persistent machine: without this,
+      # a pull request could leave a changed toolchain or cache in ~/.cargo, ~/.rustup, ~/.cache/uv,
+      # ~/.npm or ~/.cache/ms-playwright for a later master run. This must come before the
+      # toolchain step, or the toolchain installs into the shared folders. Pushes to master keep
+      # the shared folders and stay fast. The service caches below are scoped to the pull request
+      # by GitHub and cannot reach master; they only restore here (see save-if).
+      - name: Isolate the tool homes of this pull request
+        if: runner.environment == 'self-hosted' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          {
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/uv-python"
+            echo "npm_config_cache=$RUNNER_TEMP/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright"
+            echo "TRACEQA_HOME=$RUNNER_TEMP/traceqa-home"
+          } >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/cargo/bin" >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - run: uv sync --locked
+      # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
+      # - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # with:
+          # node-version: 24
+          # cache: npm
+          # cache-dependency-path: sdks/typescript/package-lock.json
+      # - name: Install the TypeScript tools
+        # working-directory: sdks/typescript
+        # run: npm ci
+
+      - name: Every package has the same version
+        run: python3 scripts/check_version.py
+      - name: Rust format
+        run: cargo fmt --all --check
+      # Rust lint (clippy) runs in the Test job, on every operating system: code behind cfg(windows)
+      # or cfg(target_os) is only linted where it is compiled.
+      - name: Python lint
+        run: uv run ruff check .
+      - name: Python format
+        run: uv run ruff format --check .
+      - name: Installer script (shellcheck)
+        run: uv run shellcheck --shell=sh scripts/install.sh
+      - name: The Makefile lists its targets
+        run: |
+          if command -v make >/dev/null; then
+            make help
+          else
+            echo "::warning::make is not installed on this runner; the Makefile was not checked"
+          fi
+      - name: Every $ref in spec/ is #/$defs/Name
+        run: python3 scripts/check_spec_refs.py
+      - name: The copies of page-script/pristine.js are in sync
+        run: python3 scripts/sync_pristine.py --check
+      - name: Python types (pyright)
+        run: uv run pyright
+      - name: Generated Python types match spec/
+        run: uv run scripts/gen_python_protocol.py --check
+      # The TypeScript SDK (sdks/typescript) was removed; kept commented out. The collector lint used its ESLint.
+      # - name: Generated TypeScript types match spec/
+        # working-directory: sdks/typescript
+        # run: npm run gen:check
+      # - name: TypeScript type check
+        # working-directory: sdks/typescript
+        # run: npm run typecheck
+      # - name: TypeScript lint (eslint)
+        # working-directory: sdks/typescript
+        # run: npm run lint
+      # - name: Collector lint (ES5 profile)
+        # working-directory: sdks/typescript
+        # run: npm run lint:collector
+      # - name: Package metadata (publint, are-the-types-wrong)
+        # working-directory: sdks/typescript
+        # run: npm run lint:package
+
+      # The workspace outlives the job on a persistent machine. Remove what the build left.
+      - name: Clean the workspace
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        # run: rm -rf target .venv node_modules sdks/typescript/node_modules tests/codegen_ts/node_modules
+        run: rm -rf target .venv node_modules tests/codegen_ts/node_modules
+
+  # The oldest compiler the workspace promises to build with (`rust-version` in Cargo.toml). It fails
+  # when code, or a dependency in Cargo.lock, starts needing something newer. Only the libraries and
+  # binaries are built, because that is what the promise is about. It runs on a GitHub-hosted machine
+  # and not the pool: it installs one more toolchain and needs nothing from the pool.
+  msrv:
+    name: Oldest Rust
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.88"
+      - run: cargo check --workspace --locked
+
+  # Everything that runs: the Rust crates, the binary, both drivers, both SDKs, the MCP server,
+  # the installer and the bench. Built once, in debug, which keeps Rust's overflow and sanity
+  # checks on. Release binaries are built by the release workflow when a version is tagged.
+  test:
+    name: Test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(needs.changes.outputs.runner) || matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # One system failing should not hide what the others do.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # The SDK tests, the end-to-end tests and the bench use this binary.
+      TRACEQA_BIN: ${{ github.workspace }}/target/debug/traceqa${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      # The stand-in engine that plays back spec/transcripts/ to both SDKs.
+      TRACEQA_REPLAY_BIN: ${{ github.workspace }}/target/debug/traceqa-replay${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+      # The WebDriver driver is tested against chromedriver. Missing chromedriver is a failure, not a skip.
+      TRACEQA_REQUIRE_CHROMEDRIVER: "1"
+      # A missing binary fails the tests that need it instead of skipping them (tests/support/ci_guards.py).
+      TRACEQA_REQUIRE_BINARY: "1"
+      # A test skipped for a reason that is not on the allow-list in tests/support/ci_guards.py fails the run.
+      TRACEQA_NO_UNEXPECTED_SKIPS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A pull request on the self-hosted pool gets its own tool homes under the temporary folder,
+      # which the runner clears after the job. The pool is one persistent machine: without this,
+      # a pull request could leave a changed toolchain or cache in ~/.cargo, ~/.rustup, ~/.cache/uv,
+      # ~/.npm or ~/.cache/ms-playwright for a later master run. This must come before the
+      # toolchain step, or the toolchain installs into the shared folders. Pushes to master keep
+      # the shared folders and stay fast. The service caches below are scoped to the pull request
+      # by GitHub and cannot reach master; they only restore here (see save-if).
+      - name: Isolate the tool homes of this pull request
+        if: runner.environment == 'self-hosted' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          {
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/uv-python"
+            echo "npm_config_cache=$RUNNER_TEMP/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/ms-playwright"
+            echo "TRACEQA_HOME=$RUNNER_TEMP/traceqa-home"
+          } >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/cargo/bin" >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          # cache-dependency-path: |
+          #   sdks/typescript/package-lock.json
+          #   tests/codegen_ts/package-lock.json
+          cache-dependency-path: tests/codegen_ts/package-lock.json
+
+      # Rust: every crate's tests, then the binaries, which reuse what the tests compiled.
+      - name: Rust tests
+        run: cargo test --locked
+      - name: Rust lint (clippy)
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Build the binaries
+        run: cargo build --locked
+      - name: The binaries start
+        shell: bash
+        run: |
+          "$TRACEQA_BIN" --version
+          "$TRACEQA_BIN" extract --help
+          test -f "$TRACEQA_REPLAY_BIN"
+
+      # Python: the drivers, the protocol package, the SDK, MCP and install, against real browsers.
+      - name: Install the Python packages
+        run: uv sync --locked
+      - name: Install browsers
+        run: uv run playwright install --with-deps chromium firefox webkit
+      # The generated TypeScript page objects are run with Playwright's own test runner (tests/test_codegen.py).
+      # Its version equals the Python one in uv.lock, so it uses the browsers installed above.
+      - name: Install the codegen test tools
+        working-directory: tests/codegen_ts
+        run: npm ci
+      - name: Find chromedriver
+        shell: bash
+        run: |
+          # GitHub's machines ship chromedriver next to a matching Chrome. Its folder is named by
+          # CHROMEWEBDRIVER, spelled ChromeWebDriver on some Windows images; PATH is the last resort.
+          name="chromedriver${{ runner.os == 'Windows' && '.exe' || '' }}"
+          found=""
+          for dir in "${CHROMEWEBDRIVER:-}" "${ChromeWebDriver:-}" "C:/SeleniumWebDrivers/ChromeDriver"; do
+            if [ -n "$dir" ] && [ -f "$dir/$name" ]; then found="$dir/$name"; break; fi
+          done
+          [ -n "$found" ] || found="$(command -v "$name" || true)"
+          if [ -z "$found" ]; then
+            echo "chromedriver not found. CHROMEWEBDRIVER='${CHROMEWEBDRIVER:-}'"
+            env | grep -i chrome || true
+            exit 1
+          fi
+          echo "chromedriver: $found"
+          echo "TRACEQA_CHROMEDRIVER=$found" >> "$GITHUB_ENV"
+      - name: Python tests
+        run: uv run pytest
+
+      # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
+      # # TypeScript: the SDK against the binary, real browsers and the transcripts.
+      # - name: Put the drivers and the workspace's Python on PATH
+        # shell: bash
+        # run: echo "$GITHUB_WORKSPACE/.venv/${{ runner.os == 'Windows' && 'Scripts' || 'bin' }}" >> "$GITHUB_PATH"
+      # - name: TypeScript tests
+        # working-directory: sdks/typescript
+        # run: |
+          # npm ci
+          # npm test
+
+      # End to end: the binary, a driver, three browsers and the collector on the demo site.
+      # One repeat: CI checks that every component is found. Speed is measured locally.
+      - name: Bench
+        run: uv run testbed/bench/run.py --repeats 1 --json bench-scores.json
+      - name: Upload the bench scores
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-scores-${{ matrix.os }}
+          path: bench-scores.json
+          if-no-files-found: ignore
+
+      # The workspace outlives the job on a persistent machine. Remove what the build left.
+      - name: Clean the workspace
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        # run: rm -rf target .venv node_modules sdks/typescript/node_modules tests/codegen_ts/node_modules
+        run: rm -rf target .venv node_modules tests/codegen_ts/node_modules
+
+  # The one check to require before merging. It passes when the jobs above passed, or were
+  # skipped because only documentation changed, and fails when any of them failed. Branch protection
+  # must require this job (CI), not the jobs above: a skipped job counts as passed there.
+  ci:
+    name: CI
+    needs: [changes, lint, msrv, test]
+    if: always()
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    steps:
+      - name: Result
+        shell: bash
+        run: |
+          echo "changes: ${{ needs.changes.result }}, lint: ${{ needs.lint.result }}, msrv: ${{ needs.msrv.result }}, test: ${{ needs.test.result }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then exit 1; fi
+          for result in "${{ needs.lint.result }}" "${{ needs.msrv.result }}" "${{ needs.test.result }}"; do
+            case "$result" in
+              success|skipped) ;;
+              *) exit 1 ;;
+            esac
+          done

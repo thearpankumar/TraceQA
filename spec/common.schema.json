@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common.schema.json",
+  "title": "TraceQA common types",
+  "description": "Types shared by more than one contract.",
+  "x-traceqa": { "contract": "common", "version": 1 },
+  "$defs": {
+    "Empty": {
+      "description": "No fields.",
+      "type": "object",
+      "properties": {}
+    },
+    "Viewport": {
+      "description": "Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.",
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "Rect": {
+      "description": "A rectangle in CSS pixels. Inside a RawElement it is relative to that frame's document. Everywhere else it is relative to the top-level page.",
+      "type": "object",
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number" },
+        "h": { "type": "number" }
+      }
+    },
+    "BrowserTarget": {
+      "description": "Which browser to run in. The engine passes this to a driver and never interprets it.",
+      "type": "object",
+      "required": ["browser"],
+      "properties": {
+        "browser": {
+          "description": "Browser name. Known values: chromium, chrome, msedge, firefox, webkit, safari, cdp, webdriver.",
+          "type": "string"
+        },
+        "cdpEndpoint": {
+          "description": "WebSocket or HTTP endpoint of an already running browser. Used with browser = cdp.",
+          "type": "string"
+        },
+        "webdriverUrl": {
+          "description": "URL of a W3C WebDriver server, local or a cloud grid. Used with browser = webdriver.",
+          "type": "string"
+        },
+        "webdriverCapabilities": {
+          "description": "Capabilities to ask the WebDriver server for, for example { \"browserName\": \"safari\" }.",
+          "type": "object"
+        },
+        "headless": { "type": "boolean" }
+      }
+    },
+    "BrowserInfo": {
+      "description": "What actually ran, as reported by the driver.",
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "StorageState": {
+      "description": "Cookies and stored values to start a browser with, so it is already signed in or past a site's first screen. The same format as Playwright's storageState, so a file made by Playwright can be used. It holds session keys: treat it as a password. The engine never writes it to a run folder or an event.",
+      "type": "object",
+      "required": ["cookies", "origins"],
+      "properties": {
+        "cookies": { "type": "array", "items": { "$ref": "#/$defs/StorageCookie" } },
+        "origins": {
+          "description": "Values in each site's localStorage.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/StorageOrigin" }
+        }
+      }
+    },
+    "StorageCookie": {
+      "type": "object",
+      "required": ["name", "value", "domain", "path"],
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string" },
+        "domain": { "description": "For example example.com, or .example.com for its subdomains too.", "type": "string" },
+        "path": { "type": "string" },
+        "expires": { "description": "Unix time in seconds. -1 or absent for a cookie that lasts until the browser closes.", "type": "number" },
+        "httpOnly": { "type": "boolean" },
+        "secure": { "type": "boolean" },
+        "sameSite": { "enum": ["Strict", "Lax", "None"] }
+      }
+    },
+    "StorageOrigin": {
+      "type": "object",
+      "required": ["origin", "localStorage"],
+      "properties": {
+        "origin": { "description": "Scheme, host and port, for example https://app.example.com.", "type": "string" },
+        "localStorage": { "type": "array", "items": { "$ref": "#/$defs/StorageItem" } }
+      }
+    },
+    "StorageItem": {
+      "type": "object",
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    },
+    "Warning": {
+      "description": "Something that did not stop the run but that the reader should know.",
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted, signed_in_pictures, collector_tampered, requests_failed.",
+          "type": "string"
+        },
+        "message": { "type": "string" }
+      }
+    },
+    "ElementState": {
+      "description": "State of one element at the moment it was read.",
+      "type": "object",
+      "required": ["visible", "enabled", "inViewport"],
+      "properties": {
+        "visible": {
+          "description": "False when the element is hidden by CSS (display, visibility, opacity, content-visibility), has no size, is clipped to one pixel or less, or is inside a hidden ancestor.",
+          "type": "boolean"
+        },
+        "enabled": { "type": "boolean" },
+        "inViewport": { "type": "boolean" },
+        "checked": { "type": "boolean" },
+        "expanded": { "type": "boolean" },
+        "selected": { "type": "boolean" },
+        "pressed": { "type": "boolean" },
+        "readonly": { "type": "boolean" },
+        "required": { "type": "boolean" },
+        "covered": {
+          "description": "True when another element lies on top of this one at every point tested, so a click would not reach it, as under a cookie banner or a modal's backdrop. Only tested for visible elements in the viewport; absent means it was not tested.",
+          "type": "boolean"
+        },
+        "coveredBy": {
+          "description": "A selector for the element on top, when covered is true.",
+          "type": "string"
+        }
+      }
+    },
+    "Confidence": {
+      "description": "How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).",
+      "type": "string",
+      "enum": ["high", "low"]
+    },
+    "LocatorStrategy": {
+      "description": "How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.",
+      "type": "string",
+      "enum": ["role", "testid", "text", "css"]
+    },
+    "LocatorScope": {
+      "description": "One ancestor a locator searches inside, outermost first in Locator.scope.",
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "description": "The ancestor's accessible name, matched exactly.", "type": "string" }
+      }
+    },
+    "Locator": {
+      "description": "How to find a component again with Playwright-style locators (getByRole, getByTestId, getByText). The counts are over the instances collected in the same file, so uniqueness is proven for one page in one browser; `traceqa codegen` combines the files of all browsers. Never uses nth(): a component that cannot be told apart is reported as not unique, or located by CSS with forced set.",
+      "type": "object",
+      "required": ["strategy", "unique", "matches", "own", "forced", "needsIncludeHidden"],
+      "properties": {
+        "strategy": { "$ref": "#/$defs/LocatorStrategy" },
+        "role": { "description": "ARIA role, for the role strategy.", "type": "string" },
+        "name": { "description": "Accessible name (role strategy) or text (text strategy). Matched exactly: whitespace normalised, case sensitive. Absent when the name is a template or changes.", "type": "string" },
+        "exact": { "description": "True whenever a name is used.", "type": "boolean" },
+        "testId": { "description": "Value of data-testid, for the testid strategy.", "type": "string" },
+        "scope": {
+          "description": "Ancestors to search inside, outermost first, each a descendant of the one before.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/LocatorScope" }
+        },
+        "frame": { "description": "Label of the frame the component is in, as written in its path: lower case, whitespace normalised. Absent for the main frame.", "type": "string" },
+        "css": { "description": "CSS selector, only for the css strategy.", "type": "string" },
+        "unique": { "description": "True when the locator matches the component's instances and nothing else collected (matches equals own).", "type": "boolean" },
+        "matches": { "description": "How many collected instances in this file the locator matches.", "type": "integer", "minimum": 0 },
+        "own": { "description": "How many of those are instances of this component.", "type": "integer", "minimum": 0 },
+        "ambiguousWith": {
+          "description": "Ids of other components the locator also matches, at most 5.",
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string" }
+        },
+        "forced": { "description": "True when no readable locator told the component apart and a structural CSS selector was used. Brittle: it breaks when the page layout changes.", "type": "boolean" },
+        "needsIncludeHidden": { "description": "True when every instance is hidden, so a role locator only finds it with includeHidden.", "type": "boolean" }
+      }
+    },
+    "RunStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "cancelled"]
+    }
+  }
+}

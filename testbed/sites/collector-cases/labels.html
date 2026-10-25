@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: labels</title>
+<style>body { font: 14px sans-serif; } div { margin: 6px 0; }</style>
+<body>
+<h1>Which labels belong to a control</h1>
+<p>The collector finds the labels of a control without asking the browser for
+<code>labels</code> on every control, so these cases hold it to the browser's rules.</p>
+
+<div><label for="lb-for">Email for</label> <input id="lb-for" data-expect="role=textbox; name=Email for; source=label"></div>
+<div><label>Wrapping label <input id="lb-wrap" data-expect="name=Wrapping label; source=label"></label></div>
+<div><label for="lb-two">First</label> <label for="lb-two">Second</label>
+  <input id="lb-two" data-expect="name=First Second; source=label"></div>
+<div><label for="lb-wrap-and-for">Both <input id="lb-wrap-inner" data-expect="name=; source="></label>
+  <input id="lb-wrap-and-for" data-expect="name=Both; source=label"></div>
+
+<div><label for="lb-notlabelable">Points at a div</label>
+  <div id="lb-notlabelable" role="button" tabindex="0" data-expect="role=button; name=; source="></div></div>
+<div><label for="lb-hidden">Points at a hidden input</label> <input type="hidden" id="lb-hidden" data-expect="absent"></div>
+<div><label for="lb-nothing">Points at nothing <input id="lb-inside-unmatched" data-expect="name=; source="></label></div>
+
+<div><label for="lb-dupid">First element with the id is a div</label>
+  <div id="lb-dupid"></div>
+  <input id="lb-dupid" data-expect="name=; source="></div>
+
+<div><label>Pick <button id="lb-first-labelable" data-expect="name=Pick Go; source=label">Go</button>
+  <input id="lb-second-labelable" data-expect="name=; source="></label></div>
+
+<div><label for="lb-button">Button label</label> <button id="lb-button" data-expect="name=Button label; source=label">Own text</button></div>
+<div><label for="lb-select">Sort by</label> <select id="lb-select" data-expect="role=combobox; name=Sort by; source=label"><option>Price</option></select></div>
+<div><label for="lb-textarea">Message</label> <textarea id="lb-textarea" data-expect="name=Message; source=label"></textarea></div>
+<div><label for="lb-aria">Ignored</label> <input id="lb-aria" aria-label="Wins" data-expect="name=Wins; source=aria-label"></div>
+
+<div id="lb-host"><template shadowrootmode="open">
+  <label for="lb-in-shadow">Inside a shadow root</label>
+  <input id="lb-in-shadow" data-expect="shadow=true; name=Inside a shadow root; source=label">
+  <label for="lb-shadow-light">Does not reach the page</label>
+</template></div>
+<div><input id="lb-shadow-light" data-expect="name=; shadow=false"></div>
+</body>
+</html>

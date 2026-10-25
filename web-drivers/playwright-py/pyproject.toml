@@ -1,0 +1,37 @@
+[project]
+name = "traceqa-driver-playwright"
+version = "0.1.0"
+description = "TraceQA browser driver for Chromium, Edge, Firefox, WebKit and CDP endpoints, built on Playwright."
+requires-python = ">=3.12"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["traceqa", "testing", "playwright", "browser", "driver"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = ["playwright>=1.47", "traceqa-protocol==0.1.0"]
+
+[project.scripts]
+traceqa-driver-playwright = "traceqa_driver_playwright.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/thearpankumar/TraceQA/tree/master/web-drivers/playwright-py#readme"
+Repository = "https://github.com/thearpankumar/TraceQA"
+Issues = "https://github.com/thearpankumar/TraceQA/issues"
+Documentation = "https://github.com/thearpankumar/TraceQA/blob/master/docs/usage.md#drivers"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/traceqa_driver_playwright"]
+
+[tool.uv.sources]
+traceqa-protocol = { workspace = true }

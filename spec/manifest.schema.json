@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manifest.schema.json",
+  "title": "TraceQA manifest",
+  "description": "A manifest says which components a page should have. It is YAML on disk (see testbed/sites/buggy-shop/manifest.yaml) and this schema describes the parsed document. `traceqa baseline init` writes one from a run; `traceqa verify --manifest` and the benchmark compare a run with one, by role and name.",
+  "x-traceqa": { "contract": "manifest", "version": 1 },
+  "$defs": {
+    "ManifestFile": {
+      "description": "The whole manifest. Unknown keys are an error (typo protection): the manifest is the one place in the spec where additionalProperties is false.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["viewports", "components"],
+      "properties": {
+        "formatVersion": { "description": "Absent in older files, which are version 1.", "type": "integer", "minimum": 0 },
+        "viewports": { "description": "Named viewports, for example desktop and mobile. `hidden` lists these names.", "type": "object", "additionalProperties": { "$ref": "common.schema.json#/$defs/Viewport" } },
+        "absent": { "description": "Components that must NOT be reported, for example content that only exists after a click.", "type": "array", "items": { "$ref": "#/$defs/ManifestAbsent" } },
+        "warnings": { "description": "Warning codes the page is expected to raise.", "type": "array", "items": { "type": "string" } },
+        "components": { "type": "array", "items": { "$ref": "#/$defs/ManifestComponent" } }
+      }
+    },
+    "ManifestAbsent": {
+      "description": "A component that must not be found.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "name"],
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "ManifestComponent": {
+      "description": "One expected component.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role"],
+      "properties": {
+        "case": { "description": "Which hard case it covers (free text, for reports).", "type": "string" },
+        "role": { "type": "string" },
+        "name": { "description": "The accessible name. Absent means an empty name unless template is true.", "type": "string" },
+        "template": { "description": "True when the instances have different names.", "type": "boolean" },
+        "instances": { "description": "How many copies exist. Default 1.", "type": "integer", "minimum": 0 },
+        "confidence": { "description": "high (default) or low.", "$ref": "common.schema.json#/$defs/Confidence" },
+        "frame": { "description": "Name of the iframe it lives in. Default: the main page.", "type": "string" },
+        "shadow": { "description": "True when it is inside shadow DOM.", "type": "boolean" },
+        "hidden": { "description": "Names of the viewports where it is not visible.", "type": "array", "items": { "type": "string" } },
+        "disabled": { "description": "How many instances are disabled. Default 0.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "VerifyReport": {
+      "description": "What `traceqa verify --format json` prints: a run checked against a manifest, per target.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formatVersion", "runId", "manifest", "strict", "passed", "targets", "skipped", "notes"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 1 },
+        "runId": { "type": "string" },
+        "manifest": { "description": "The manifest file as it was named on the command line.", "type": "string" },
+        "strict": { "description": "True when extras (components found but not in the manifest) fail the check.", "type": "boolean" },
+        "passed": { "description": "True when no target has a failure.", "type": "boolean" },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/VerifyTarget" } },
+        "skipped": { "description": "Targets whose viewport size is not in the manifest.", "type": "array", "items": { "$ref": "#/$defs/VerifySkipped" } },
+        "notes": { "description": "Unused manifest entries and other remarks that do not fail the check.", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "VerifyTarget": {
+      "description": "The check of one target.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "url", "viewport", "size", "checked", "passed", "issues"],
+      "properties": {
+        "target": { "description": "The target folder, for example chromium-1280x800.", "type": "string" },
+        "url": { "type": "string" },
+        "viewport": { "description": "The manifest's name for the target's viewport.", "type": "string" },
+        "size": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "checked": { "description": "How many manifest components were checked.", "type": "integer", "minimum": 0 },
+        "passed": { "type": "boolean" },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/VerifyIssue" } }
+      }
+    },
+    "VerifyIssue": {
+      "description": "One thing the check found.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "check", "message"],
+      "properties": {
+        "severity": { "description": "fail, warning or note. An extra is a warning, or a fail with --strict.", "type": "string", "enum": ["fail", "warning", "note"] },
+        "check": { "description": "missing, present, instances, confidence, visible, hidden, disabled, frame, shadow, warning or extra.", "type": "string" },
+        "message": { "description": "A sentence, with the page's words cleaned and cut.", "type": "string" },
+        "role": { "type": "string" },
+        "name": { "type": "string" },
+        "componentId": { "type": "string" }
+      }
+    },
+    "VerifySkipped": {
+      "description": "A target that was not checked.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "reason"],
+      "properties": { "target": { "type": "string" }, "reason": { "type": "string" } }
+    }
+  }
+}

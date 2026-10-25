@@ -1,0 +1,11 @@
+{
+  "target": {
+    "browser": "firefox",
+    "headless": true
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "locale": "en-US"
+}

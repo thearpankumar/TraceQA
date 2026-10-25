@@ -1,0 +1,41 @@
+# Line endings: LF in the repository and in every working tree, on every system, so files compare
+# byte for byte on Windows too. Git decides per file whether it is text (text=auto).
+* text=auto eol=lf
+
+# Windows batch files only run with CRLF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: never converted, never diffed as text. tests/test_workflows.py checks that every
+# tracked non-UTF-8 file matches one of these; the ones not tracked today are listed ahead of time.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.wasm binary
+
+# Generated from spec/ (regenerate, do not edit): collapsed in GitHub diffs, left out of language stats.
+# python/traceqa-protocol/src/traceqa_protocol/models.py linguist-generated
+# python/traceqa-protocol/src/traceqa_protocol/contracts.py linguist-generated
+web-drivers/traceqa-protocol/src/traceqa_protocol/models.py linguist-generated
+web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py linguist-generated
+# sdks/typescript/src/protocol.ts linguist-generated  # the TypeScript SDK was removed
+# Generated from uv.lock by scripts/gen_driver_requirements.py.
+crates/traceqa-cli/driver-requirements.txt linguist-generated
+# Lock files are written by their tools.
+Cargo.lock linguist-generated
+uv.lock linguist-generated
+**/package-lock.json linguist-generated
+
+# Copied from upstream (the SARIF 2.1.0 schema): not counted as this project's code.
+tests/data/sarif-schema-2.1.0.json linguist-vendored

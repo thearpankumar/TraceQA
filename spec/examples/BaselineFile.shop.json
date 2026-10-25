@@ -1,0 +1,28 @@
+{
+  "formatVersion": 1,
+  "key": "shop.example.com-3f9a1c2e",
+  "url": "https://shop.example.com/",
+  "fingerprintVersion": 1,
+  "promotedAt": "2026-03-02T09:30:00Z",
+  "promotedFrom": { "runId": "r_20260302T093000Z_a1b2c3", "engineVersion": "0.1.0" },
+  "targets": [
+    {
+      "dir": "chromium-1280x800",
+      "browser": { "name": "chromium", "version": "126.0.6478.55" },
+      "viewport": { "width": 1280, "height": 800 },
+      "hasCrops": true
+    }
+  ],
+  "aliases": [
+    {
+      "from": "c_9f2a41c07b3e",
+      "to": "c_0a1b2c3d4e5f",
+      "reason": "rename",
+      "evidence": "Button label changed from Add to cart to Add to basket",
+      "addedAt": "2026-03-05T10:00:00Z"
+    }
+  ],
+  "promotions": [
+    { "runId": "r_20260302T093000Z_a1b2c3", "at": "2026-03-02T09:30:00Z", "summary": "first save" }
+  ]
+}

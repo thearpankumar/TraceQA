@@ -1,0 +1,12 @@
+{
+  "driverName": "traceqa-driver-webdriver",
+  "driverVersion": "0.1.0",
+  "protocolVersion": 1,
+  "browsers": [
+    "safari",
+    "webdriver"
+  ],
+  "exclusiveBrowsers": [
+    "safari"
+  ]
+}

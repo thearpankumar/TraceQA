@@ -1,0 +1,82 @@
+{
+  "formatVersion": 1,
+  "fingerprintVersion": 2,
+  "runId": "r_20261013_210455_a1b2",
+  "url": "https://shop.test",
+  "finalUrl": "https://shop.test/",
+  "title": "Buggy Shop",
+  "browser": { "name": "chromium", "version": "143.0" },
+  "viewport": { "width": 1280, "height": 800 },
+  "capturedAt": "2026-10-13T15:34:55Z",
+  "components": [
+    {
+      "id": "c_5a68e8b18177",
+      "role": "button",
+      "name": "",
+      "nameIsTemplate": false,
+      "confidence": "high",
+      "signals": ["native"],
+      "path": "banner",
+      "instances": [
+        {
+          "key": "c_5a68e8b18177:0",
+          "name": "",
+          "tag": "button",
+          "attrs": { "type": "button", "data-testid": "menu-toggle" },
+          "selectors": ["[data-testid=\"menu-toggle\"]"],
+          "box": { "x": 16, "y": 12, "w": 40, "h": 40 },
+          "state": { "visible": true, "enabled": true, "inViewport": true },
+          "frameId": "main",
+          "inShadowDom": false
+        }
+      ]
+    },
+    {
+      "id": "c_87e8339687f1",
+      "role": "textbox",
+      "name": "Search products",
+      "nameIsTemplate": false,
+      "confidence": "high",
+      "signals": ["native"],
+      "path": "banner",
+      "instances": [
+        {
+          "key": "c_87e8339687f1:0",
+          "name": "Search products",
+          "nameSource": "placeholder",
+          "tag": "input",
+          "attrs": { "type": "text", "placeholder": "Search products", "autocomplete": "off" },
+          "selectors": ["#search"],
+          "box": { "x": 80, "y": 12, "w": 400, "h": 40 },
+          "state": { "visible": true, "enabled": true, "inViewport": true },
+          "frameId": "main",
+          "inShadowDom": false
+        }
+      ]
+    },
+    {
+      "id": "c_44f6ceff6e6f",
+      "role": "generic",
+      "name": "Share page",
+      "nameIsTemplate": false,
+      "confidence": "low",
+      "signals": ["tabindex", "cursor-pointer"],
+      "path": "main",
+      "instances": [
+        {
+          "key": "c_44f6ceff6e6f:0",
+          "name": "Share page",
+          "nameSource": "content",
+          "tag": "div",
+          "attrs": { "tabindex": "0" },
+          "selectors": ["main > div:nth-of-type(1)"],
+          "box": { "x": 16, "y": 120, "w": 160, "h": 32 },
+          "state": { "visible": true, "enabled": true, "inViewport": true },
+          "frameId": "main",
+          "inShadowDom": false
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,91 @@
+# Files this repository never tracks. One file for the whole repository; the lock files
+# (Cargo.lock, uv.lock, package-lock.json) are committed on purpose, so builds are reproducible.
+# Patterns follow github/gitignore. Editor folders (.idea/, .vscode/) belong in your global
+# excludes file (git config core.excludesFile), not here.
+
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# Assistant settings that belong to one person's machine
+.claude/
+
+# Secrets in environment files (keep an example)
+.env
+.env.*
+!.env.example
+
+# Rust (Cargo)
+target/
+# The release binary `make build` copies out of target/
+/bin/
+**/*.rs.bk
+*.pdb
+rustc-ice-*.txt
+**/mutants.out*/
+
+# Python (uv)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+*.egg
+.eggs/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pypirc
+
+# TypeScript and Node (npm)
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.eslintcache
+.npm/
+npm-debug.log*
+*.tgz
+
+# Playwright test output
+test-results/
+playwright-report/
+blob-report/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.coverprofile
+coverage.*
+!coverage.go
+profile.cov
+go.work
+go.work.sum
+
+# TraceQA output: run folders, visual diff pictures, generated page objects, bench scores.
+# .traceqa/ is not ignored: baselines in .traceqa/baselines/ are meant to be committed.
+/runs/
+/visual-diff/
+/traceqa-pages/
+/bench-scores.json
+
+# Saved browser states from `traceqa login`. They hold session keys.
+*.state.json
+storage-state*.json
+state.json
