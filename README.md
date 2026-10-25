@@ -524,6 +524,7 @@ The Rust types regenerate on build.
 | Document | Contents |
 |---|---|
 | [docs/usage.md](docs/usage.md) | Every command and option, the SDKs, the MCP tools, output files, warnings and exit codes. |
+| [docs/features.md](docs/features.md) | Every feature, one line each: what it does and how. |
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |
 | [docs/releasing.md](docs/releasing.md) | Version numbers and how to publish a release. |
