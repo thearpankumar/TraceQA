@@ -99,14 +99,15 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync --locked
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: sdks/typescript/package-lock.json
-      - name: Install the TypeScript tools
-        working-directory: sdks/typescript
-        run: npm ci
+      # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
+      # - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        # with:
+          # node-version: 24
+          # cache: npm
+          # cache-dependency-path: sdks/typescript/package-lock.json
+      # - name: Install the TypeScript tools
+        # working-directory: sdks/typescript
+        # run: npm ci
 
       - name: Every package has the same version
         run: python3 scripts/check_version.py
@@ -126,27 +127,29 @@ jobs:
         run: uv run pyright
       - name: Generated Python types match spec/
         run: uv run scripts/gen_python_protocol.py --check
-      - name: Generated TypeScript types match spec/
-        working-directory: sdks/typescript
-        run: npm run gen:check
-      - name: TypeScript type check
-        working-directory: sdks/typescript
-        run: npm run typecheck
-      - name: TypeScript lint (eslint)
-        working-directory: sdks/typescript
-        run: npm run lint
-      - name: Collector lint (ES5 profile)
-        working-directory: sdks/typescript
-        run: npm run lint:collector
-      - name: Package metadata (publint, are-the-types-wrong)
-        working-directory: sdks/typescript
-        run: npm run lint:package
+      # The TypeScript SDK (sdks/typescript) was removed; kept commented out. The collector lint used its ESLint.
+      # - name: Generated TypeScript types match spec/
+        # working-directory: sdks/typescript
+        # run: npm run gen:check
+      # - name: TypeScript type check
+        # working-directory: sdks/typescript
+        # run: npm run typecheck
+      # - name: TypeScript lint (eslint)
+        # working-directory: sdks/typescript
+        # run: npm run lint
+      # - name: Collector lint (ES5 profile)
+        # working-directory: sdks/typescript
+        # run: npm run lint:collector
+      # - name: Package metadata (publint, are-the-types-wrong)
+        # working-directory: sdks/typescript
+        # run: npm run lint:package
 
       # The workspace outlives the job on a persistent machine. Remove what the build left.
       - name: Clean the workspace
         if: always() && runner.environment == 'self-hosted'
         shell: bash
-        run: rm -rf target .venv node_modules sdks/typescript/node_modules tests/codegen_ts/node_modules
+        # run: rm -rf target .venv node_modules sdks/typescript/node_modules tests/codegen_ts/node_modules
+        run: rm -rf target .venv node_modules tests/codegen_ts/node_modules
 
   # The oldest compiler the workspace promises to build with (`rust-version` in Cargo.toml). It fails
   # when code, or a dependency in Cargo.lock, starts needing something newer. Only the libraries and
@@ -229,9 +232,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: |
-            sdks/typescript/package-lock.json
-            tests/codegen_ts/package-lock.json
+          # cache-dependency-path: |
+          #   sdks/typescript/package-lock.json
+          #   tests/codegen_ts/package-lock.json
+          cache-dependency-path: tests/codegen_ts/package-lock.json
 
       # Rust: every crate's tests, then the binaries, which reuse what the tests compiled.
       - name: Rust tests
@@ -278,15 +282,16 @@ jobs:
       - name: Python tests
         run: uv run pytest
 
-      # TypeScript: the SDK against the binary, real browsers and the transcripts.
-      - name: Put the drivers and the workspace's Python on PATH
-        shell: bash
-        run: echo "$GITHUB_WORKSPACE/.venv/${{ runner.os == 'Windows' && 'Scripts' || 'bin' }}" >> "$GITHUB_PATH"
-      - name: TypeScript tests
-        working-directory: sdks/typescript
-        run: |
-          npm ci
-          npm test
+      # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
+      # # TypeScript: the SDK against the binary, real browsers and the transcripts.
+      # - name: Put the drivers and the workspace's Python on PATH
+        # shell: bash
+        # run: echo "$GITHUB_WORKSPACE/.venv/${{ runner.os == 'Windows' && 'Scripts' || 'bin' }}" >> "$GITHUB_PATH"
+      # - name: TypeScript tests
+        # working-directory: sdks/typescript
+        # run: |
+          # npm ci
+          # npm test
 
       # End to end: the binary, a driver, three browsers and the collector on the demo site.
       # One repeat: CI checks that every component is found. Speed is measured locally.
@@ -304,7 +309,8 @@ jobs:
       - name: Clean the workspace
         if: always() && runner.environment == 'self-hosted'
         shell: bash
-        run: rm -rf target .venv node_modules sdks/typescript/node_modules tests/codegen_ts/node_modules
+        # run: rm -rf target .venv node_modules sdks/typescript/node_modules tests/codegen_ts/node_modules
+        run: rm -rf target .venv node_modules tests/codegen_ts/node_modules
 
   # The one check to require before merging. It passes when the jobs above passed, or were
   # skipped because only documentation changed, and fails when any of them failed. Branch protection

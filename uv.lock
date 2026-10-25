@@ -10,7 +10,6 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "traceqa",
     "traceqa-driver-playwright",
     "traceqa-driver-webdriver",
     "traceqa-protocol",
@@ -1652,17 +1651,6 @@ wheels = [
 ]
 
 [[package]]
-name = "traceqa"
-version = "0.1.0"
-source = { editable = "sdks/python" }
-dependencies = [
-    { name = "traceqa-protocol" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "traceqa-protocol", editable = "web-drivers/traceqa-protocol" }]
-
-[[package]]
 name = "traceqa-driver-playwright"
 version = "0.1.0"
 source = { editable = "web-drivers/playwright-py" }
@@ -1713,7 +1701,6 @@ dev = [
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "ruff" },
-    { name = "traceqa" },
     { name = "traceqa-driver-playwright" },
     { name = "traceqa-driver-webdriver" },
     { name = "traceqa-protocol" },
@@ -1730,7 +1717,6 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "traceqa", editable = "sdks/python" },
     { name = "traceqa-driver-playwright", editable = "web-drivers/playwright-py" },
     { name = "traceqa-driver-webdriver", editable = "web-drivers/webdriver-py" },
     { name = "traceqa-protocol", editable = "web-drivers/traceqa-protocol" },

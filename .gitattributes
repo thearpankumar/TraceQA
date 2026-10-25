@@ -29,7 +29,7 @@
 # python/traceqa-protocol/src/traceqa_protocol/contracts.py linguist-generated
 web-drivers/traceqa-protocol/src/traceqa_protocol/models.py linguist-generated
 web-drivers/traceqa-protocol/src/traceqa_protocol/contracts.py linguist-generated
-sdks/typescript/src/protocol.ts linguist-generated
+# sdks/typescript/src/protocol.ts linguist-generated  # the TypeScript SDK was removed
 # Generated from uv.lock by scripts/gen_driver_requirements.py.
 crates/traceqa-cli/driver-requirements.txt linguist-generated
 # Lock files are written by their tools.

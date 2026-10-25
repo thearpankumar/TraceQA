@@ -263,7 +263,7 @@ re-run the exact path that exposed a bug.
 - Output: a result per edge (`reproduced` when the target state equals the recorded one by EXP-1, `diverged`
   with the actual state, or `missing` when the component id is not on the page) and exit code 1 if any
   edge is not reproduced.
-- `traceqa-replay` today only replays recorded SDK conversations (a stand-in for `traceqa serve`), so this is
+- `traceqa-replay` today only replays recorded client conversations (a stand-in for `traceqa serve`), so this is
   a new command. It reuses the safety policy, so a replay is also read-only by default.
 
 **Acceptance.**
@@ -563,11 +563,11 @@ them.
 
 ### HYG-1: Ruff ANN rules (deferred in M7)
 
-**Why.** Explicit annotations on public functions make the Python SDK and protocol packages readable without an
+**Why.** Explicit annotations on public functions make the Python protocol package and drivers readable without an
 editor. They were left out when the lint rules were widened because pyright already checks types, and turning
 on `ANN` at that point would have meant hundreds of mechanical edits.
 
-**Design.** Add `ANN` to `select` in `pyproject.toml`. Fix public API first (`sdks/python/src`, `python/`),
+**Design.** Add `ANN` to `select` in `pyproject.toml`. Fix public API first (`web-drivers/traceqa-protocol`),
 then drivers and scripts. Ignore `ANN401` (explicit `Any`) where the protocol really is dynamic, each with a
 one-line justification in the config. Tests may be exempt through `per-file-ignores`.
 

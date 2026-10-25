@@ -59,7 +59,7 @@ finds into bug reports and deterministic tests.
 | Parallel execution | Browsers and screen sizes run side by side, with a time breakdown for each. |
 | Consistent results | One in-page collector runs in every browser, so results are measured the same way everywhere. |
 | AI agent ready | A built-in MCP server lets AI tools such as Claude Code and Cursor run TraceQA and inspect its results. |
-| Any language | A documented protocol, with Python and TypeScript SDKs and a guide for others. |
+| Any language | A documented protocol (`traceqa serve`) and a guide for writing a client. |
 | Non-invasive | It navigates to the URL and scrolls to load lazy content. With `--storage-state` it first sets cookies and local storage. It never clicks, types or submits anything. |
 
 ## Supported platforms and browsers
@@ -85,7 +85,7 @@ change is tested on all three in continuous integration.
 | [Rust](https://rustup.rs), stable | Building the `traceqa` binary |
 | [uv](https://docs.astral.sh/uv/) | Installing the browser drivers |
 | [Git](https://git-scm.com) | Getting the source |
-| [Node.js](https://nodejs.org) 24 or later | Only for the TypeScript SDK |
+| [Node.js](https://nodejs.org) 24 or later | Only for the codegen tests (`tests/codegen_ts`) |
 
 Install uv if it is not already present:
 
@@ -156,12 +156,10 @@ traceqa doctor
 This reports where each driver was found, whether it starts, and which browsers
 it can open.
 
-### SDKs and AI tools
+### AI tools
 
 | Integration | Setup |
 |---|---|
-| Python SDK | Not yet on PyPI. Use it from the repository: see [docs/usage.md](docs/usage.md#python-sdk). |
-| TypeScript SDK | Not yet on npm. Use it from the repository: see [sdks/typescript](sdks/typescript/README.md). |
 | Claude Code | `claude mcp add traceqa -- traceqa mcp` |
 | Other MCP hosts | Add the command `traceqa` with the argument `mcp` in the host's MCP settings. |
 
@@ -255,8 +253,6 @@ traceqa extract http://127.0.0.1:4173/
 | Interface | Best for | Entry point |
 |---|---|---|
 | Command line | Local checks, scripts and CI pipelines | `traceqa extract` |
-| Python SDK | Python test suites and tooling | `traceqa.extract()` |
-| TypeScript SDK | Node.js test suites and tooling | `extract()` |
 | MCP server | AI agents and assistants | `traceqa mcp` |
 | Client protocol | Any other language | `traceqa serve`, see [docs/clients.md](docs/clients.md) |
 
@@ -273,34 +269,6 @@ check with `traceqa diff RUN --against NAME --fail-on removed,disabled`; see
 To catch a style change on one component, extract both runs with `--crops` and run `traceqa visual RUN_A RUN_B`
 (same browser and viewport only); see [docs/usage.md](docs/usage.md#traceqa-visual).
 All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
-
-### Python
-
-```python
-import traceqa
-
-result = traceqa.extract(
-    "https://example.com",
-    browsers=["chromium", "firefox"],
-    viewports=[(1280, 800), (390, 844)],
-)
-components = result.components("chromium-1280x800").components
-```
-
-### TypeScript
-
-```ts
-import { extract } from "traceqa";
-
-const result = await extract("https://example.com", {
-  browsers: ["chromium", "firefox"],
-  viewports: [
-    [1280, 800],
-    [390, 844],
-  ],
-});
-const { components } = await result.components("chromium-1280x800");
-```
 
 ### AI agents (MCP)
 
@@ -329,8 +297,6 @@ flowchart TB
     subgraph callers["Callers"]
         cli["CLI<br/>traceqa extract"]
         ai["AI tools over MCP<br/>traceqa mcp"]
-        py["Python SDK"]
-        ts["TypeScript SDK"]
         other["Any other language"]
     end
 
@@ -359,8 +325,6 @@ flowchart TB
 
     cli -->|direct call| run
     ai -->|direct call| run
-    py -->|JSON-RPC over stdio| serve
-    ts -->|JSON-RPC over stdio| serve
     other -->|JSON-RPC over stdio| serve
     extract <-->|JSON-RPC over stdio| pw
     extract <-->|JSON-RPC over stdio| wd
@@ -380,7 +344,6 @@ flowchart TB
 | Command line and MCP server | Rust | Front ends compiled into the same `traceqa` binary as the engine. |
 | Drivers | Python | Control browsers. They carry out instructions and report results, and hold no logic. |
 | Collector | JavaScript | A single script evaluated inside the page that reports facts about its interactive elements. |
-| SDKs | Python, TypeScript | Start the engine and exchange messages with it. They hold no logic. |
 | Contracts | JSON Schema | Define every message and file format. All language bindings are generated from them. |
 
 ### How an extraction works
@@ -408,7 +371,7 @@ affect the others.
 | Browsers are reached through separate driver programs | Supporting a new browser never changes the engine. |
 | One in-page collector for every browser | Results are measured the same way and are directly comparable. |
 | Programs communicate in JSON-RPC over standard streams | Any language that can start a process can integrate. |
-| JSON Schemas are the single source of truth | Rust, Python and TypeScript types are generated and cannot drift apart. |
+| JSON Schemas are the single source of truth | Rust and Python types are generated and cannot drift apart. |
 | Results are files on disk | Every run can be inspected, compared and reported on later. |
 
 The full design, including the message flow and the reasoning behind each
@@ -429,8 +392,6 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `web-drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |
 | `web-drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
 | `page-script/` | The script that runs inside each page and reads its elements (the collector). |
-| `sdks/python/` | The Python SDK. |
-| `sdks/typescript/` | The TypeScript SDK. |
 | `web-drivers/traceqa-protocol/` | Python types generated from `spec/` and the base the drivers share. |
 | `spec/` | Contracts: schemas, examples, recorded conversations and the identifier recipe. |
 | `testbed/sites/buggy-shop/` | Demo site with a manifest of its expected components. |
@@ -457,14 +418,11 @@ Run the test suites:
 ```sh
 cargo test
 uv run pytest
-npm ci --prefix sdks/typescript
-uv run --directory sdks/typescript node --run test
 uv run testbed/bench/run.py
 ```
 
-These are the Rust crates, then the collector cases, drivers, SDKs, MCP server and
-installer, then the TypeScript SDK (it needs Node 24 or later), then the end-to-end bench
-on the demo site. Every command runs unchanged from the repository root in Bash,
+These are the Rust crates, then the collector cases, drivers, MCP server and installer, then
+the end-to-end bench on the demo site. Every command runs unchanged from the repository root in Bash,
 PowerShell and cmd on Windows, and in a POSIX shell on macOS and Linux.
 
 Run the linters:
@@ -473,8 +431,6 @@ Run the linters:
 uv run ruff check .
 uv run ruff format --check .
 uv run pyright
-npm run lint --prefix sdks/typescript
-npm run lint:collector --prefix sdks/typescript
 ```
 
 By default a Python test that needs the built binary, `uv`, or `chromedriver` is skipped
@@ -487,28 +443,26 @@ Every part of the repository has tests, from unit tests of each crate to
 end-to-end runs in real browsers. The collector is checked case by case in
 three browsers against pages that state their own expected results, and every
 run folder a test produces is checked against the JSON Schemas in `spec/`. The MCP server is tested with the official
-MCP client library, and both SDKs replay the same recorded conversations so
-they are proven to send identical messages.
+MCP client library.
 
 Continuous integration runs on every pull request, on pushes to `master`, on demand and weekly:
 
 | Job | Platforms | Checks |
 |---|---|---|
 | Changes | Linux | Decides whether the change touches code. Only `README.md`, `LICENSE` and Markdown files under `docs/` count as documentation; a change made of those alone skips Lint and Test. Manual and weekly scheduled runs test everything. |
-| Lint | Linux | Formatting for Rust, lint for Python and TypeScript, Python and TypeScript type checks, the collector's ES5 profile, that every `$ref` in `spec/` resolves, that generated types match `spec/`, and that every package has the same version. |
-| Test | Linux, macOS, Windows | Clippy (`-D warnings`) on each system, all Rust, Python and TypeScript tests against the built binary and real browsers, and the bench. |
+| Lint | Linux | Formatting for Rust, lint and type checks for Python, that every `$ref` in `spec/` resolves, that generated types match `spec/`, and that every package has the same version. |
+| Test | Linux, macOS, Windows | Clippy (`-D warnings`) on each system, all Rust and Python tests against the built binary and real browsers, and the bench. |
 | CI | Linux | One result for the whole run: passes when every job passed or was skipped for a documentation change. |
 
 Pushing a version tag (`vX.Y.Z`, on a `master` commit, matching every package version) runs the
 release workflow (`.github/workflows/release.yml`), which audits the dependencies, then builds, checks and
 publishes the binaries.
 
-After changing a schema in `spec/`, regenerate the Python and TypeScript types, and
+After changing a schema in `spec/`, regenerate the Python types, and
 after a client protocol change record the transcripts again:
 
 ```sh
 uv run scripts/gen_python_protocol.py
-npm run gen --prefix sdks/typescript
 uv run scripts/record_transcripts.py
 ```
 
@@ -519,7 +473,8 @@ The Rust types regenerate on build.
 | Stage | Description | Status |
 |---|---|---|
 | Component extraction | Inventory of every interactive element, with stable identifiers | Available |
-| SDKs and MCP server | Python, TypeScript and AI agent integration | Available |
+| MCP server | AI agent integration | Available |
+| SDKs | Python and TypeScript SDKs | Planned |
 | One-command setup | `traceqa install` and `traceqa doctor` | Available |
 | Releases | Prebuilt binaries for every tagged version | Available |
 | Distribution | A GitHub Action, and packages on PyPI and npm | Planned |
@@ -532,7 +487,7 @@ The Rust types regenerate on build.
 
 | Document | Contents |
 |---|---|
-| [docs/usage.md](docs/usage.md) | Every command and option, the SDKs, the MCP tools, output files, warnings and exit codes. |
+| [docs/usage.md](docs/usage.md) | Every command and option, the MCP tools, output files, warnings and exit codes. |
 | [docs/features.md](docs/features.md) | What you can do with TraceQA, one line each. |
 | [docs/architecture.md](docs/architecture.md) | Components, message flow and design decisions. |
 | [docs/clients.md](docs/clients.md) | Writing a client in another language. |

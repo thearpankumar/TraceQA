@@ -1,8 +1,7 @@
 # Transcripts
 
-Recorded conversations between a client and the engine. Every client is tested
-by playing these back: the Python and TypeScript clients do, and a client in
-another language should too. See [docs/clients.md](../../docs/clients.md).
+Recorded conversations between a client and the engine. Every client should be
+tested by playing these back. See [docs/clients.md](../../docs/clients.md).
 
 ## Format
 

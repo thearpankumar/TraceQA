@@ -8,8 +8,6 @@ instructions.
 flowchart TB
     subgraph callers["Callers"]
         cli["CLI<br/>traceqa extract"]
-        py["Python SDK<br/>traceqa.extract()"]
-        ts["TypeScript SDK<br/>extract()"]
         ai["AI tools over MCP<br/>traceqa mcp"]
         other["Any other language"]
     end
@@ -39,8 +37,6 @@ flowchart TB
 
     cli -->|direct call| run
     ai -->|direct call| run
-    py -->|JSON-RPC over stdio| serve
-    ts -->|JSON-RPC over stdio| serve
     other -->|JSON-RPC over stdio| serve
     extract <-->|JSON-RPC over stdio| pw
     extract <-->|JSON-RPC over stdio| wd
@@ -61,7 +57,7 @@ flowchart TB
 | MCP server | Rust | Offers the engine to AI tools as MCP tools. Compiled into the same binary. |
 | Drivers | Python | Control browsers. Each does what it is asked and reports what happened. |
 | Collector | JavaScript | Runs inside the page and reports facts about its interactive elements. |
-| SDKs | Any | Start the engine and exchange messages with it. They contain no logic. |
+| Clients | Any | Start the engine (`traceqa serve`) and exchange messages with it. They contain no logic. |
 | Contracts | JSON Schema | Define every message and file format. |
 
 The CLI keeps one module per subcommand in `crates/traceqa-cli/src/` (`extract.rs`, `serve.rs`, `mcp.rs`, `install.rs`, `doctor.rs`, `login.rs`). Each holds its own arguments struct and a `run` function that returns the exit code; options shared by several commands (`--driver`) are in `args.rs`, and `main.rs` only lists the commands and dispatches. To add a subcommand, create its file, then add one `mod` line, one `Command` variant and one `match` arm to `main.rs`. A command that starts a run calls `extract::execute_request`, so signal handling is set up once. A command that works on a finished run finds it with `traceqa_recorder::open_run`, which accepts a run folder, a target folder, a `components.json` path or a bare run id; it caps reads at 64 MiB and does not follow symbolic links.
@@ -82,16 +78,14 @@ language. The same approach is used by language servers and by the Model
 Context Protocol.
 
 The messages are defined in `spec/`. The Rust types are generated from the
-schemas at build time, the Python types by `scripts/gen_python_protocol.py` and
-the TypeScript types by `sdks/typescript/scripts/gen-protocol.mjs`, so the sides
-cannot drift apart. Every example in `spec/examples/` is checked by the Rust and
+schemas at build time and the Python types by `scripts/gen_python_protocol.py`, so
+the sides cannot drift apart. Every example in `spec/examples/` is checked by the Rust and
 Python test suites.
 
 Every client is also held to the recorded conversations in
 `spec/transcripts/`. A stand-in engine, `traceqa-replay`, plays one back and
-checks each message the client sends, field by field. The Python and TypeScript
-clients pass the same files, so they send the same messages. A client in
-another language is tested the same way: see [clients.md](clients.md).
+checks each message the client sends, field by field. A client in any language
+is tested this way: see [clients.md](clients.md).
 
 ## Client protocol
 
@@ -270,7 +264,7 @@ folder and do not call back into the engine. The formats are described in
 
 | Decision | Reason |
 |---|---|
-| The engine and the CLI are one Rust binary. | All logic lives in one place, so every driver and SDK behaves the same, and a single binary is simple to distribute. |
+| The engine and the CLI are one Rust binary. | All logic lives in one place, so every driver and client behaves the same, and a single binary is simple to distribute. |
 | Drivers are separate processes. | A driver holds no logic, so supporting a new browser never changes the engine. |
 | The page is read by a script evaluated inside it. | It is the only code that runs identically in every browser. |
 | Messages are JSON-RPC 2.0, one per line, over standard streams. | Every language can start a process and read and write lines. |
