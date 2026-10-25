@@ -437,7 +437,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `testbed/sites/collector-cases/` | Small pages that test the collector one behaviour at a time. |
 | `testbed/sites/patterns/` | Pages built like real sites (menus, carousels, forms, grids, tables, dialogs) that test the whole engine. |
 | `testbed/sites/trouble/` | A site that fails on purpose, for the failure tests. |
-| `bench/` | Scores extraction against the demo site. |
+| `testbed/bench/` | Scores extraction against the demo site. |
 | `tests/` | End-to-end tests of the MCP server and the installer. |
 | `scripts/` | Code generation and transcript recording. |
 | `docs/` | Usage, features, architecture, client guide, testing, backlog and security policy. |
@@ -459,7 +459,7 @@ cargo test
 uv run pytest
 npm ci --prefix sdks/typescript
 uv run --directory sdks/typescript node --run test
-uv run bench/run.py
+uv run testbed/bench/run.py
 ```
 
 These are the Rust crates, then the collector cases, drivers, SDKs, MCP server and

@@ -291,7 +291,7 @@ jobs:
       # End to end: the binary, a driver, three browsers and the collector on the demo site.
       # One repeat: CI checks that every component is found. Speed is measured locally.
       - name: Bench
-        run: uv run bench/run.py --repeats 1 --json bench-scores.json
+        run: uv run testbed/bench/run.py --repeats 1 --json bench-scores.json
       - name: Upload the bench scores
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

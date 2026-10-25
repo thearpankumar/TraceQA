@@ -61,7 +61,7 @@ ignore = [
 "web-drivers/*/src/**" = ["S603", "S310"]  # S310: urlopen only talks to the local WebDriver / fixture server
 "python/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
 "scripts/*.py" = ["S603"]
-"bench/*.py" = ["S603"]
+"testbed/bench/*.py" = ["S603"]
 
 [tool.pyright]
 include = ["python", "web-drivers", "sdks/python"]

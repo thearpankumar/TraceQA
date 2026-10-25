@@ -3,7 +3,7 @@
 //!
 //! The manifest is a constraint set, not a snapshot: it lists what must be there, what must not be,
 //! and which warnings are allowed. Components found that it does not list are extras, which warn
-//! (and fail with `--strict`). The matching is the matching of `bench/run.py`: same role, then a
+//! (and fail with `--strict`). The matching is the matching of `testbed/bench/run.py`: same role, then a
 //! template flag or an exact name, each found component used once, in manifest order. A frame is
 //! compared through the label in the component path, never by splitting the path on " > ".
 //!
@@ -234,7 +234,7 @@ fn found_subject(c: &Component) -> String {
     subject(&c.role, &c.name, c.name_is_template)
 }
 
-/// The rule `bench/run.py` calls `matches`: the role, then the template flag or the exact name.
+/// The rule `testbed/bench/run.py` calls `matches`: the role, then the template flag or the exact name.
 fn matches(expected: &ManifestComponent, found: &Component) -> bool {
     if found.role != expected.role {
         return false;

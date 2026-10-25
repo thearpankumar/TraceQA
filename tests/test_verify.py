@@ -2,7 +2,7 @@
 
 Most tests build a run folder by hand from spec/examples (no browser). The tests on the real Buggy
 Shop run it once in Chromium at both viewports of testbed/sites/buggy-shop/manifest.yaml and check that
-`verify` and the bench (bench/run.py) agree on it, on the good manifest and on broken copies.
+`verify` and the bench (testbed/bench/run.py) agree on it, on the good manifest and on broken copies.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def shop_manifest() -> dict[str, Any]:
 
 
 def bench():
-    spec = importlib.util.spec_from_file_location("bench_run", ROOT / "bench" / "run.py")
+    spec = importlib.util.spec_from_file_location("bench_run", ROOT / "testbed" / "bench" / "run.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -258,7 +258,7 @@ def shop_run(shop_url: str, tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def bench_scores(run: Path, manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """What bench/run.py says about each target of the run."""
+    """What testbed/bench/run.py says about each target of the run."""
     module = bench()
     names = {f"{v['width']}x{v['height']}": name for name, v in manifest["viewports"].items()}
     scores = {}

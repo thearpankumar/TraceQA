@@ -1,6 +1,6 @@
 # Component fingerprint, version 2
 
-**Status: measured on the Buggy Shop and on four real sites.** `bench/run.py`
+**Status: measured on the Buggy Shop and on four real sites.** `testbed/bench/run.py`
 gets the same ids in Chromium, Firefox and WebKit, at two viewports, across
 repeated runs. The first real site showed that the earlier rule merged lists of
 different links into one component, and the card rule below replaced it. It is implemented in `crates/traceqa-engine/src/fingerprint.rs`
