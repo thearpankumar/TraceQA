@@ -1,0 +1,102 @@
+{
+  "a": {
+    "browser": {
+      "name": "chromium",
+      "version": "143.0"
+    },
+    "capturedAt": "2026-10-13T15:34:55Z",
+    "componentCount": 2,
+    "finalUrl": "https://shop.test/",
+    "fingerprintVersion": 2,
+    "label": "before",
+    "runId": "r_20261013_210455_a1b2",
+    "target": "before",
+    "url": "https://shop.test",
+    "viewport": {
+      "height": 800,
+      "width": 1280
+    }
+  },
+  "b": {
+    "browser": {
+      "name": "chromium",
+      "version": "143.0"
+    },
+    "capturedAt": "2026-10-13T15:34:55Z",
+    "componentCount": 2,
+    "finalUrl": "https://shop.test/",
+    "fingerprintVersion": 2,
+    "label": "after",
+    "runId": "r_20261014_093000_c3d4",
+    "target": "after",
+    "url": "https://shop.test",
+    "viewport": {
+      "height": 800,
+      "width": 1280
+    }
+  },
+  "entries": [
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 2,
+        "name": "Add to cart",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 2
+      },
+      "fields": [],
+      "flags": [],
+      "id": "c_9f2a41c07b3e",
+      "kind": "removed",
+      "pairedWith": {
+        "confidence": "high",
+        "id": "c_0a1b2c3d4e5f",
+        "reason": "role_changed"
+      }
+    },
+    {
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 2,
+        "name": "Add to cart",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 2
+      },
+      "fields": [],
+      "flags": [],
+      "id": "c_0a1b2c3d4e5f",
+      "kind": "added",
+      "pairedWith": {
+        "confidence": "high",
+        "id": "c_9f2a41c07b3e",
+        "reason": "role_changed"
+      }
+    }
+  ],
+  "formatVersion": 1,
+  "mode": "run-to-run",
+  "summary": {
+    "added": 1,
+    "changed": 0,
+    "paired": 1,
+    "removed": 1,
+    "unchanged": 1
+  },
+  "warnings": []
+}

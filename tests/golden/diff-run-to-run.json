@@ -1,0 +1,166 @@
+{
+  "summary": {
+    "added": 1,
+    "changed": 2,
+    "paired": 1,
+    "removed": 2,
+    "unchanged": 33
+  },
+  "entries": [
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Buggy Shop",
+        "nameIsTemplate": false,
+        "path": "banner",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 1
+      },
+      "fields": [],
+      "flags": [],
+      "id": "c_0f4b2a722613",
+      "kind": "removed",
+      "pairedWith": {
+        "confidence": "low",
+        "id": "c_ffffffffffff",
+        "reason": "name_changed"
+      }
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Search",
+        "nameIsTemplate": false,
+        "path": "search \"site search\"",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 1
+      },
+      "fields": [],
+      "flags": [],
+      "id": "c_663c9dccbb31",
+      "kind": "removed"
+    },
+    {
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Buggy Shop Home",
+        "nameIsTemplate": false,
+        "path": "banner",
+        "pressed": 0,
+        "role": "link",
+        "selected": 0,
+        "visible": 1
+      },
+      "fields": [],
+      "flags": [],
+      "id": "c_ffffffffffff",
+      "kind": "added",
+      "pairedWith": {
+        "confidence": "low",
+        "id": "c_0f4b2a722613",
+        "reason": "name_changed"
+      }
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 11,
+        "expanded": 0,
+        "instances": 12,
+        "name": "Add to cart",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 12
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 10,
+        "expanded": 0,
+        "instances": 11,
+        "name": "Add to cart",
+        "nameIsTemplate": false,
+        "path": "list \"products\" > listitem",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 11
+      },
+      "fields": [
+        "instances",
+        "visible",
+        "enabled"
+      ],
+      "flags": [
+        "count_down"
+      ],
+      "id": "c_5e19c7835bfe",
+      "kind": "changed"
+    },
+    {
+      "a": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 1,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Shipping info",
+        "nameIsTemplate": false,
+        "path": "main > group",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 1
+      },
+      "b": {
+        "checked": 0,
+        "confidence": "high",
+        "covered": 0,
+        "enabled": 0,
+        "expanded": 0,
+        "instances": 1,
+        "name": "Shipping info",
+        "nameIsTemplate": false,
+        "path": "main > group",
+        "pressed": 0,
+        "role": "button",
+        "selected": 0,
+        "visible": 1
+      },
+      "fields": [
+        "enabled"
+      ],
+      "flags": [
+        "became_disabled"
+      ],
+      "id": "c_b440c13a06a7",
+      "kind": "changed"
+    }
+  ]
+}

@@ -795,8 +795,19 @@ dependencies = [
  "clap",
  "ctrlc",
  "serde_json",
+ "traceqa-diff",
  "traceqa-engine",
  "traceqa-mcp",
+ "traceqa-protocol",
+ "traceqa-recorder",
+]
+
+[[package]]
+name = "traceqa-diff"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "traceqa-protocol",
 ]
 

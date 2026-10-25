@@ -186,6 +186,66 @@ traceqa extract https://example.com --browser cdp=http://127.0.0.1:9222
 traceqa extract https://example.com --json > run.json
 ```
 
+## `traceqa diff`
+
+What differs between two finished runs: across browsers, across viewports, or from one run to the
+next. It only reads run folders and never starts a browser.
+
+```sh
+# Yesterday's run against today's (one browser and viewport each)
+traceqa diff runs/r_20261013_210455_a1b2 runs/r_20261014_093000_c3d4
+
+# Chromium against Firefox inside one run
+traceqa diff runs/r_20261013_210455_a1b2 runs/r_20261013_210455_a1b2 --target-a chromium-1280x800 --target-b firefox-1280x800
+
+# For a pull request or a CI step summary
+traceqa diff runs/before runs/after --target chromium-1280x800 --out diff.md
+traceqa diff runs/before runs/after --target chromium-1280x800 --format json > diff.json
+```
+
+`A` and `B` are anything `traceqa` can open as a run: a run folder, a target folder, a
+`components.json`, or the id of a run in `--runs-dir` (default `runs`). A run with several targets
+needs one: `--target NAME` picks the folder of that name on both sides, `--target-a` and `--target-b`
+pick one each. A run with a single target needs no flag.
+
+| Flag | Meaning |
+|---|---|
+| `--format markdown\|json` | Markdown (the default) is for people. `json` is the `DiffFile` contract (`spec/diff.schema.json`). |
+| `--out FILE` | Write the report to a file instead of standard output. |
+| `--target`, `--target-a`, `--target-b` | Which target folder of a run to compare. |
+| `--runs-dir DIR` | Where bare run ids are looked up. |
+
+**What is compared.** Components are joined on their id. A component only in B is `added`, only in A
+is `removed`, and on both sides with a difference is `changed`, with the fields that differ:
+`instances`, `visible`, `enabled`, `covered`, `checked`, `expanded`, `selected`, `pressed` (all counts
+of instances in that state) and `confidence`. Each changed entry also carries flags for scripts:
+`became_hidden`, `became_visible`, `became_disabled`, `became_enabled`, `became_covered`,
+`became_uncovered`, `count_up` and `count_down`. Positions, sizes and pictures are not compared: they
+move with every layout change.
+
+**Role and name changes.** The id is a hash of role, name and path, so a button that becomes a link, or
+is renamed, has a new id. It appears as one removed and one added entry that name each other in
+`pairedWith`. At the same path with the same name and another role the pair is `role_changed`
+(confidence high). At the same path and role with exactly one removed and one added component it is
+`name_changed` (confidence low). Two renames at one path are ambiguous and are not paired.
+
+**Mode.** Recorded in the report: `cross-browser` (same run, same viewport, another browser),
+`cross-viewport` (same run, same browser, another viewport; components a site hides on purpose are
+expected to differ), `run-to-run` (different runs, same browser and viewport), or `custom`. When the
+two sides share fewer than half of the smaller side's components, a note says so.
+
+**Markdown.** Names, paths and roles come from the page, so they are shown in code spans, cut to 80
+characters, stripped of invisible and direction-changing characters, and a pipe is shown as
+U+2223. Each of the Removed, Added and Changed tables shows 50 rows and then `and N more, use
+--format json`, which also keeps the report far below GitHub's 1 MiB limit for a step summary.
+
+**Exit codes.** `0` whenever the diff ran, whether or not it found differences. `2` for input that
+cannot be compared: a path that does not exist, a run with several targets and no `--target`, or two
+files with different `fingerprintVersion`s (their ids mean different things; extract both again with
+the same TraceQA). `1` is kept for gates that fail on a difference.
+
+The report is the same bytes every time for the same inputs.
+
 ## `traceqa serve`
 
 ```

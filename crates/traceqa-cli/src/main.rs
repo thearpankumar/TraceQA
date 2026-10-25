@@ -7,6 +7,7 @@
 //! the variant order, which is the order `traceqa --help` lists commands in.
 
 mod args;
+mod diff;
 mod doctor;
 mod extract;
 mod install;
@@ -32,6 +33,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Compare two runs (browsers, viewports, or builds) by component.
+    ///
+    /// Prints Markdown, or the DiffFile JSON with --format json. Exit 0 when the diff ran.
+    Diff(diff::DiffArgs),
     /// List every interactive component on a page.
     Extract(extract::ExtractArgs),
     /// Speak the client protocol on stdin and stdout. This is what SDKs start.
@@ -53,6 +58,7 @@ enum Command {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
+        Command::Diff(args) => diff::run(&args),
         Command::Doctor(args) => doctor::run(&args),
         Command::Extract(args) => extract::run(&args),
         Command::Install(args) => install::run(&args),

@@ -282,6 +282,100 @@ class RunStatus(str, Enum):
     cancelled = "cancelled"
 
 
+class DiffSide(BaseModel):
+    """
+    One of the two compared pages.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    label: str = Field(..., description="What the person typed for this side.")
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    target: str | None = Field(
+        default=None, description="The target folder name inside the run, when known."
+    )
+    browser: BrowserInfo
+    viewport: Viewport
+    url: str
+    final_url: str = Field(..., validation_alias="finalUrl", serialization_alias="finalUrl")
+    captured_at: str = Field(
+        ...,
+        validation_alias="capturedAt", serialization_alias="capturedAt",
+        description="RFC 3339 timestamp in UTC, copied from the side's components.json.",
+    )
+    fingerprint_version: int = Field(..., validation_alias="fingerprintVersion", serialization_alias="fingerprintVersion", ge=0)
+    component_count: int = Field(..., validation_alias="componentCount", serialization_alias="componentCount", ge=0)
+
+
+class DiffSummary(BaseModel):
+    """
+    How many components fall in each group. A paired entry is counted under added or removed, and its pair once more in paired.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    added: int = Field(..., ge=0)
+    removed: int = Field(..., ge=0)
+    changed: int = Field(..., ge=0)
+    unchanged: int = Field(..., ge=0)
+    paired: int = Field(
+        ...,
+        description="Pairs of one removed and one added component that look like the same component after a change.",
+        ge=0,
+    )
+
+
+class Kind(str, Enum):
+    """
+    One of added, removed, changed. An added component is in B only, a removed one in A only.
+    """
+
+    added = "added"
+    removed = "removed"
+    changed = "changed"
+
+
+class ComponentSummary(BaseModel):
+    """
+    What a diff compares about one component. The state fields count the instances in that state (covered counts only instances that were tested and found covered).
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    role: str
+    name: str
+    name_is_template: bool = Field(..., validation_alias="nameIsTemplate", serialization_alias="nameIsTemplate")
+    path: str
+    instances: int = Field(..., ge=0)
+    visible: int = Field(..., ge=0)
+    enabled: int = Field(..., ge=0)
+    covered: int = Field(..., ge=0)
+    checked: int = Field(..., ge=0)
+    expanded: int = Field(..., ge=0)
+    selected: int = Field(..., ge=0)
+    pressed: int = Field(..., ge=0)
+    confidence: Confidence
+
+
+class PairLink(BaseModel):
+    """
+    Links a removed entry to the added entry that is probably the same component. The id hashes role, name and path, so a change of role or name gives a new id.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(..., description="The id of the other entry.")
+    reason: str = Field(
+        ...,
+        description="Known values: role_changed (same path and name, other role), name_changed (same path and role, other name or template flag).",
+    )
+    confidence: Confidence
+
+
 class DriverHelloParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -760,6 +854,40 @@ class StorageOrigin(BaseModel):
     local_storage: list[StorageItem] = Field(..., validation_alias="localStorage", serialization_alias="localStorage")
 
 
+class DiffEntry(BaseModel):
+    """
+    One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: Kind = Field(
+        ...,
+        description="One of added, removed, changed. An added component is in B only, a removed one in A only.",
+    )
+    id: str = Field(..., description="The component id.")
+    a: ComponentSummary | None = Field(
+        default=None, description="The component on side A. Absent for added."
+    )
+    b: ComponentSummary | None = Field(
+        default=None, description="The component on side B. Absent for removed."
+    )
+    fields: list[str] = Field(
+        ...,
+        description="For changed: the ComponentSummary fields that differ (instances, visible, enabled, covered, checked, expanded, selected, pressed, confidence). Empty otherwise.",
+    )
+    flags: list[str] = Field(
+        ...,
+        description="Ready-made facts for gating, in this order when present: became_hidden (some visible instances on A, none on B), became_visible, became_disabled (some enabled instances on A, none on B), became_enabled, became_covered (no covered instance on A, some on B), became_uncovered, count_up, count_down (instance count). Only on changed entries.",
+    )
+    paired_with: PairLink | None = Field(
+        default=None,
+        validation_alias="pairedWith", serialization_alias="pairedWith",
+        description="Set on a removed or added entry that looks like the other side's entry after a change of role or name.",
+    )
+
+
 class PageGotoResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -912,6 +1040,29 @@ class StorageState(BaseModel):
     cookies: list[StorageCookie]
     origins: list[StorageOrigin] = Field(
         ..., description="Values in each site's localStorage."
+    )
+
+
+class DiffFile(BaseModel):
+    """
+    Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    mode: str = Field(
+        ...,
+        description="What kind of comparison this is, worked out from the two sides. Known values: cross-browser (same run, same viewport, another browser), cross-viewport (same run, same browser, another viewport), run-to-run (different runs, same browser and viewport), custom.",
+    )
+    a: DiffSide
+    b: DiffSide
+    summary: DiffSummary
+    entries: list[DiffEntry]
+    warnings: list[Warning] = Field(
+        ...,
+        description="Things the reader should know about the comparison. Known codes: viewports_differ (components hidden by design are expected).",
     )
 
 

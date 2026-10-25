@@ -44,6 +44,12 @@ Warning?: Warning
 ElementState?: ElementState
 Confidence?: Confidence
 RunStatus?: RunStatus
+DiffFile?: DiffFile
+DiffSide?: DiffSide
+DiffSummary?: DiffSummary
+DiffEntry?: DiffEntry
+ComponentSummary?: ComponentSummary2
+PairLink?: PairLink1
 DriverHelloParams?: DriverHelloParams
 DriverHelloResult?: DriverHelloResult
 Capabilities?: Capabilities
@@ -493,6 +499,167 @@ cookies: StorageCookie[]
  */
 origins: StorageOrigin[]
 }
+/**
+ * Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).
+ */
+export interface DiffFile {
+formatVersion: number
+/**
+ * What kind of comparison this is, worked out from the two sides. Known values: cross-browser (same run, same viewport, another browser), cross-viewport (same run, same browser, another viewport), run-to-run (different runs, same browser and viewport), custom.
+ */
+mode: string
+a: DiffSide
+b: DiffSide
+summary: DiffSummary
+entries: DiffEntry[]
+/**
+ * Things the reader should know about the comparison. Known codes: viewports_differ (components hidden by design are expected).
+ */
+warnings: Warning[]
+}
+/**
+ * One of the two compared pages.
+ */
+export interface DiffSide {
+/**
+ * What the person typed for this side.
+ */
+label: string
+runId: string
+/**
+ * The target folder name inside the run, when known.
+ */
+target?: string
+browser: BrowserInfo
+viewport: Viewport
+url: string
+finalUrl: string
+/**
+ * RFC 3339 timestamp in UTC, copied from the side's components.json.
+ */
+capturedAt: string
+fingerprintVersion: number
+componentCount: number
+}
+/**
+ * How many components fall in each group. A paired entry is counted under added or removed, and its pair once more in paired.
+ */
+export interface DiffSummary {
+added: number
+removed: number
+changed: number
+unchanged: number
+/**
+ * Pairs of one removed and one added component that look like the same component after a change.
+ */
+paired: number
+}
+/**
+ * One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.
+ */
+export interface DiffEntry {
+/**
+ * One of added, removed, changed. An added component is in B only, a removed one in A only.
+ */
+kind: ("added" | "removed" | "changed")
+/**
+ * The component id.
+ */
+id: string
+a?: ComponentSummary
+b?: ComponentSummary1
+/**
+ * For changed: the ComponentSummary fields that differ (instances, visible, enabled, covered, checked, expanded, selected, pressed, confidence). Empty otherwise.
+ */
+fields: string[]
+/**
+ * Ready-made facts for gating, in this order when present: became_hidden (some visible instances on A, none on B), became_visible, became_disabled (some enabled instances on A, none on B), became_enabled, became_covered (no covered instance on A, some on B), became_uncovered, count_up, count_down (instance count). Only on changed entries.
+ */
+flags: string[]
+pairedWith?: PairLink
+}
+/**
+ * The component on side A. Absent for added.
+ */
+export interface ComponentSummary {
+role: string
+name: string
+nameIsTemplate: boolean
+path: string
+instances: number
+visible: number
+enabled: number
+covered: number
+checked: number
+expanded: number
+selected: number
+pressed: number
+confidence: Confidence
+}
+/**
+ * The component on side B. Absent for removed.
+ */
+export interface ComponentSummary1 {
+role: string
+name: string
+nameIsTemplate: boolean
+path: string
+instances: number
+visible: number
+enabled: number
+covered: number
+checked: number
+expanded: number
+selected: number
+pressed: number
+confidence: Confidence
+}
+/**
+ * Set on a removed or added entry that looks like the other side's entry after a change of role or name.
+ */
+export interface PairLink {
+/**
+ * The id of the other entry.
+ */
+id: string
+/**
+ * Known values: role_changed (same path and name, other role), name_changed (same path and role, other name or template flag).
+ */
+reason: string
+confidence: Confidence
+}
+/**
+ * What a diff compares about one component. The state fields count the instances in that state (covered counts only instances that were tested and found covered).
+ */
+export interface ComponentSummary2 {
+role: string
+name: string
+nameIsTemplate: boolean
+path: string
+instances: number
+visible: number
+enabled: number
+covered: number
+checked: number
+expanded: number
+selected: number
+pressed: number
+confidence: Confidence
+}
+/**
+ * Links a removed entry to the added entry that is probably the same component. The id hashes role, name and path, so a change of role or name gives a new id.
+ */
+export interface PairLink1 {
+/**
+ * The id of the other entry.
+ */
+id: string
+/**
+ * Known values: role_changed (same path and name, other role), name_changed (same path and role, other name or template flag).
+ */
+reason: string
+confidence: Confidence
+}
 export interface DriverHelloParams {
 protocolVersion: number
 engineVersion: string
@@ -888,6 +1055,8 @@ export const CLIENT_PROTOCOL_NOTIFICATIONS = {
 export const COLLECTOR_VERSION = 1;
 
 export const COMMON_VERSION = 1;
+
+export const DIFF_VERSION = 1;
 
 export const DRIVER_PROTOCOL_VERSION = 1;
 export const DRIVER_PROTOCOL_METHODS = {

@@ -208,6 +208,9 @@ traceqa extract http://127.0.0.1:4173/
 
 Exit codes make it suitable for CI: `0` when every browser completed, `1` when
 any failed, `2` for invalid input, `130` when stopped with Ctrl-C (or SIGTERM or SIGHUP on Unix). `--json` prints a machine-readable summary.
+
+To see what changed between two runs (two browsers, two viewports, or yesterday and today),
+use `traceqa diff RUN_A RUN_B`; see [docs/usage.md](docs/usage.md#traceqa-diff).
 All options are in [docs/usage.md](docs/usage.md#traceqa-extract).
 
 ### Python
@@ -355,6 +358,7 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `crates/traceqa-engine/` | The engine library. |
 | `crates/traceqa-cli/` | The `traceqa` command, including `install` and `doctor`. |
 | `crates/traceqa-mcp/` | The MCP server behind `traceqa mcp`. |
+| `crates/traceqa-diff/` | Compares two runs by component id, behind `traceqa diff`. |
 | `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
 | `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
 | `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |
