@@ -462,13 +462,14 @@ impl Drop for ProcessTransport {
 /// The driver processes this process started and has not yet ended.
 static LIVE: Mutex<Vec<Weak<Mutex<Child>>>> = Mutex::new(Vec::new());
 
-/// Kills and reaps every driver process this process started. For a process that is about to
-/// exit: `process::exit` runs no `Drop`, so a driver that ignores signals and its input closing
-/// would outlive the command. A driver that is dropped normally is shut down politely instead.
+/// Kills and reaps every driver process this process started, with everything each one started.
+/// For a process that is about to exit: `process::exit` runs no `Drop`, so a driver that ignores
+/// signals and its input closing would outlive the command. A driver that is dropped normally is
+/// shut down politely instead.
 ///
-/// Only the driver process itself is ended, plus its descendants on Windows (`taskkill /T`,
-/// because a launcher such as the Python one starts the real driver as a child). On Unix a
-/// driver's own children close when their pipes to it die.
+/// The whole process tree of a driver is ended, because a launcher such as the Python one starts
+/// the real driver as a child, and a driver starts browsers that do not end with their parent
+/// (Windows: `taskkill /T /F`; Unix: the descendants are found from `ps` and sent SIGKILL).
 pub fn kill_all_drivers() {
     let children: Vec<_> = LIVE.lock_ok().clone();
     kill_registered(&children);
@@ -478,7 +479,6 @@ pub fn kill_all_drivers() {
 fn kill_registered(children: &[Weak<Mutex<Child>>]) {
     for child in children.iter().filter_map(Weak::upgrade) {
         let mut child = child.lock_ok();
-        #[cfg(windows)]
         kill_tree(child.id());
         let _ = child.kill();
         let _ = child.wait();
@@ -497,6 +497,92 @@ fn kill_tree(pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Unix: ends a process and everything it started. The workspace forbids `unsafe`, so the
+/// signals go through the `kill` builtin of `/bin/sh` and the process table comes from `ps`
+/// (both POSIX, both run by absolute path). The descendants are collected before anything dies,
+/// because an orphan is handed to init and loses the link to its parent, and the driver is
+/// stopped first so it cannot start a new child while the tree is walked. A process that
+/// changed its group or session (`setsid`) is still found: the walk follows parent pids.
+/// Best effort: a failure of `ps` or `kill` leaves what it could not reach, and a pid reused
+/// between the table and the signal (a window of milliseconds) is accepted as a risk.
+#[cfg(unix)]
+fn kill_tree(pid: u32) {
+    signal_all("STOP", &[pid]);
+    let mut doomed: Vec<u32> = vec![pid];
+    // A child that was just started is stopped too, then the table is read again; three rounds
+    // reach a driver, its launcher, a browser and the browser's helpers.
+    for _ in 0..3 {
+        let found = descendants(pid, &process_table(), std::process::id());
+        let fresh: Vec<u32> = found.into_iter().filter(|p| !doomed.contains(p)).collect();
+        if fresh.is_empty() {
+            break;
+        }
+        signal_all("STOP", &fresh);
+        doomed.extend(fresh);
+    }
+    signal_all("KILL", &doomed);
+}
+
+/// Unix: sends `signal` (a name such as `KILL`) to every pid, ignoring failures.
+#[cfg(unix)]
+fn signal_all(signal: &str, pids: &[u32]) {
+    let _ = Command::new("/bin/sh")
+        .args(["-c", "s=$1; shift; kill -s \"$s\" \"$@\" 2>/dev/null", "sh", signal])
+        .args(pids.iter().map(u32::to_string))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Unix: every process as (pid, parent pid), from `ps`. Empty when `ps` cannot be run.
+#[cfg(unix)]
+fn process_table() -> Vec<(u32, u32)> {
+    for ps in ["/bin/ps", "/usr/bin/ps"] {
+        let output = Command::new(ps)
+            .args(["-A", "-o", "pid=,ppid="])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        if let Ok(output) = output {
+            if output.status.success() {
+                return parse_process_table(&String::from_utf8_lossy(&output.stdout));
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// `ps -o pid=,ppid=` output as (pid, parent pid) pairs. A line that is not two numbers is ignored.
+#[cfg(any(unix, test))]
+fn parse_process_table(text: &str) -> Vec<(u32, u32)> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse().ok()?;
+            let parent = fields.next()?.parse().ok()?;
+            fields.next().is_none().then_some((pid, parent))
+        })
+        .collect()
+}
+
+/// Every process below `root` (children, their children, and so on), never `root` itself, pid 0,
+/// pid 1 or `own`, the pid of this process.
+#[cfg(any(unix, test))]
+fn descendants(root: u32, table: &[(u32, u32)], own: u32) -> Vec<u32> {
+    let mut found: Vec<u32> = Vec::new();
+    let mut todo = vec![root];
+    while let Some(parent) = todo.pop() {
+        for &(pid, its_parent) in table {
+            if its_parent == parent && pid > 1 && pid != own && pid != root && !found.contains(&pid) {
+                found.push(pid);
+                todo.push(pid);
+            }
+        }
+    }
+    found
 }
 
 /// A connected driver that has completed the version handshake.
@@ -836,6 +922,64 @@ mod tests {
         drop(transport);
         LIVE.lock_ok().retain(|entry| entry.strong_count() > 0);
         assert!(LIVE.lock_ok().iter().all(|entry| entry.strong_count() > 0));
+    }
+
+    #[test]
+    fn descendants_follow_parent_links_and_skip_init_and_ourselves() {
+        let table = parse_process_table(
+            "    1     0\n  100     1\n  101   100\n  102   101\n  200     1\n  201   200\n  300   100\n garbage line\n  400 x\n  500   100   7\n  900   102\n",
+        );
+        assert_eq!(table.len(), 8, "malformed lines are ignored");
+        let mut found = descendants(100, &table, 900);
+        found.sort_unstable();
+        assert_eq!(
+            found,
+            [101, 102, 300],
+            "the fork chain, not the other branch, not init, not us"
+        );
+        assert!(descendants(1, &table, 5).iter().all(|pid| *pid > 1));
+        // A loop in the table ends the walk.
+        assert_eq!(descendants(10, &[(11, 10), (10, 11)], 999), [11]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn kill_registered_ends_the_children_of_a_driver_too() {
+        let line = r#"sh -c "sleep 600 & wait""#;
+        let transport = ProcessTransport::spawn(&DriverCommand::parse(line).unwrap()).unwrap();
+        let driver = transport.child.lock_ok().id();
+        // The shell starts the sleep a moment after it was spawned.
+        let mut grandchild = None;
+        for _ in 0..200 {
+            grandchild = descendants(driver, &process_table(), std::process::id())
+                .first()
+                .copied();
+            if grandchild.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let grandchild = grandchild.expect("the shell started a child");
+        kill_registered(&[Arc::downgrade(&transport.child)]);
+        assert!(
+            transport.child.lock_ok().try_wait().unwrap().is_some(),
+            "the driver was reaped"
+        );
+        // The sleep is an orphan now: gone, or a zombie that only init has yet to reap.
+        for _ in 0..200 {
+            if !process_table().iter().any(|(pid, _)| *pid == grandchild) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let state = Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", &grandchild.to_string()])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&state.stdout).trim().starts_with('Z'),
+            "the driver's child outlived it"
+        );
     }
 
     #[test]

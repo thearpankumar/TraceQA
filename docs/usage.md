@@ -149,8 +149,12 @@ A second Ctrl-C quits at once, without waiting for the browsers: `run.json` is
 written first (status `cancelled`, `finishedAt` set, targets that had not
 finished `cancelled`), `events.jsonl` ends with `run.finished`, and the exit
 code is 130, within about two seconds. The run folder is valid, as after a
-single Ctrl-C. The drivers TraceQA started are killed before it exits, so a
-driver that ignores signals and its input closing cannot outlive the command.
+single Ctrl-C. The drivers TraceQA started are killed before it exits, with
+everything each of them started (a launcher's real driver, the browsers), so a
+driver that ignores signals and its input closing cannot outlive the command,
+nor can its children. On Windows that is `taskkill /T`; on Unix TraceQA walks
+the parent pids from `ps` and sends SIGKILL, which also reaches a process that
+left the driver's session or group.
 
 On Unix, SIGTERM (`timeout`, `docker stop`, a CI timeout) and SIGHUP (a closed
 terminal) take the same path as Ctrl-C: the first one cancels the run cleanly,

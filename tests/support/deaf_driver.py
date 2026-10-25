@@ -6,12 +6,19 @@ stuck_driver.py and stays silent after that. Unlike stuck_driver.py it does not 
 input closes: it sleeps until it is killed. The tests fail if it outlives the command, and the
 process list in the failure names it. It is safe to leave behind by accident: it ends itself
 after ten minutes.
+
+`--grandchild FILE [--setsid]` makes it start a second deaf process of the same kind (`--leaf`:
+no stdin, ignores signals) and write both pids to FILE as JSON, `{"driver": N, "grandchild": M}`,
+before it answers anything. With `--setsid` the grandchild leaves the driver's session and group,
+as a browser may, so only a walk of parent pids reaches it.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import signal
+import subprocess
 import sys
 import time
 
@@ -39,6 +46,25 @@ ANSWERS = {
 for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"):
     if hasattr(signal, name):
         signal.signal(getattr(signal, name), signal.SIG_IGN)
+
+if "--leaf" in sys.argv:
+    # The grandchild: never reads its input, ends itself after ten minutes.
+    time.sleep(600)
+    sys.exit(0)
+
+if "--grandchild" in sys.argv:
+    target = sys.argv[sys.argv.index("--grandchild") + 1]
+    options: dict = {"start_new_session": True} if "--setsid" in sys.argv and os.name != "nt" else {}
+    leaf = subprocess.Popen(
+        [sys.executable, __file__, "--leaf"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        **options,
+    )
+    with open(target + ".tmp", "w", encoding="utf-8") as handle:
+        json.dump({"driver": os.getpid(), "grandchild": leaf.pid}, handle)
+    os.replace(target + ".tmp", target)
 
 for line in sys.stdin:
     request = json.loads(line)
