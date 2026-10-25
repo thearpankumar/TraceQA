@@ -172,7 +172,7 @@ def test_audit_workflow_never_uses_the_self_hosted_pool_and_has_read_only_permis
         assert command in text, command
 
 
-# Dependabot is switched off (.github/dependabot.yml is commented out), so is its test.
+# Dependabot was removed (.github/dependabot.yml is deleted), so its test stays commented out.
 # def test_dependabot_covers_every_ecosystem_in_the_repo() -> None:
 #     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
 #     assert config["version"] == 2
