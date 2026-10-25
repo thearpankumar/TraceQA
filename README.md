@@ -500,7 +500,8 @@ The Rust types regenerate on build.
 | One-command setup | `traceqa install` and `traceqa doctor` | Available |
 | Releases | Prebuilt binaries for every tagged version | Available |
 | Distribution | A GitHub Action, and packages on PyPI and npm | Planned |
-| Explorer | Interacts with components and follows links to map the application | Planned |
+| Site map | `traceqa map` follows same-origin links and lists the components on each page | Available |
+| Explorer | Interacts with components to test the application | Planned |
 | Check mode | Tests one feature and reports what breaks | Planned |
 | Sweep mode | Tests the whole application and reports every issue | Planned |
 

@@ -147,6 +147,12 @@ StabilityFile?: StabilityFile
 TargetStability?: TargetStability
 ComponentStability?: ComponentStability
 InstanceRange?: InstanceRange
+SiteFile?: SiteFile
+SiteLimits?: SiteLimits
+SiteRobots?: SiteRobots
+SitePage?: SitePage
+SiteComponent?: SiteComponent
+SiteSkip?: SiteSkip
 VisualReport?: VisualReport
 VisualSide?: VisualSide
 VisualThresholds?: VisualThresholds
@@ -1734,6 +1740,150 @@ min: number
 max: number
 }
 /**
+ * site.json. Page addresses have secret parameters replaced, as in components.json.
+ */
+export interface SiteFile {
+formatVersion: number
+/**
+ * The group folder's name. Equals the groupId in group.json.
+ */
+groupId: string
+/**
+ * The page the crawl started from, as asked for.
+ */
+seed: string
+/**
+ * Scheme, host and port of the seed after redirects. Only pages with this origin are followed.
+ */
+origin: string
+/**
+ * The deepest link level that was asked for. The seed is depth 0.
+ */
+depth: number
+limits: SiteLimits
+robots: SiteRobots
+/**
+ * Every page that was read or queued, in the order it was reached (breadth first). A page's index is its position here.
+ */
+pages: SitePage[]
+/**
+ * Every component found on a page that was read, by component id.
+ */
+components: {
+[k: string]: SiteComponent
+}
+/**
+ * Ids of the components present on every page that was read successfully, sorted. Empty when fewer than two pages were read. A header or footer whose landmark names change from page to page gets different ids on each page and is not listed.
+ */
+shared: string[]
+/**
+ * Links that were found and not followed, one entry per address and reason.
+ */
+skipped: SiteSkip[]
+}
+/**
+ * What bounded the crawl.
+ */
+export interface SiteLimits {
+maxPages: number
+/**
+ * Pause between two pages.
+ */
+delayMs: number
+maxMinutes: number
+/**
+ * At most this many addresses are read for one path pattern, where numbers and long hex or UUID segments count as one (/products/{n}).
+ */
+perPattern: number
+/**
+ * The --include globs. Empty means everything on the origin.
+ */
+include: string[]
+/**
+ * The globs that were not followed: the defaults for logout, delete and similar paths, and any --exclude.
+ */
+exclude: string[]
+}
+/**
+ * How robots.txt was applied.
+ */
+export interface SiteRobots {
+/**
+ * False with --no-robots.
+ */
+respected: boolean
+/**
+ * Known values: fetched (rules read and applied), not-found (a 4xx answer: everything allowed), unavailable (a 5xx answer or no answer: everything disallowed, as RFC 9309 says), disabled (--no-robots).
+ */
+status: string
+}
+/**
+ * One address of the site.
+ */
+export interface SitePage {
+index: number
+/**
+ * The address that was asked for.
+ */
+url: string
+/**
+ * Where the page ended up after redirects. Absent when it was not read.
+ */
+finalUrl?: string
+/**
+ * Links followed from the seed to get here.
+ */
+depth: number
+/**
+ * The ordinary run that read the page. Absent when it was not read.
+ */
+runId?: string
+/**
+ * The run's status (completed, failed, cancelled), or skipped when the page was queued and never read.
+ */
+status: string
+title?: string
+/**
+ * Ids of the components found on the page, in every frame, sorted.
+ */
+componentIds: string[]
+/**
+ * Indexes of the pages this page links to, sorted.
+ */
+linksOut: number[]
+/**
+ * Why a page was not read or its links not used: max-minutes or cancelled (queued, never read), left-origin (it redirected to another origin; its links and components are not used).
+ */
+skipped?: string
+}
+/**
+ * A component and the pages it was found on.
+ */
+export interface SiteComponent {
+role: string
+/**
+ * As in components.json; '*' when the name differs between instances.
+ */
+name: string
+/**
+ * Indexes into pages, sorted.
+ */
+pages: number[]
+}
+/**
+ * A link that was not followed.
+ */
+export interface SiteSkip {
+/**
+ * The link, resolved against its page. The query and fragment are left out of web addresses.
+ */
+url: string
+/**
+ * Known values: scheme (mailto, tel, javascript, data and other non-web links), file (a document, archive, image or media file), other-origin, excluded (matched an exclude glob), not-included (matched no include glob), robots, pattern-limit, max-pages, invalid.
+ */
+reason: string
+}
+/**
  * Output of `traceqa visual --format json`. Fully determined by the two runs and the thresholds; it holds no timestamp of its own. Results are ordered by component id.
  */
 export interface VisualReport {
@@ -1927,5 +2077,7 @@ export const HEAL_VERSION = 1;
 export const MANIFEST_VERSION = 1;
 
 export const RUN_FOLDER_VERSION = 1;
+
+export const SITE_VERSION = 1;
 
 export const VISUAL_VERSION = 1;

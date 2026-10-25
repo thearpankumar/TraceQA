@@ -25,6 +25,8 @@ traceqa-mcp.workspace = true
 traceqa-protocol.workspace = true
 traceqa-recorder.workspace = true
 traceqa-visual.workspace = true
+ureq.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 serde_norway.workspace = true

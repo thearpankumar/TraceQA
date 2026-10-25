@@ -29,12 +29,16 @@ allow-wildcard-paths = true
 [licenses]
 version = 2
 # Exactly what Cargo.lock needs, from `cargo deny list`. Every other licence in the tree
-# (0BSD, BSD-3-Clause, Zlib, Unlicense) is only one side of an OR with these. A new licence
+# (0BSD, Zlib, Unlicense) is only one side of an OR with these. A new licence
 # fails the check and needs a decision and a comment here.
 allow = [
     "Apache-2.0", # this workspace, and most of its dependencies (dual-licensed with MIT)
     "MIT",        # most of the tree
     "Unicode-3.0", # unicode-ident's data tables
+    # The next three come with ureq's TLS stack (rustls), used only to fetch robots.txt over https:
+    "ISC",                 # ring, rustls-webpki, untrusted
+    "BSD-3-Clause",        # subtle
+    "CDLA-Permissive-2.0", # webpki-roots (the CA list data)
 ]
 confidence-threshold = 0.9
 

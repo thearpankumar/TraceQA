@@ -208,7 +208,14 @@ def test_deny_policy_denies_unknown_sources_and_lists_its_licences() -> None:
     assert policy["sources"]["unknown-registry"] == "deny"
     assert policy["sources"]["unknown-git"] == "deny"
     assert policy["advisories"]["ignore"] == []
-    assert set(policy["licenses"]["allow"]) == {"Apache-2.0", "MIT", "Unicode-3.0"}
+    assert set(policy["licenses"]["allow"]) == {
+        "Apache-2.0",
+        "MIT",
+        "Unicode-3.0",
+        "ISC",
+        "BSD-3-Clause",
+        "CDLA-Permissive-2.0",
+    }
 
 
 PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
