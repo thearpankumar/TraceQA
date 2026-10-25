@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = [
     "sdks/typescript",
     "sdks/python",
-    "drivers/playwright-py",
-    "drivers/webdriver-py",
+    "web-drivers/playwright-py",
+    "web-drivers/webdriver-py",
     "python/traceqa-protocol",
 ]
 

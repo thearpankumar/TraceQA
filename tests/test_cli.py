@@ -156,12 +156,14 @@ def test_known_browsers_match_what_the_drivers_open() -> None:
     assert block, "KNOWN_BROWSERS not found in lib.rs"
     known = set(re.findall(r'"(\w+)"', block.group(2)))
     assert len(known) == int(block.group(1))
-    playwright = (ROOT / "drivers/playwright-py/src/traceqa_driver_playwright/driver.py").read_text(encoding="utf-8")
+    playwright = (ROOT / "web-drivers/playwright-py/src/traceqa_driver_playwright/driver.py").read_text(
+        encoding="utf-8"
+    )
     table = re.search(r"^BROWSERS: .*?= \{(.*?)^\}", playwright, re.S | re.M)
     assert table
     opened = set(re.findall(r'^\s+"(\w+)":', table.group(1), re.M))
     opened.add(re.search(r'^CDP = "(\w+)"', playwright, re.M).group(1))
-    webdriver = (ROOT / "drivers/webdriver-py/src/traceqa_driver_webdriver/driver.py").read_text(encoding="utf-8")
+    webdriver = (ROOT / "web-drivers/webdriver-py/src/traceqa_driver_webdriver/driver.py").read_text(encoding="utf-8")
     opened |= {re.search(rf'^{name} = "(\w+)"', webdriver, re.M).group(1) for name in ("SAFARI", "REMOTE")}
     assert known == opened
 

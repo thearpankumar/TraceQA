@@ -24,7 +24,7 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["python/*", "drivers/*", "sdks/python"]
+members = ["python/*", "web-drivers/*", "sdks/python"]
 
 [tool.uv.sources]
 traceqa-protocol = { workspace = true }
@@ -33,7 +33,7 @@ traceqa-driver-webdriver = { workspace = true }
 traceqa = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["python", "collector", "drivers", "sdks", "tests"]
+testpaths = ["python", "collector", "web-drivers", "sdks", "tests"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
@@ -58,13 +58,13 @@ ignore = [
 # Code that starts a fixed command (the engine, a driver, chromedriver, uv, python) with an argument
 # list and no shell. Nothing here builds the command from untrusted input.
 "sdks/python/src/**" = ["S603"]
-"drivers/*/src/**" = ["S603", "S310"]  # S310: urlopen only talks to the local WebDriver / fixture server
+"web-drivers/*/src/**" = ["S603", "S310"]  # S310: urlopen only talks to the local WebDriver / fixture server
 "python/traceqa-protocol/src/traceqa_protocol/testing.py" = ["S603"]
 "scripts/*.py" = ["S603"]
 "bench/*.py" = ["S603"]
 
 [tool.pyright]
-include = ["python", "drivers", "sdks/python"]
+include = ["python", "web-drivers", "sdks/python"]
 exclude = [
     "**/node_modules",
     "**/.venv",

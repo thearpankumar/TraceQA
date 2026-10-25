@@ -1665,7 +1665,7 @@ requires-dist = [{ name = "traceqa-protocol", editable = "python/traceqa-protoco
 [[package]]
 name = "traceqa-driver-playwright"
 version = "0.1.0"
-source = { editable = "drivers/playwright-py" }
+source = { editable = "web-drivers/playwright-py" }
 dependencies = [
     { name = "playwright" },
     { name = "traceqa-protocol" },
@@ -1680,7 +1680,7 @@ requires-dist = [
 [[package]]
 name = "traceqa-driver-webdriver"
 version = "0.1.0"
-source = { editable = "drivers/webdriver-py" }
+source = { editable = "web-drivers/webdriver-py" }
 dependencies = [
     { name = "traceqa-protocol" },
 ]
@@ -1731,8 +1731,8 @@ dev = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "traceqa", editable = "sdks/python" },
-    { name = "traceqa-driver-playwright", editable = "drivers/playwright-py" },
-    { name = "traceqa-driver-webdriver", editable = "drivers/webdriver-py" },
+    { name = "traceqa-driver-playwright", editable = "web-drivers/playwright-py" },
+    { name = "traceqa-driver-webdriver", editable = "web-drivers/webdriver-py" },
     { name = "traceqa-protocol", editable = "python/traceqa-protocol" },
 ]
 

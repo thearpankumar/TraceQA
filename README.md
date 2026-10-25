@@ -426,8 +426,8 @@ decision, is in [docs/architecture.md](docs/architecture.md).
 | `crates/traceqa-protocol/` | Rust types generated from `spec/`, and the message line format. |
 | `crates/traceqa-recorder/` | Run folder, event log and screenshot crops. |
 | `crates/traceqa-replay/` | A stand-in engine that replays recorded conversations, for testing clients. |
-| `drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |
-| `drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
+| `web-drivers/playwright-py/` | Driver for Chromium, Chrome, Edge, Firefox, WebKit and CDP endpoints. |
+| `web-drivers/webdriver-py/` | Driver for Safari and W3C WebDriver servers. |
 | `collector/` | The in-page script. |
 | `sdks/python/` | The Python SDK. |
 | `sdks/typescript/` | The TypeScript SDK. |
