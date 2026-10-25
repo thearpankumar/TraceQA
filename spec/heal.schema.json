@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "heal.schema.json",
+  "title": "TraceQA heal",
+  "description": "The result of `traceqa heal RUN --against BASELINE`: healing as a query over a diff. Every component of the baseline that the run does not have as it was is classified once. Identity-preserving drift (the same id, another way to find it) is a mechanical fix. A rename is only ever a proposal for a person to accept. A removal is a failure, an unclear match is refused, and a run that was signed out heals nothing. Heals never change the baseline's components: `traceqa baseline promote` stays the only way to move the reference.",
+  "x-traceqa": { "contract": "heal", "version": 1 },
+  "$defs": {
+    "HealReport": {
+      "description": "heal.json, written to the run folder, and the output of `traceqa heal --format json`. Fully determined by the run, the baseline and the --accept choices; the items are ordered by target, then kind, then id.",
+      "type": "object",
+      "required": ["formatVersion", "runId", "baseline", "items", "summary"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "runId": { "type": "string" },
+        "baseline": { "$ref": "baseline.schema.json#/$defs/BaselineRef" },
+        "items": { "description": "One per baseline component that is not present as it was. Components that are unchanged are only counted in the summary.", "type": "array", "items": { "$ref": "#/$defs/HealItem" } },
+        "summary": { "$ref": "#/$defs/HealSummary" }
+      }
+    },
+    "HealItem": {
+      "description": "What to do about one baseline component.",
+      "type": "object",
+      "required": ["kind", "id", "action", "evidence"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/HealKind" },
+        "id": { "description": "The component id in the baseline. Empty for session_not_accepted, which concerns the whole run.", "type": "string" },
+        "newId": { "description": "The component id in the run, for rename_proposal and locator_fix (the same id).", "type": "string" },
+        "target": { "description": "The target folder this was found in, for example chromium-1280x800.", "type": "string" },
+        "role": { "type": "string" },
+        "name": { "description": "The component's name in the baseline.", "type": "string" },
+        "action": { "$ref": "#/$defs/HealAction" },
+        "confidence": { "description": "For rename_proposal only: high when both sides carry the same data-testid, medium when the evidence is the name and the position.", "$ref": "#/$defs/HealConfidence" },
+        "evidence": { "description": "Why, one sentence each. For ambiguous, the candidates.", "type": "array", "items": { "type": "string" } },
+        "fixPreview": { "description": "For locator_fix and rename_proposal: the locator as Playwright TypeScript before and after, in the form `- old` newline `+ new`.", "type": "string" },
+        "accepted": { "description": "True when --accept recorded this proposal as an alias in the baseline in this run of the command.", "type": "boolean" }
+      }
+    },
+    "HealKind": {
+      "description": "locator_fix: same id, another locator. rename_proposal: removed here, one probable new id. removed: gone, no candidate. ambiguous: more than one candidate on a side. session_not_accepted: the run was signed out. unchanged: present as it was (only in library results, never listed in a report).",
+      "type": "string",
+      "enum": ["locator_fix", "rename_proposal", "removed", "ambiguous", "session_not_accepted", "unchanged"]
+    },
+    "HealAction": {
+      "description": "fix: a mechanical change that is safe to apply. propose: a person has to decide. fail: a failure to fix in the product or the baseline. refuse: not enough to decide. none: nothing to do.",
+      "type": "string",
+      "enum": ["fix", "propose", "fail", "refuse", "none"]
+    },
+    "HealConfidence": {
+      "type": "string",
+      "enum": ["high", "medium"]
+    },
+    "HealSummary": {
+      "type": "object",
+      "required": ["unchanged", "locatorFixes", "renameProposals", "removed", "ambiguous", "sessionNotAccepted", "failed"],
+      "properties": {
+        "unchanged": { "type": "integer", "minimum": 0 },
+        "locatorFixes": { "type": "integer", "minimum": 0 },
+        "renameProposals": { "type": "integer", "minimum": 0 },
+        "removed": { "type": "integer", "minimum": 0 },
+        "ambiguous": { "type": "integer", "minimum": 0 },
+        "sessionNotAccepted": { "type": "integer", "minimum": 0 },
+        "accepted": { "description": "Proposals recorded as aliases by --accept in this run of the command.", "type": "integer", "minimum": 0 },
+        "failed": { "description": "True when the command exits 1: any item whose action is not none or fix, or a proposal that was not accepted.", "type": "boolean" }
+      }
+    }
+  }
+}

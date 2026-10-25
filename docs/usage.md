@@ -879,6 +879,80 @@ What a property looks like (TypeScript; the Python class is the same with `@prop
 Exit code 0 on success, 2 when the command is wrong, the run cannot be read, or the run was
 made by a `traceqa` from before locators existed (extract the page again).
 
+## `traceqa heal`
+
+Sorts what a run lost against a baseline into what can be fixed mechanically, what a person has to
+decide, and what is a failure. It is a query over a diff: it reads the run and the baseline, never
+starts a browser, and never changes the baseline's components (only `traceqa baseline promote`
+moves the reference).
+
+```sh
+traceqa heal runs/r_20261025_064332_b084 --against checkout
+traceqa heal runs/r_20261025_064332_b084 --against checkout --page-object tests/pages/shop.page.ts
+traceqa heal runs/r_20261025_064332_b084 --against checkout --accept c_8a1f03b2c4d5 --page-object tests/pages/shop.page.ts
+```
+
+| Option | Meaning |
+|---|---|
+| `RUN` | A run folder, a target folder, or the id of a run in `--runs-dir`. |
+| `--against NAME\|DIR` | The baseline: its name in `--baseline-dir`, or a baseline folder. Required. |
+| `--baseline-dir DIR` | Where `--against NAME` looks (default `.traceqa/baselines`). |
+| `--target NAME` | Look at one target folder of the baseline only. |
+| `--page-object PATH` | A page object made by [`traceqa codegen`](#traceqa-codegen) (`.ts` or `.py`) to patch. Repeat for several. The unified diff is printed (to standard error) before the file is written. |
+| `--accept ID` | Accept the rename proposal for the baseline component `ID`. Repeat for several. |
+| `--allow-in-ci` | Allow `--accept` and `--page-object` when `CI` or `GITHUB_ACTIONS` is `true`. |
+| `--format markdown\|json` | Markdown (default) for people; `json` is the `HealReport` contract (`spec/heal.schema.json`). |
+| `--runs-dir DIR` | Where bare run ids are looked up. |
+
+The report is also written to `heal.json` in the run folder.
+
+### The five outcomes
+
+Every component of the baseline that the run does not have as it was gets one item. Components
+that are unchanged are only counted.
+
+| `kind` | When | `action` |
+|---|---|---|
+| `locator_fix` | The same id is in the run, and its locator is different (it needed a landmark, or lost its test id). The id is the same, so the component is the same; only the way to find it changed. | `fix` |
+| `rename_proposal` | The id is gone, and exactly one component of the run is a match, with no other removed component competing for it (a 1:1 match). | `propose` |
+| `removed` | The id is gone and nothing in the run is a safe match. | `fail` |
+| `ambiguous` | More than one component could be the match, on either side. Nothing is proposed; the candidates are listed. | `refuse` |
+| `session_not_accepted` | The run carries a `session_not_accepted` warning: it shows a sign-in page, not the page of the baseline. This is checked first and nothing else is healed. Sign in again (`traceqa login`) and extract again. | `refuse` |
+
+**What makes a match.** The role must be equal and so must the landmark (the first landmark step
+of the path, such as `main` or `navigation "contents"`). Then either both sides carry the same
+`data-testid` (confidence `high`), or the names are alike (normalised: Unicode NFC, lower case,
+whitespace collapsed; Levenshtein ratio of at least 0.8) and the centre of the box moved by no
+more than 10 percent of the viewport on each axis (confidence `medium`). A different role is never
+a match, and a similar name far away is not one either. The 1:1 rule is never relaxed to get more
+heals: a rename that is really a removal plus an unrelated addition stays `removed` or `ambiguous`.
+
+**Exit codes.** `0` only when every item is `none` or `fix` (or a proposal was accepted in this
+command). `1` when anything is a proposal, a removal, ambiguous or refused. `2` for input that
+cannot be used: a baseline target the run lacks, ids of another fingerprint version, an `--accept`
+for an id that has no proposal, or a refused write (below).
+
+### Accepting a proposal, and CI
+
+A rename is never applied by itself. `--accept ID` is the person's decision: it records the alias
+`{from, to, reason: "heal", evidence, addedAt}` in the baseline (the same as `traceqa baseline
+alias`, which `traceqa diff --against` then honours: the pair is accepted and the gates ignore it)
+and patches the page objects named with `--page-object`.
+
+`--accept` and any write to a page object are **refused with exit 2 when `CI=true` or
+`GITHUB_ACTIONS=true`**, unless `--allow-in-ci` is given. In CI, heal can only report. A
+`--page-object` without `--accept` writes the mechanical `locator_fix` items only; renames are
+shown in the report and patched only after `--accept`.
+
+### Patching a page object
+
+Only the `return` line of a property is ever changed, and only under a `traceqa:id c_...` marker
+that names the component. The line must still hold exactly the expression that codegen wrote for
+the baseline: a line a person edited is kept and reported on standard error. When the targets
+(browsers) of the baseline need different new locators for one component, it is not patched. The
+patch is idempotent: running it again changes nothing. An accepted rename also moves the marker to
+the new id. Everything else in the file, comments and line endings included, stays byte for byte.
+
 ## Pages behind a sign-in
 
 Extraction starts every browser empty, so a page behind a sign-in, an

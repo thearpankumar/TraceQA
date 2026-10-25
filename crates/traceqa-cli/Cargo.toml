@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 traceqa-diff.workspace = true
 traceqa-findings.workspace = true
+traceqa-heal.workspace = true
 traceqa-engine.workspace = true
 traceqa-mcp.workspace = true
 traceqa-protocol.workspace = true

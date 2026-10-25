@@ -1057,6 +1057,57 @@ class FindingsFile(BaseModel):
     )
 
 
+class HealKind(str, Enum):
+    """
+    locator_fix: same id, another locator. rename_proposal: removed here, one probable new id. removed: gone, no candidate. ambiguous: more than one candidate on a side. session_not_accepted: the run was signed out. unchanged: present as it was (only in library results, never listed in a report).
+    """
+
+    locator_fix = "locator_fix"
+    rename_proposal = "rename_proposal"
+    removed = "removed"
+    ambiguous = "ambiguous"
+    session_not_accepted = "session_not_accepted"
+    unchanged = "unchanged"
+
+
+class HealAction(str, Enum):
+    """
+    fix: a mechanical change that is safe to apply. propose: a person has to decide. fail: a failure to fix in the product or the baseline. refuse: not enough to decide. none: nothing to do.
+    """
+
+    fix = "fix"
+    propose = "propose"
+    fail = "fail"
+    refuse = "refuse"
+    none = "none"
+
+
+class HealConfidence(str, Enum):
+    high = "high"
+    medium = "medium"
+
+
+class HealSummary(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    unchanged: int = Field(..., ge=0)
+    locator_fixes: int = Field(..., validation_alias="locatorFixes", serialization_alias="locatorFixes", ge=0)
+    rename_proposals: int = Field(..., validation_alias="renameProposals", serialization_alias="renameProposals", ge=0)
+    removed: int = Field(..., ge=0)
+    ambiguous: int = Field(..., ge=0)
+    session_not_accepted: int = Field(..., validation_alias="sessionNotAccepted", serialization_alias="sessionNotAccepted", ge=0)
+    accepted: int | None = Field(
+        default=None,
+        description="Proposals recorded as aliases by --accept in this run of the command.",
+        ge=0,
+    )
+    failed: bool = Field(
+        ...,
+        description="True when the command exits 1: any item whose action is not none or fix, or a proposal that was not accepted.",
+    )
+
+
 class ManifestAbsent(BaseModel):
     """
     A component that must not be found.
@@ -1362,6 +1413,51 @@ class PageEvalResult(BaseModel):
     requests_failed: RequestsFailed | None = Field(default=None, validation_alias="requestsFailed", serialization_alias="requestsFailed")
 
 
+class HealItem(BaseModel):
+    """
+    What to do about one baseline component.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    kind: HealKind
+    id: str = Field(
+        ...,
+        description="The component id in the baseline. Empty for session_not_accepted, which concerns the whole run.",
+    )
+    new_id: str | None = Field(
+        default=None,
+        validation_alias="newId", serialization_alias="newId",
+        description="The component id in the run, for rename_proposal and locator_fix (the same id).",
+    )
+    target: str | None = Field(
+        default=None,
+        description="The target folder this was found in, for example chromium-1280x800.",
+    )
+    role: str | None = None
+    name: str | None = Field(
+        default=None, description="The component's name in the baseline."
+    )
+    action: HealAction
+    confidence: HealConfidence | None = Field(
+        default=None,
+        description="For rename_proposal only: high when both sides carry the same data-testid, medium when the evidence is the name and the position.",
+    )
+    evidence: list[str] = Field(
+        ..., description="Why, one sentence each. For ambiguous, the candidates."
+    )
+    fix_preview: str | None = Field(
+        default=None,
+        validation_alias="fixPreview", serialization_alias="fixPreview",
+        description="For locator_fix and rename_proposal: the locator as Playwright TypeScript before and after, in the form `- old` newline `+ new`.",
+    )
+    accepted: bool | None = Field(
+        default=None,
+        description="True when --accept recorded this proposal as an alias in the baseline in this run of the command.",
+    )
+
+
 class ManifestFile(BaseModel):
     """
     The whole manifest.
@@ -1652,6 +1748,24 @@ class SessionOpenParams(BaseModel):
         validation_alias="storageState", serialization_alias="storageState",
         description="Cookies and stored values to put in place before the first page is loaded.",
     )
+
+
+class HealReport(BaseModel):
+    """
+    heal.json, written to the run folder, and the output of `traceqa heal --format json`. Fully determined by the run, the baseline and the --accept choices; the items are ordered by target, then kind, then id.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    baseline: BaselineRef
+    items: list[HealItem] = Field(
+        ...,
+        description="One per baseline component that is not present as it was. Components that are unchanged are only counted in the summary.",
+    )
+    summary: HealSummary
 
 
 class RunManifest(BaseModel):

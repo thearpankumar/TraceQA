@@ -841,6 +841,7 @@ dependencies = [
  "traceqa-diff",
  "traceqa-engine",
  "traceqa-findings",
+ "traceqa-heal",
  "traceqa-mcp",
  "traceqa-protocol",
  "traceqa-recorder",
@@ -884,6 +885,16 @@ dependencies = [
  "serde_norway",
  "traceqa-diff",
  "traceqa-protocol",
+]
+
+[[package]]
+name = "traceqa-heal"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "traceqa-diff",
+ "traceqa-protocol",
+ "unicode-normalization",
 ]
 
 [[package]]

@@ -32,6 +32,15 @@ export type ScrollTo = ("top" | "bottom")
 export type ScrollWait = ("animations" | "height")
 export type ActionKind = ("click" | "hover" | "type" | "select" | "press")
 export type LogLevel = ("debug" | "info" | "warn" | "error")
+/**
+ * locator_fix: same id, another locator. rename_proposal: removed here, one probable new id. removed: gone, no candidate. ambiguous: more than one candidate on a side. session_not_accepted: the run was signed out. unchanged: present as it was (only in library results, never listed in a report).
+ */
+export type HealKind = ("locator_fix" | "rename_proposal" | "removed" | "ambiguous" | "session_not_accepted" | "unchanged")
+/**
+ * fix: a mechanical change that is safe to apply. propose: a person has to decide. fail: a failure to fix in the product or the baseline. refuse: not enough to decide. none: nothing to do.
+ */
+export type HealAction = ("fix" | "propose" | "fail" | "refuse" | "none")
+export type HealConfidence = ("high" | "medium")
 
 export interface SpecTypes {
 BaselineFile?: BaselineFile
@@ -116,6 +125,12 @@ FindingSuppression?: FindingSuppression
 FindingCounts?: FindingCounts
 Finding?: Finding
 FindingsFile?: FindingsFile
+HealReport?: HealReport
+HealItem?: HealItem
+HealKind?: HealKind
+HealAction?: HealAction
+HealConfidence?: HealConfidence
+HealSummary?: HealSummary
 ManifestFile?: ManifestFile
 ManifestAbsent?: ManifestAbsent
 ManifestComponent?: ManifestComponent
@@ -1313,6 +1328,75 @@ kind: string
 retryable: boolean
 }
 /**
+ * heal.json, written to the run folder, and the output of `traceqa heal --format json`. Fully determined by the run, the baseline and the --accept choices; the items are ordered by target, then kind, then id.
+ */
+export interface HealReport {
+formatVersion: number
+runId: string
+baseline: BaselineRef
+/**
+ * One per baseline component that is not present as it was. Components that are unchanged are only counted in the summary.
+ */
+items: HealItem[]
+summary: HealSummary
+}
+/**
+ * What to do about one baseline component.
+ */
+export interface HealItem {
+kind: HealKind
+/**
+ * The component id in the baseline. Empty for session_not_accepted, which concerns the whole run.
+ */
+id: string
+/**
+ * The component id in the run, for rename_proposal and locator_fix (the same id).
+ */
+newId?: string
+/**
+ * The target folder this was found in, for example chromium-1280x800.
+ */
+target?: string
+role?: string
+/**
+ * The component's name in the baseline.
+ */
+name?: string
+action: HealAction
+/**
+ * For rename_proposal only: high when both sides carry the same data-testid, medium when the evidence is the name and the position.
+ */
+confidence?: ("high" | "medium")
+/**
+ * Why, one sentence each. For ambiguous, the candidates.
+ */
+evidence: string[]
+/**
+ * For locator_fix and rename_proposal: the locator as Playwright TypeScript before and after, in the form `- old` newline `+ new`.
+ */
+fixPreview?: string
+/**
+ * True when --accept recorded this proposal as an alias in the baseline in this run of the command.
+ */
+accepted?: boolean
+}
+export interface HealSummary {
+unchanged: number
+locatorFixes: number
+renameProposals: number
+removed: number
+ambiguous: number
+sessionNotAccepted: number
+/**
+ * Proposals recorded as aliases by --accept in this run of the command.
+ */
+accepted?: number
+/**
+ * True when the command exits 1: any item whose action is not none or fix, or a proposal that was not accepted.
+ */
+failed: boolean
+}
+/**
  * The whole manifest.
  */
 export interface ManifestFile {
@@ -1741,6 +1825,8 @@ export const DRIVER_PROTOCOL_NOTIFICATIONS = {
 } as const;
 
 export const FINDINGS_VERSION = 1;
+
+export const HEAL_VERSION = 1;
 
 export const MANIFEST_VERSION = 1;
 

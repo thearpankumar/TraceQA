@@ -204,6 +204,15 @@ component (role and exact name first, never `nth()`; see
 traceqa codegen runs/<run> --lang ts --out tests/pages
 ```
 
+When a page changes, `traceqa heal` sorts what a run lost against a baseline: a mechanical fix when the
+component keeps its id, a proposal (never applied by itself, refused in CI) when exactly one component is its
+rename, a failure when it is gone, a refusal when it is unclear (see [docs/usage.md](docs/usage.md#traceqa-heal)):
+
+```sh
+traceqa heal runs/<run> --against NAME
+traceqa heal runs/<run> --against NAME --accept ID --page-object tests/pages/shop.page.ts
+```
+
 For pages behind a sign-in, sign in once and reuse the saved state:
 
 ```sh
