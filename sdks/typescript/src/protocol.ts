@@ -16,6 +16,18 @@ export type ScrollTo = ("top" | "bottom")
 export type ScrollWait = ("animations" | "height")
 export type ActionKind = ("click" | "hover" | "type" | "select" | "press")
 export type LogLevel = ("debug" | "info" | "warn" | "error")
+/**
+ * error: very likely a real problem. warning: probably a problem, check it. info: worth a look.
+ */
+export type FindingSeverity = ("error" | "warning" | "info")
+/**
+ * How sure the rule is that this is a real problem, apart from its severity.
+ */
+export type FindingConfidence = ("high" | "medium" | "low")
+/**
+ * target: one browser at one viewport, written next to its components.json. run: findings about the run as a whole, written in the run folder.
+ */
+export type FindingScope = ("target" | "run")
 
 export interface SpecTypes {
 EngineHelloParams?: EngineHelloParams
@@ -79,6 +91,13 @@ PageActResult?: PageActResult
 LogLevel?: LogLevel
 DriverLogParams?: DriverLogParams
 RpcErrorData?: RpcErrorData
+FindingSeverity?: FindingSeverity
+FindingConfidence?: FindingConfidence
+FindingScope?: FindingScope
+FindingSuppression?: FindingSuppression
+FindingCounts?: FindingCounts
+Finding?: Finding
+FindingsFile?: FindingsFile
 RunManifest?: RunManifest
 TargetSummary?: TargetSummary
 Timings?: Timings
@@ -391,7 +410,7 @@ nameSource?: string
  */
 tag: string
 /**
- * A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder.
+ * A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder, tabindex, autocomplete, role.
  */
 attrs: {
 [k: string]: string
@@ -938,6 +957,89 @@ kind: string
 retryable: boolean
 }
 /**
+ * Why a finding was set aside, from the suppression file.
+ */
+export interface FindingSuppression {
+reason: string
+/**
+ * YYYY-MM-DD. The entry applies through that day.
+ */
+expires?: string
+}
+/**
+ * Findings that are not suppressed, by severity.
+ */
+export interface FindingCounts {
+error: number
+warning: number
+info: number
+}
+/**
+ * One problem found by one rule in one component.
+ */
+export interface Finding {
+/**
+ * The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is.
+ */
+id: string
+/**
+ * Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete.
+ */
+rule: string
+severity: FindingSeverity
+confidence: FindingConfidence
+componentId: string
+/**
+ * Keys of the instances concerned, at most 20.
+ */
+instances: string[]
+role: string
+name: string
+path: string
+message: string
+/**
+ * What the rule measured. The fields depend on the rule; see docs/usage.md.
+ */
+evidence: {
+[k: string]: unknown
+}
+/**
+ * WCAG 2.2 success criteria the check relates to, for example 2.5.8.
+ */
+wcag: string[]
+helpUrl?: string
+suppressed?: FindingSuppression
+}
+/**
+ * findings.json for one target (scope target) or for the run (scope run).
+ */
+export interface FindingsFile {
+formatVersion: number
+/**
+ * Raised when a rule is added or changes what it reports.
+ */
+rulesVersion: number
+scope: FindingScope
+runId: string
+/**
+ * Folder name inside the run folder. Absent when the file was computed from a components.json alone, and for scope run.
+ */
+target?: string
+url?: string
+browser?: BrowserInfo
+viewport?: Viewport
+counts: FindingCounts
+findings: Finding[]
+/**
+ * Findings set aside by the suppression file, each with its reason.
+ */
+suppressed: Finding[]
+/**
+ * Known codes: name_source_missing, suppression_unused, suppression_expired.
+ */
+warnings: Warning[]
+}
+/**
  * components.json: every interactive component found on one page, in one browser, at one viewport.
  */
 export interface ComponentsFile {
@@ -1011,6 +1113,10 @@ export interface Instance {
  */
 key: string
 name: string
+/**
+ * Where this instance's name came from. Known values: aria-label, aria-labelledby, label, content, alt, title, placeholder, value. Absent when the name is empty.
+ */
+nameSource?: string
 tag: string
 attrs: {
 [k: string]: string
@@ -1106,5 +1212,7 @@ export const DRIVER_PROTOCOL_NOTIFICATIONS = {
     "params": "DriverLogParams"
   }
 } as const;
+
+export const FINDINGS_VERSION = 1;
 
 export const RUN_FOLDER_VERSION = 1;

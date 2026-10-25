@@ -1,0 +1,57 @@
+{
+  "formatVersion": 1,
+  "rulesVersion": 1,
+  "scope": "target",
+  "runId": "r_20261013_210455_a1b2",
+  "target": "chromium-1280x800",
+  "url": "https://shop.test",
+  "browser": { "name": "chromium", "version": "143.0" },
+  "viewport": { "width": 1280, "height": 800 },
+  "counts": { "error": 1, "warning": 2, "info": 0 },
+  "findings": [
+    {
+      "id": "unnamed-control:c_5a68e8b18177",
+      "rule": "unnamed-control",
+      "severity": "error",
+      "confidence": "high",
+      "componentId": "c_5a68e8b18177",
+      "instances": ["c_5a68e8b18177:0"],
+      "role": "button",
+      "name": "",
+      "path": "banner",
+      "message": "A button has no accessible name, so a screen reader announces it without saying what it does. This is an automated check, not a conformance claim.",
+      "evidence": { "unnamedInstances": 1, "tag": "button", "signals": ["native"] },
+      "wcag": ["4.1.2"]
+    },
+    {
+      "id": "weak-name-source:c_87e8339687f1",
+      "rule": "weak-name-source",
+      "severity": "warning",
+      "confidence": "medium",
+      "componentId": "c_87e8339687f1",
+      "instances": ["c_87e8339687f1:0"],
+      "role": "textbox",
+      "name": "Search products",
+      "path": "banner",
+      "message": "The only source of the name is the placeholder attribute. A placeholder is not a visible label: it can vanish when typing or is not shown on touch screens. This is an automated check, not a conformance claim.",
+      "evidence": { "nameSource": "placeholder", "weakInstances": 1 },
+      "wcag": ["4.1.2", "3.3.2"]
+    },
+    {
+      "id": "fake-button:c_44f6ceff6e6f",
+      "rule": "fake-button",
+      "severity": "warning",
+      "confidence": "low",
+      "componentId": "c_44f6ceff6e6f",
+      "instances": ["c_44f6ceff6e6f:0"],
+      "role": "generic",
+      "name": "Share page",
+      "path": "main",
+      "message": "This element acts like a button but has no button role. It can be focused, but a screen reader does not announce it as a button. This is an automated check, not a conformance claim.",
+      "evidence": { "signals": ["tabindex", "cursor-pointer"], "keyboardReachable": true, "tabindex": "0" },
+      "wcag": ["4.1.2", "2.1.1"]
+    }
+  ],
+  "suppressed": [],
+  "warnings": []
+}

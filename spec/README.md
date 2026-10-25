@@ -11,6 +11,7 @@ from them, so the sides cannot drift apart.
 | `collector.schema.json` | Collector output | The in-page script and the engine |
 | `run-folder.schema.json` | Run folder | The engine and anything that reads results |
 | `diff.schema.json` | Diff output | `traceqa diff` and anything that reads its report |
+| `findings.schema.json` | Findings | `traceqa findings` and anything that reads `findings.json`. Computed from `components.json` on demand, never written by `extract`. The suppression file (YAML, `.traceqa/suppressions.yaml`) is described in [docs/usage.md](../docs/usage.md#suppressions): entries of `id` (or `rule` and `component`), a required `reason` and an optional `expires`. |
 | `common.schema.json` | Shared types | Used by the files above |
 | `fingerprint.md` | Component id recipe | The engine and anything that compares runs |
 | `fingerprint-vectors.json` | Shared test vectors for the recipe | The engine's unit tests and the collector test (`tests/test_fingerprint_vectors.py`) |

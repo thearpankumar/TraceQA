@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Findings fixture</title>
+<!--
+  One positive and one or more negative cases for each rule of `traceqa findings`. Used by
+  tests/test_findings.py at 1280x800. The page never scrolls: a fixed banner covers the bottom 80 px,
+  and a page that scrolled would show it over different controls on each screen.
+
+  Rule                  Positive                                   Negative
+  unnamed-control       icon-only button                           "Close dialog" (aria-label)
+  weak-name-source      placeholder-only and title-only inputs     wrapped label with the same text
+  fake-button           pointer div (error), onclick div (error),  real button, role=button div
+                        tabindex=0 div (warning),
+                        tabindex=-1 div (error)
+  small-target          three 16 px buttons 2 px apart             16 px button far from the rest,
+                                                                   two 24 px buttons 2 px apart
+  covered-at-load       button under the cookie banner             "Accept cookies" on top of it
+  ambiguous-names       two "Read more" links, different hrefs     two "Contact" links, same href
+  missing-autocomplete  password and tel inputs                    email with autocomplete, text input
+
+  Everything else is at least 32 px tall and far from its neighbours, so no other rule fires.
+-->
+<style>
+  body { font: 14px/1.4 sans-serif; margin: 0; height: 700px; overflow: hidden; }
+  .columns { display: flex; gap: 24px; padding: 16px; }
+  section { width: 280px; }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  button, input, a { min-height: 32px; min-width: 32px; box-sizing: border-box; margin: 0 0 12px; }
+  a { display: inline-block; padding: 6px 8px; }
+  input { display: block; width: 240px; height: 32px; }
+  label { display: block; }
+  .fake { display: block; width: 160px; min-height: 32px; margin: 0 0 12px; background: #eee; }
+  .targets { position: relative; height: 150px; }
+  .targets button { position: absolute; padding: 0; border: 1px solid #888; }
+  .tiny { width: 16px; height: 16px; min-width: 0; min-height: 0; }
+  .medium { width: 24px; height: 24px; min-width: 0; min-height: 0; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  #cookie-banner { position: fixed; left: 0; right: 0; bottom: 0; height: 80px; z-index: 10; background: #ddd; padding: 16px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div class="columns">
+  <section aria-label="Names">
+    <h2>Names</h2>
+    <button data-testid="icon-only"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6"/></svg></button>
+    <button aria-label="Close dialog">x</button>
+    <input type="text" placeholder="Search products" data-testid="placeholder-only">
+    <input type="text" title="Coupon code" data-testid="title-only">
+    <label>Email address <input type="text" placeholder="Email address" data-testid="wrapped-label"></label>
+  </section>
+
+  <section aria-label="Fake buttons">
+    <h2>Fake buttons</h2>
+    <div class="fake" style="cursor:pointer">Buy now</div>
+    <div class="fake" onclick="void 0">Subscribe</div>
+    <div class="fake" tabindex="0" style="cursor:pointer">Share page</div>
+    <div class="fake" tabindex="-1" style="cursor:pointer">Skip it</div>
+    <button style="cursor:pointer">Real button</button>
+    <div class="fake" role="button" tabindex="0">ARIA button</div>
+  </section>
+
+  <section aria-label="Targets">
+    <h2>Targets</h2>
+    <div class="targets">
+      <button class="tiny" style="left:0;top:0" aria-label="Zoom out"></button>
+      <button class="tiny" style="left:18px;top:0" aria-label="Zoom in"></button>
+      <button class="tiny" style="left:36px;top:0" aria-label="Reset zoom"></button>
+      <button class="tiny" style="left:200px;top:0" aria-label="Lonely tiny"></button>
+      <button class="medium" style="left:0;top:80px" aria-label="Previous">&lt;</button>
+      <button class="medium" style="left:26px;top:80px" aria-label="Next">&gt;</button>
+    </div>
+    <h2>Links</h2>
+    <ul>
+      <li><a href="/article-1">Read more</a></li>
+      <li><a href="/article-2">Read more</a></li>
+    </ul>
+    <nav aria-label="Primary"><a href="/contact">Contact</a></nav>
+  </section>
+
+  <section aria-label="Forms">
+    <h2>Forms</h2>
+    <input type="password" aria-label="Password">
+    <input type="tel" aria-label="Phone number">
+    <input type="email" aria-label="Email" autocomplete="email">
+    <input type="text" aria-label="Nickname">
+  </section>
+</div>
+
+<button style="position:absolute; left:600px; top:740px">Under the banner</button>
+
+<div id="cookie-banner">
+  We use cookies. <button>Accept cookies</button>
+</div>
+<footer style="position:absolute; left:16px; top:600px"><a href="/contact">Contact</a></footer>
+</body>
+</html>

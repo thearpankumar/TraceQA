@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Collector cases: copied attributes</title>
+<style>body { font: 14px sans-serif; } div { margin: 6px 0; }</style>
+<body>
+<h1>The attributes the collector copies</h1>
+<!-- `traceqa findings` reads tabindex, autocomplete and role from attrs. "-" means the attribute is absent. -->
+
+<div><div id="attr-tab0" tabindex="0" style="cursor:pointer" data-expect="attrtabindex=0; attrrole=-; attrautocomplete=-">Focusable</div></div>
+<div><div id="attr-tabminus" tabindex="-1" onclick="void 0" data-expect="attrtabindex=-1; signals=onclick-attr">Not in the tab order</div></div>
+<div><input id="attr-auto" type="email" aria-label="Email" autocomplete="email" data-expect="attrautocomplete=email; attrtabindex=-"></div>
+<div><input id="attr-auto-none" type="password" aria-label="Password" data-expect="attrautocomplete=-"></div>
+<div><div id="attr-role" role="button" tabindex="0" data-expect="attrrole=button; attrtabindex=0; name=Explicit role">Explicit role</div></div>
+</body>
+</html>

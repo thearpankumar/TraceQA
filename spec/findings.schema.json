@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "findings.schema.json",
+  "title": "TraceQA findings",
+  "description": "findings.json: automated checks over components.json. Written by `traceqa findings`, never by `extract`. Every finding is an automated check, not a conformance claim: automated tools find only part of the accessibility problems a page has.",
+  "x-traceqa": { "contract": "findings", "version": 1 },
+  "$defs": {
+    "FindingSeverity": {
+      "description": "error: very likely a real problem. warning: probably a problem, check it. info: worth a look.",
+      "type": "string",
+      "enum": ["error", "warning", "info"]
+    },
+    "FindingConfidence": {
+      "description": "How sure the rule is that this is a real problem, apart from its severity.",
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "FindingScope": {
+      "description": "target: one browser at one viewport, written next to its components.json. run: findings about the run as a whole, written in the run folder.",
+      "type": "string",
+      "enum": ["target", "run"]
+    },
+    "FindingSuppression": {
+      "description": "Why a finding was set aside, from the suppression file.",
+      "type": "object",
+      "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string" },
+        "expires": { "description": "YYYY-MM-DD. The entry applies through that day.", "type": "string" }
+      }
+    },
+    "FindingCounts": {
+      "description": "Findings that are not suppressed, by severity.",
+      "type": "object",
+      "required": ["error", "warning", "info"],
+      "properties": {
+        "error": { "type": "integer", "minimum": 0 },
+        "warning": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Finding": {
+      "description": "One problem found by one rule in one component.",
+      "type": "object",
+      "required": ["id", "rule", "severity", "confidence", "componentId", "instances", "role", "name", "path", "message", "evidence", "wcag"],
+      "properties": {
+        "id": { "description": "The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is.", "type": "string" },
+        "rule": { "description": "Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete.", "type": "string" },
+        "severity": { "$ref": "#/$defs/FindingSeverity" },
+        "confidence": { "$ref": "#/$defs/FindingConfidence" },
+        "componentId": { "type": "string" },
+        "instances": { "description": "Keys of the instances concerned, at most 20.", "type": "array", "items": { "type": "string" } },
+        "role": { "type": "string" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "message": { "type": "string" },
+        "evidence": { "description": "What the rule measured. The fields depend on the rule; see docs/usage.md.", "type": "object" },
+        "wcag": { "description": "WCAG 2.2 success criteria the check relates to, for example 2.5.8.", "type": "array", "items": { "type": "string" } },
+        "helpUrl": { "type": "string" },
+        "suppressed": { "$ref": "#/$defs/FindingSuppression" }
+      }
+    },
+    "FindingsFile": {
+      "description": "findings.json for one target (scope target) or for the run (scope run).",
+      "type": "object",
+      "required": ["formatVersion", "rulesVersion", "scope", "runId", "counts", "findings", "suppressed", "warnings"],
+      "properties": {
+        "formatVersion": { "type": "integer", "minimum": 0 },
+        "rulesVersion": { "description": "Raised when a rule is added or changes what it reports.", "type": "integer", "minimum": 0 },
+        "scope": { "$ref": "#/$defs/FindingScope" },
+        "runId": { "type": "string" },
+        "target": { "description": "Folder name inside the run folder. Absent when the file was computed from a components.json alone, and for scope run.", "type": "string" },
+        "url": { "type": "string" },
+        "browser": { "$ref": "common.schema.json#/$defs/BrowserInfo" },
+        "viewport": { "$ref": "common.schema.json#/$defs/Viewport" },
+        "counts": { "$ref": "#/$defs/FindingCounts" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
+        "suppressed": { "description": "Findings set aside by the suppression file, each with its reason.", "type": "array", "items": { "$ref": "#/$defs/Finding" } },
+        "warnings": {
+          "description": "Known codes: name_source_missing, suppression_unused, suppression_expired.",
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/Warning" }
+        }
+      }
+    }
+  }
+}

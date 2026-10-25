@@ -726,6 +726,136 @@ class RpcErrorData(BaseModel):
     retryable: bool
 
 
+class FindingSeverity(str, Enum):
+    """
+    error: very likely a real problem. warning: probably a problem, check it. info: worth a look.
+    """
+
+    error = "error"
+    warning = "warning"
+    info = "info"
+
+
+class FindingConfidence(str, Enum):
+    """
+    How sure the rule is that this is a real problem, apart from its severity.
+    """
+
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class FindingScope(str, Enum):
+    """
+    target: one browser at one viewport, written next to its components.json. run: findings about the run as a whole, written in the run folder.
+    """
+
+    target = "target"
+    run = "run"
+
+
+class FindingSuppression(BaseModel):
+    """
+    Why a finding was set aside, from the suppression file.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reason: str
+    expires: str | None = Field(
+        default=None, description="YYYY-MM-DD. The entry applies through that day."
+    )
+
+
+class FindingCounts(BaseModel):
+    """
+    Findings that are not suppressed, by severity.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    error: int = Field(..., ge=0)
+    warning: int = Field(..., ge=0)
+    info: int = Field(..., ge=0)
+
+
+class Finding(BaseModel):
+    """
+    One problem found by one rule in one component.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(
+        ...,
+        description="The rule, a colon and the component id, for example unnamed-control:c_9f2a41c07b3e. The same in every browser and run while the component id is.",
+    )
+    rule: str = Field(
+        ...,
+        description="Known values: unnamed-control, weak-name-source, fake-button, small-target, covered-at-load, ambiguous-names, missing-autocomplete.",
+    )
+    severity: FindingSeverity
+    confidence: FindingConfidence
+    component_id: str = Field(..., validation_alias="componentId", serialization_alias="componentId")
+    instances: list[str] = Field(
+        ..., description="Keys of the instances concerned, at most 20."
+    )
+    role: str
+    name: str
+    path: str
+    message: str
+    evidence: dict[str, Any] = Field(
+        ...,
+        description="What the rule measured. The fields depend on the rule; see docs/usage.md.",
+    )
+    wcag: list[str] = Field(
+        ...,
+        description="WCAG 2.2 success criteria the check relates to, for example 2.5.8.",
+    )
+    help_url: str | None = Field(default=None, validation_alias="helpUrl", serialization_alias="helpUrl")
+    suppressed: FindingSuppression | None = None
+
+
+class FindingsFile(BaseModel):
+    """
+    findings.json for one target (scope target) or for the run (scope run).
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
+    rules_version: int = Field(
+        ...,
+        validation_alias="rulesVersion", serialization_alias="rulesVersion",
+        description="Raised when a rule is added or changes what it reports.",
+        ge=0,
+    )
+    scope: FindingScope
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    target: str | None = Field(
+        default=None,
+        description="Folder name inside the run folder. Absent when the file was computed from a components.json alone, and for scope run.",
+    )
+    url: str | None = None
+    browser: BrowserInfo | None = None
+    viewport: Viewport | None = None
+    counts: FindingCounts
+    findings: list[Finding]
+    suppressed: list[Finding] = Field(
+        ...,
+        description="Findings set aside by the suppression file, each with its reason.",
+    )
+    warnings: list[Warning] = Field(
+        ...,
+        description="Known codes: name_source_missing, suppression_unused, suppression_expired.",
+    )
+
+
 class Timings(BaseModel):
     """
     Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.
@@ -812,6 +942,11 @@ class Instance(BaseModel):
         description="The component id, a colon, and the instance's position in document order.",
     )
     name: str
+    name_source: str | None = Field(
+        default=None,
+        validation_alias="nameSource", serialization_alias="nameSource",
+        description="Where this instance's name came from. Known values: aria-label, aria-labelledby, label, content, alt, title, placeholder, value. Absent when the name is empty.",
+    )
     tag: str
     attrs: dict[str, str]
     selectors: list[str]
@@ -1010,7 +1145,7 @@ class RawElement(BaseModel):
     tag: str = Field(..., description="Lower-case tag name.")
     attrs: dict[str, str] = Field(
         ...,
-        description="A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder.",
+        description="A fixed subset of attributes when present: id, data-testid, type, href, name, placeholder, tabindex, autocomplete, role.",
     )
     text: str | None = Field(
         default=None, description="Visible text, trimmed and capped at 200 characters."

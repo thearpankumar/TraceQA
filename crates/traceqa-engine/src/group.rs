@@ -213,6 +213,7 @@ pub fn group(elements: Vec<Located>) -> Vec<Component> {
         component.instances.push(Instance {
             key: format!("{id}:{}", component.instances.len()),
             name: element.name,
+            name_source: element.name_source,
             tag: element.tag,
             attrs: element.attrs,
             selectors: element.selectors,
@@ -298,6 +299,23 @@ mod tests {
             .iter()
             .map(|c| (c.role.clone(), c.name.clone(), c.instances.len()))
             .collect()
+    }
+
+    #[test]
+    fn each_instance_keeps_where_its_own_name_came_from() {
+        let path = vec![step("banner", "header", None)];
+        let mut by_label = element("textbox", "Email", path.clone());
+        by_label.element.name_source = Some("label".into());
+        let mut by_placeholder = element("textbox", "Email", path);
+        by_placeholder.element.name_source = Some("placeholder".into());
+        let components = group(vec![by_label, by_placeholder]);
+        assert_eq!(components.len(), 1);
+        let sources: Vec<Option<&str>> = components[0]
+            .instances
+            .iter()
+            .map(|i| i.name_source.as_deref())
+            .collect();
+        assert_eq!(sources, [Some("label"), Some("placeholder")]);
     }
 
     #[test]
