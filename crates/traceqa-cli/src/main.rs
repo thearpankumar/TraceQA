@@ -25,6 +25,7 @@ mod runs;
 mod serve;
 mod site;
 mod stability;
+mod verify;
 mod visual;
 
 use std::process::ExitCode;
@@ -97,6 +98,10 @@ enum Command {
     ///
     /// Run extract with --crops on both sides first. Then: traceqa visual runs/A runs/B --target chromium-1280x800
     Visual(visual::VisualArgs),
+    /// Check a run against a manifest: what must exist, must not exist, be enabled or hidden.
+    ///
+    /// Exit 0 when it passes, 1 when it does not, 2 when the manifest or the run cannot be read.
+    Verify(verify::VerifyArgs),
 }
 
 fn main() -> ExitCode {
@@ -115,5 +120,6 @@ fn main() -> ExitCode {
         Command::Runs(args) => runs::run(&args),
         Command::Serve(args) => serve::run(&args),
         Command::Visual(args) => visual::run(&args),
+        Command::Verify(args) => verify::run(&args),
     }
 }

@@ -1114,6 +1114,7 @@ class ManifestAbsent(BaseModel):
     """
 
     model_config = ConfigDict(
+        extra="forbid",
         populate_by_name=True,
     )
     role: str
@@ -1126,6 +1127,7 @@ class ManifestComponent(BaseModel):
     """
 
     model_config = ConfigDict(
+        extra="forbid",
         populate_by_name=True,
     )
     case: str | None = Field(
@@ -1158,6 +1160,54 @@ class ManifestComponent(BaseModel):
     disabled: int | None = Field(
         default=None, description="How many instances are disabled. Default 0.", ge=0
     )
+
+
+class Severity(str, Enum):
+    """
+    fail, warning or note. An extra is a warning, or a fail with --strict.
+    """
+
+    fail = "fail"
+    warning = "warning"
+    note = "note"
+
+
+class VerifyIssue(BaseModel):
+    """
+    One thing the check found.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    severity: Severity = Field(
+        ...,
+        description="fail, warning or note. An extra is a warning, or a fail with --strict.",
+    )
+    check: str = Field(
+        ...,
+        description="missing, present, instances, confidence, visible, hidden, disabled, frame, shadow, warning or extra.",
+    )
+    message: str = Field(
+        ..., description="A sentence, with the page's words cleaned and cut."
+    )
+    role: str | None = None
+    name: str | None = None
+    component_id: str | None = Field(default=None, validation_alias="componentId", serialization_alias="componentId")
+
+
+class VerifySkipped(BaseModel):
+    """
+    A target that was not checked.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    target: str
+    reason: str
 
 
 class Timings(BaseModel):
@@ -1688,10 +1738,11 @@ class HealItem(BaseModel):
 
 class ManifestFile(BaseModel):
     """
-    The whole manifest.
+    The whole manifest. Unknown keys are an error (typo protection): the manifest is the one place in the spec where additionalProperties is false.
     """
 
     model_config = ConfigDict(
+        extra="forbid",
         populate_by_name=True,
     )
     format_version: int | None = Field(
@@ -1712,6 +1763,30 @@ class ManifestFile(BaseModel):
         default=None, description="Warning codes the page is expected to raise."
     )
     components: list[ManifestComponent]
+
+
+class VerifyTarget(BaseModel):
+    """
+    The check of one target.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    target: str = Field(
+        ..., description="The target folder, for example chromium-1280x800."
+    )
+    url: str
+    viewport: str = Field(
+        ..., description="The manifest's name for the target's viewport."
+    )
+    size: Viewport
+    checked: int = Field(
+        ..., description="How many manifest components were checked.", ge=0
+    )
+    passed: bool
+    issues: list[VerifyIssue]
 
 
 class TargetSummary(BaseModel):
@@ -2059,6 +2134,35 @@ class HealReport(BaseModel):
         description="One per baseline component that is not present as it was. Components that are unchanged are only counted in the summary.",
     )
     summary: HealSummary
+
+
+class VerifyReport(BaseModel):
+    """
+    What `traceqa verify --format json` prints: a run checked against a manifest, per target.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=1)
+    run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
+    manifest: str = Field(
+        ..., description="The manifest file as it was named on the command line."
+    )
+    strict: bool = Field(
+        ...,
+        description="True when extras (components found but not in the manifest) fail the check.",
+    )
+    passed: bool = Field(..., description="True when no target has a failure.")
+    targets: list[VerifyTarget]
+    skipped: list[VerifySkipped] = Field(
+        ..., description="Targets whose viewport size is not in the manifest."
+    )
+    notes: list[str] = Field(
+        ...,
+        description="Unused manifest entries and other remarks that do not fail the check.",
+    )
 
 
 class RunManifest(BaseModel):

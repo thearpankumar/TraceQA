@@ -477,6 +477,56 @@ it; that is why covered components are skipped. Anti-aliased pixels are ignored 
 as pixelmatch does). Exit codes: 0 when the comparison ran, 1 with `--fail-on-different` and a different
 component, 2 for input that cannot be compared (another browser or viewport, a side without crops).
 
+## `traceqa verify`
+
+```sh
+traceqa verify RUN --manifest FILE [--target NAME] [--strict] [--format text|json|github|sarif]
+```
+
+Checks a finished run against a manifest: the list of components a page should have, in the format
+of `fixtures/buggy-shop/manifest.yaml` and `spec/manifest.schema.json`. `traceqa baseline init RUN
+--out manifest.yaml` writes a first one from a run; review it, because it records what was found,
+not what should be there. A manifest is a constraint set, not a snapshot: it says what must exist,
+what must not, and which warnings are allowed. The check is `bench/run.py`'s, so the two agree on
+the shop.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--manifest FILE` | required | The manifest (YAML). |
+| `--target NAME` | all | Only this target, for example `chromium-1280x800`. |
+| `--strict` | off | Fail on extras: components found that the manifest does not list. Without it they only warn. |
+| `--format` | `text` | `text`, `json` (`VerifyReport` in `spec/manifest.schema.json`), `github` (workflow commands, and a summary in `$GITHUB_STEP_SUMMARY`) or `sarif` (SARIF 2.1.0, for viewers; not GitHub code scanning, see Findings). |
+| `--runs-dir DIR` | `runs` | Where a bare run id is looked up. |
+
+Exit codes: 0 every checked target passes, 1 a target fails, 2 the manifest or the run cannot be
+used (a typo in the manifest, a repeated viewport name, an unknown `--target`, a target that did
+not finish, or no target at a viewport the manifest names).
+
+Each target is checked at the manifest viewport with the same width and height; a target at another
+size is skipped with a note. Per target:
+
+| Check | Fails when |
+|---|---|
+| `missing` | a listed component is not found. The message names the nearest component of the same role, by edit distance. |
+| `present` | an `absent` entry (role and exact name) is found. |
+| `instances`, `confidence`, `disabled` | the count, the confidence or the number of disabled instances differs (defaults 1, `high`, 0). |
+| `hidden`, `visible` | a component listed as hidden at this viewport has a visible instance, or one not listed has none. |
+| `frame`, `shadow` | the frame it lives in, or whether it is in shadow DOM, differs. A frame name is compared the way the path writes it (trimmed, lower-cased), never by splitting the path on `>`. |
+| `warning` | the extraction raised a warning code the manifest's `warnings` does not list. A listed code that was not raised is only a note, so stale entries get reported. |
+| `extra` | (with `--strict`) a component is found that no entry matched. |
+
+Matching follows the bench: the same role, then `template: true` (any name) or the exact name, each
+found component used once, in manifest order. Ids are not used, because people write manifests.
+Unknown keys anywhere in the manifest are an error, so a typo such as `instnaces` cannot silently
+weaken the check; so is a `hidden` list that names a viewport not under `viewports`. Page text in a
+message is cleaned and cut like in the other reports.
+
+```text
+$ traceqa verify runs/r_20261013_210455_a1b2 --manifest fixtures/buggy-shop/manifest.yaml
+chromium-1280x800 (desktop): FAIL, 37 components checked, 1 failures
+  FAIL missing at desktop: button 'Open the size guide' x1 (nearest: button 'Open size guide' c_4f1a...)
+```
+
 ## `traceqa serve`
 
 ```
@@ -1492,3 +1542,7 @@ The bench compares extraction results with
 components were found, how many unexpected ones were reported, how many differed
 from the manifest, whether identifiers were stable across all runs, and the
 median time. It exits with a non-zero status when any score falls short.
+
+`traceqa verify --manifest fixtures/buggy-shop/manifest.yaml RUN --strict` applies the same checks to
+one run and agrees with the bench on the shop (`tests/test_verify.py` asserts it). The bench stays
+the scorer for the matrix of browsers and repeats.
