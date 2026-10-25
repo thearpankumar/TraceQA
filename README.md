@@ -475,6 +475,9 @@ uv run python testbed/sites/buggy-shop/serve.py
 
 Every command works unchanged in Bash, PowerShell and cmd. CI runs the tests on Linux, macOS and Windows.
 
+The [devcontainer](.devcontainer) has Rust, uv, Node and the three browsers ready: open the folder in VS Code and
+choose *Reopen in Container*.
+
 ## Security
 
 Please report vulnerabilities privately, as described in [docs/SECURITY.md](docs/SECURITY.md).
