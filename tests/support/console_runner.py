@@ -36,8 +36,34 @@ def _pump(stream, sink: list[str], marker: str | None, found: threading.Event) -
             found.set()
 
 
-def _snapshot() -> dict[int, tuple[int, str]]:
-    """Windows: every process with its parent and executable name, from a toolhelp snapshot."""
+def _creation_time(pid: int) -> int | None:
+    """Windows: when the process was created (FILETIME, 100 ns units), None when it cannot be read.
+
+    A (pid, creation time) pair names one process for good; a pid alone may be reused.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE, *([ctypes.POINTER(wintypes.FILETIME)] * 4)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    created, exited, kernel_time, user_time = (wintypes.FILETIME() for _ in range(4))
+    ok = kernel.GetProcessTimes(
+        handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel_time), ctypes.byref(user_time)
+    )
+    kernel.CloseHandle(handle)
+    if not ok:
+        return None
+    return (created.dwHighDateTime << 32) | created.dwLowDateTime
+
+
+def _snapshot() -> dict[int, tuple[int, str, int | None]]:
+    """Windows: every process with its parent, executable name and creation time (toolhelp)."""
     import ctypes
     from ctypes import wintypes
 
@@ -61,13 +87,14 @@ def _snapshot() -> dict[int, tuple[int, str]]:
     kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
     kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    parents: dict[int, tuple[int, str]] = {}
+    parents: dict[int, tuple[int, str, int | None]] = {}
     handle = kernel.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
     entry = ProcessEntry()
     entry.dwSize = ctypes.sizeof(ProcessEntry)
     ok = kernel.Process32FirstW(handle, ctypes.byref(entry))
     while ok:
-        parents[entry.th32ProcessID] = (entry.th32ParentProcessID, entry.szExeFile)
+        pid = entry.th32ProcessID
+        parents[pid] = (entry.th32ParentProcessID, entry.szExeFile, _creation_time(pid))
         ok = kernel.Process32NextW(handle, ctypes.byref(entry))
     kernel.CloseHandle(handle)
     return parents
@@ -91,28 +118,63 @@ def _windows_alive(pid: int) -> bool:
     return code.value == 259  # STILL_ACTIVE
 
 
-def descendants(pid: int) -> dict[int, str]:
-    """Windows: the processes that `pid` started, directly or not (pid to executable name)."""
-    parents = _snapshot()
-    found: dict[int, str] = {}
-    todo = [pid]
+def filter_descendants(root: int, table: dict[int, tuple[int, str, int | None]]) -> dict[int, tuple[str, int | None]]:
+    """The processes `root` started, directly or not, as pid to (name, creation time).
+
+    `table` maps pid to (parent pid, name, creation time). Windows keeps the parent pid of a
+    process after the parent has ended, and reuses pids, so a process whose parent pid matches
+    only by accident would look like a child. A child cannot be older than its parent: such an
+    entry is left out, and so is everything below it. An unknown time (None) trusts the link.
+    Cycles and a process that is its own parent end the walk.
+    """
+    found: dict[int, tuple[str, int | None]] = {}
+    todo = [root]
     while todo:
         parent = todo.pop()
-        for child, (its_parent, name) in parents.items():
-            if its_parent == parent and child not in found and child != pid:
-                found[child] = name
-                todo.append(child)
+        parent_created = table[parent][2] if parent in table else None
+        for child, (its_parent, name, created) in table.items():
+            if its_parent != parent or child in (root, parent) or child in found:
+                continue
+            if created is not None and parent_created is not None and created < parent_created:
+                continue
+            found[child] = (name, created)
+            todo.append(child)
     return found
 
 
-def _still_running(pid: int, group: dict[int, str]) -> list[str]:
+def descendants(pid: int) -> dict[int, tuple[str, int | None]]:
+    """Windows: the processes that `pid` started, directly or not (pid to name and creation time)."""
+    return filter_descendants(pid, _snapshot())
+
+
+def leftovers(group: dict[int, tuple[str, int | None]], alive=None, created_of=None) -> list[str]:
+    """Windows: the recorded processes still running, as "PID COMMAND".
+
+    A pid counts only when the process now holding it was created when the one recorded was, so a
+    reused pid is a foreign process and never reported. `alive` and `created_of` look a pid up
+    (the Windows API by default); tests pass their own.
+    """
+    alive = alive or _windows_alive
+    created_of = created_of or _creation_time
+    left = []
+    for pid, (name, created) in sorted(group.items()):
+        if not alive(pid):
+            continue
+        now = created_of(pid)
+        if created is not None and now is not None and now != created:
+            continue
+        left.append(f"{pid} {name}")
+    return left
+
+
+def _still_running(pid: int, group: dict[int, tuple[str, int | None]]) -> list[str]:
     """What of the command's processes is still alive, as "PID COMMAND" so a failure names them.
 
     POSIX: the members of its group, with their command line. Windows: the processes in `group`
-    (pid to executable name) that have not ended.
+    (pid to name and creation time) that have not ended and still hold the recorded creation time.
     """
     if WINDOWS:
-        return [f"{p} {name}" for p, name in sorted(group.items()) if _windows_alive(p)]
+        return leftovers(group)
     # A zombie has exited and only waits for its parent. A driver orphaned by an exit that did not
     # wait for it stays one for good where the first process never reaps (a container's, as on
     # the Linux CI runner), so zombies do not count.
@@ -175,6 +237,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         env=env,
         **kwargs,
     )
+    root_created = _creation_time(process.pid) if WINDOWS else None  # before the pid can be reused
     out: list[str] = []
     err: list[str] = []
     ready = spec["ready"]
@@ -194,6 +257,7 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     was_ready = process.poll() is None and (found.is_set() or ("glob" in ready and bool(glob.glob(ready["glob"]))))
 
     group = descendants(process.pid) if WINDOWS and was_ready else {}
+
     started = None
     returncode: Any = None
     if was_ready:
@@ -203,6 +267,12 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
             if index:
                 time.sleep(spec.get("gap", 0.5))
             _send(process, spec.get("signal", "SIGINT"), spec.get("target", "group"))
+            if WINDOWS and index == 0 and root_created is not None:
+                # Children started late (after ready) are covered through the same filter.
+                table = _snapshot()
+                if process.pid in table and table[process.pid][2] == root_created:
+                    for pid, entry in filter_descendants(process.pid, table).items():
+                        group.setdefault(pid, entry)
         try:
             returncode = process.wait(timeout=spec.get("exit_timeout", 60))
         except subprocess.TimeoutExpired:
