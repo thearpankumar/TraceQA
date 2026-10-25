@@ -24,6 +24,9 @@ for line in sys.stdin:
             {"driverName": "half", "driverVersion": "0", "protocolVersion": 1, "browsers": ["alpha", "beta"]},
         )
     elif method == "session.open":
+        # What a real driver prints while it starts a browser.
+        log = {"jsonrpc": "2.0", "method": "driver.log", "params": {"level": "info", "message": "opened alpha 1"}}
+        print(json.dumps(log), flush=True)
         if request["params"]["target"]["browser"] == "alpha":
             reply(
                 request,

@@ -325,7 +325,7 @@ fn origin(command: &DriverCommand) -> String {
     }
 }
 
-pub fn doctor(explicit: &[String]) -> ExitCode {
+pub fn doctor(explicit: &[String], verbose: bool) -> ExitCode {
     println!("TraceQA {}", traceqa_engine::VERSION);
     println!("Commit:  {}", commit_text(COMMIT));
     match home::dir() {
@@ -356,7 +356,10 @@ pub fn doctor(explicit: &[String]) -> ExitCode {
     for command in driver_commands(explicit) {
         println!("  {command}");
         println!("    {}", origin(&command));
-        let connected = ProcessTransport::spawn(&command).and_then(|transport| Driver::connect(Box::new(transport)));
+        // The drivers' log lines would be mixed into the results, so they are shown only on request.
+        let connected = ProcessTransport::spawn(&command)
+            .map(|transport| if verbose { transport } else { transport.quiet() })
+            .and_then(|transport| Driver::connect(Box::new(transport)));
         let mut driver = match connected {
             Ok(driver) => driver,
             Err(error) => {

@@ -375,6 +375,10 @@ with the command that installs it. `cdp` and `webdriver` need an address and
 are not tried; Safari is tried on macOS only. Honours `PLAYWRIGHT_BROWSERS_PATH`.
 Exits with 0 when at least one browser opens, and with 1 when none does.
 
+The drivers' own log lines (`[driver info] opened chromium ...`) are hidden, so they do
+not interleave with the results. `--verbose` shows them, on standard error. The
+results and the exit code are the same either way.
+
 ```
 TraceQA 0.1.0
 Commit:  not a release build

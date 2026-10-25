@@ -223,6 +223,7 @@ def test_doctor_with_working_browsers_exits_0_and_lists_them() -> None:
     result = doctor()
     assert result.returncode == 0, result.stdout
     assert "chromium: ok" in result.stdout and "Ready. Browsers that work:" in result.stdout
+    assert "[driver" not in result.stdout and "[driver" not in result.stderr
     no_jargon(result.stdout)
 
 
@@ -232,6 +233,31 @@ def test_doctor_names_the_browsers_that_are_missing_while_others_work() -> None:
     assert "alpha: ok" in result.stdout and "beta: not installed" in result.stdout
     assert "Ready. Browsers that work: alpha" in result.stdout
     assert "Not installed: beta. Run: traceqa install beta" in result.stdout
+
+
+def test_doctor_hides_driver_log_lines_by_default() -> None:
+    result = doctor("--driver", f'"{sys.executable}" "{HALF_INSTALLED_DRIVER}"')
+    assert result.returncode == 0, result.stdout
+    assert "[driver" not in result.stdout and "[driver" not in result.stderr
+    assert "alpha: ok" in result.stdout and "beta: not installed" in result.stdout
+
+
+def test_doctor_verbose_shows_driver_log_lines_on_stderr() -> None:
+    driver = f'"{sys.executable}" "{HALF_INSTALLED_DRIVER}"'
+    quiet, verbose = doctor("--driver", driver), doctor("--verbose", "--driver", driver)
+    assert "[driver info] opened alpha 1" in verbose.stderr
+    assert "[driver" not in verbose.stdout
+    assert verbose.stdout == quiet.stdout and verbose.returncode == quiet.returncode
+
+
+@pytest.mark.parametrize("flags", [[], ["--verbose"]])
+def test_doctor_exit_code_is_unchanged_with_verbose(flags: list[str]) -> None:
+    result = doctor(*flags, "--driver", "traceqa-no-such-driver")
+    assert result.returncode == 1
+
+
+def test_doctor_help_mentions_verbose() -> None:
+    assert "--verbose" in traceqa("doctor", "--help").stdout
 
 
 def test_doctor_with_a_driver_that_is_not_there_says_so_plainly() -> None:

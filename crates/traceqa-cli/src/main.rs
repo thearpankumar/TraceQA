@@ -42,7 +42,7 @@ enum Command {
     /// Install the browser drivers and browsers into TraceQA's own folder (~/.traceqa).
     Install(install::InstallArgs),
     /// Check the setup: where the drivers are, whether they start, and which browsers they open.
-    Doctor(DriverArgs),
+    Doctor(DoctorArgs),
     /// Sign in once in a browser window and save its state, for pages behind a sign-in.
     ///
     /// Then run: traceqa extract URL --storage-state FILE
@@ -75,6 +75,15 @@ struct McpArgs {
     /// fires many calls cannot start many browsers. Reading tools have a higher limit of their own.
     #[arg(long, value_name = "N", default_value_t = traceqa_mcp::DEFAULT_MAX_CONCURRENT_EXTRACTS)]
     max_concurrent_extracts: usize,
+    #[command(flatten)]
+    drivers: DriverArgs,
+}
+
+#[derive(Args)]
+struct DoctorArgs {
+    /// Also show the drivers' own log lines (on standard error).
+    #[arg(long)]
+    verbose: bool,
     #[command(flatten)]
     drivers: DriverArgs,
 }
@@ -181,7 +190,7 @@ fn main() -> ExitCode {
         }
         Command::Mcp(args) => mcp(&args),
         Command::Install(args) => install::install(&args),
-        Command::Doctor(args) => install::doctor(&args.drivers),
+        Command::Doctor(args) => install::doctor(&args.drivers.drivers, args.verbose),
         Command::Login(args) => login::login(&args),
     }
 }
