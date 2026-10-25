@@ -1,4 +1,4 @@
-//! `traceqa serve`: the client protocol on stdin and stdout. This is what SDKs start.
+//! `traceqa serve`: the client protocol on stdin and stdout. This is what clients in other languages start.
 
 use std::io::{self, BufReader};
 use std::process::ExitCode;

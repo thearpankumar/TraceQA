@@ -69,7 +69,7 @@ enum Command {
     ///
     /// Proposals are only applied when you accept them. Then: traceqa heal RUN --against NAME --accept ID
     Heal(heal::HealArgs),
-    /// Speak the client protocol on stdin and stdout. This is what SDKs start.
+    /// Speak the client protocol on stdin and stdout. This is what clients in other languages start.
     Serve(serve::ServeArgs),
     /// Let AI tools such as Claude Code run TraceQA (an MCP server).
     ///
