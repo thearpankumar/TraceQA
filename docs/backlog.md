@@ -5,24 +5,6 @@ everything else it describes does not exist yet. `LIM-` items are limits of feat
 records a refusal that the code already enforces. Each item says why it matters, how it should work and how to
 tell that it is done, so that someone can pick it up without asking.
 
-## How to read this file
-
-Every item is a heading of the form `### ID: title`, followed by four labelled parts:
-
-- **Why.** The problem, in a sentence or two.
-- **Design.** Notes on how to build it, including the existing code it builds on.
-- **Acceptance.** Observable, measurable statements: a number, a command or a file. Each one can be checked by
-  someone who did not write the item.
-- **Size.** S (a day or two), M (about a week), L (several weeks).
-
-Item ids are stable. `EXP-` items are the explorer, `ORA-` items the interaction oracles, `ARC-` items
-architecture gaps, `HYG-` items deferred hygiene, `CUT-` items features that were scoped out of the
-feature phase and `LIM-` items known limits of features that did ship. The numbers F6, F7 and A3 to A10 refer to the feature review that produced this list.
-
-Order of work: the safety policy (EXP-5) and the `page.act` extension (EXP-4) come first, because nothing may
-click on a real site without them. The walker (EXP-1 to EXP-3) comes next, then outputs and replay (EXP-7,
-EXP-8), then the oracles. Hygiene items are independent and can be taken at any time.
-
 ## 1. The explorer (F6)
 
 ### What it is
@@ -883,3 +865,22 @@ tightened to that; an agent can still get every
 component's locator from the detailed answer.
 
 **Size.** S
+
+
+## How to read this file
+
+Every item is a heading of the form `### ID: title`, followed by four labelled parts:
+
+- **Why.** The problem, in a sentence or two.
+- **Design.** Notes on how to build it, including the existing code it builds on.
+- **Acceptance.** Observable, measurable statements: a number, a command or a file. Each one can be checked by
+  someone who did not write the item.
+- **Size.** S (a day or two), M (about a week), L (several weeks).
+
+Item ids are stable. `EXP-` items are the explorer, `ORA-` items the interaction oracles, `ARC-` items
+architecture gaps, `HYG-` items deferred hygiene, `CUT-` items features that were scoped out of the
+feature phase and `LIM-` items known limits of features that did ship. The numbers F6, F7 and A3 to A10 refer to the feature review that produced this list.
+
+Order of work: the safety policy (EXP-5) and the `page.act` extension (EXP-4) come first, because nothing may
+click on a real site without them. The walker (EXP-1 to EXP-3) comes next, then outputs and replay (EXP-7,
+EXP-8), then the oracles. Hygiene items are independent and can be taken at any time.
