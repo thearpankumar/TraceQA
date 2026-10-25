@@ -11,6 +11,8 @@ from them, so the sides cannot drift apart.
 | `collector.schema.json` | Collector output | The in-page script and the engine |
 | `run-folder.schema.json` | Run folder | The engine and anything that reads results |
 | `diff.schema.json` | Diff output | `traceqa diff` and anything that reads its report |
+| `baseline.schema.json` | Baseline | `traceqa baseline`, `traceqa diff --against` and anything that reads a baseline folder. Written only by `baseline save`, `promote` and `alias`, never by `extract` or `diff`; see [docs/usage.md](../docs/usage.md#baselines-and-the-ci-gate). |
+| `manifest.schema.json` | Manifest | `traceqa baseline init` and anything that compares a run with a list of expected components (the bench). The file is YAML; the schema describes the parsed document. |
 | `findings.schema.json` | Findings | `traceqa findings` and anything that reads `findings.json`. Computed from `components.json` on demand, never written by `extract`. The suppression file (YAML, `.traceqa/suppressions.yaml`) is described in [docs/usage.md](../docs/usage.md#suppressions): entries of `id` (or `rule` and `component`), a required `reason` and an optional `expires`. |
 | `common.schema.json` | Shared types | Used by the files above |
 | `fingerprint.md` | Component id recipe | The engine and anything that compares runs |

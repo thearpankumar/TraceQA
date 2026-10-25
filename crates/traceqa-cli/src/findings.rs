@@ -47,6 +47,10 @@ enum Format {
     Table,
     Json,
     Markdown,
+    /// GitHub Actions workflow commands; also fills $GITHUB_STEP_SUMMARY.
+    Github,
+    /// SARIF 2.1.0, for SARIF viewers and other tools (not GitHub code scanning: see docs/usage.md).
+    Sarif,
 }
 
 #[derive(Args)]
@@ -135,6 +139,17 @@ fn execute(args: &FindingsArgs) -> Result<ExitCode, String> {
         ),
         Format::Table => print!("{}", table(&shown)),
         Format::Markdown => print!("{}", markdown(&shown)),
+        Format::Github => {
+            print!(
+                "{}",
+                traceqa_diff::github::render(&traceqa_diff::github::finding_annotations(&shown))
+            );
+            append_step_summary(&markdown(&shown));
+        }
+        Format::Sarif => println!(
+            "{}",
+            serde_json::to_string_pretty(&traceqa_diff::sarif::findings_log(&shown)).expect("JSON always serialises")
+        ),
     }
     for file in &shown {
         for warning in &file.warnings {
@@ -323,6 +338,22 @@ fn markdown(files: &[&FindingsFile]) -> String {
         }
     }
     out
+}
+
+/// GitHub Actions names a file whose Markdown becomes the step's summary.
+fn append_step_summary(text: &str) {
+    use std::io::Write as _;
+    let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY").filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let written = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(text.as_bytes()));
+    if let Err(e) = written {
+        eprintln!("traceqa: warning: could not write $GITHUB_STEP_SUMMARY: {e}");
+    }
 }
 
 /// Keeps a markdown table cell on one line and stops page text from adding markup.

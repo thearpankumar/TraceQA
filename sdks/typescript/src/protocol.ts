@@ -1,10 +1,10 @@
 // Generated from spec/ by scripts/gen-protocol.mjs. Do not edit.
 
-export type RunStatus = ("running" | "completed" | "failed" | "cancelled")
 /**
  * How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).
  */
 export type Confidence = ("high" | "low")
+export type RunStatus = ("running" | "completed" | "failed" | "cancelled")
 /**
  * How a locator finds its component: by ARIA role and name, by test id, by visible text, or (last resort) by a CSS selector.
  */
@@ -34,6 +34,14 @@ export type FindingConfidence = ("high" | "medium" | "low")
 export type FindingScope = ("target" | "run")
 
 export interface SpecTypes {
+BaselineFile?: BaselineFile
+BaselineSource?: BaselineSource
+BaselineTarget?: BaselineTarget
+BaselineAlias?: BaselineAlias
+BaselinePromotion?: BaselinePromotion
+BaselineReport?: BaselineReport
+BaselineRef?: BaselineRef
+BaselineTargetReport?: BaselineTargetReport
 EngineHelloParams?: EngineHelloParams
 EngineHelloResult?: EngineHelloResult
 ExtractOptions?: ExtractOptions
@@ -105,6 +113,9 @@ FindingSuppression?: FindingSuppression
 FindingCounts?: FindingCounts
 Finding?: Finding
 FindingsFile?: FindingsFile
+ManifestFile?: ManifestFile
+ManifestAbsent?: ManifestAbsent
+ManifestComponent?: ManifestComponent
 RunManifest?: RunManifest
 TargetSummary?: TargetSummary
 Timings?: Timings
@@ -112,6 +123,291 @@ Event?: Event
 ComponentsFile?: ComponentsFile
 Component?: Component
 Instance?: Instance
+}
+/**
+ * baseline.json. Holds no storage state, no run.json and no error text, so the folder is safe to commit.
+ */
+export interface BaselineFile {
+formatVersion: number
+/**
+ * The folder name: the host of the page (made safe for file names) and 8 hex characters of the SHA-256 of the page address, or the name the person gave.
+ */
+key: string
+/**
+ * The page address with secrets replaced, as in components.json.
+ */
+url: string
+/**
+ * Ids of a run with another fingerprintVersion cannot be compared; save the baseline again.
+ */
+fingerprintVersion: number
+/**
+ * RFC 3339 timestamp in UTC of the last save or promote.
+ */
+promotedAt: string
+promotedFrom: BaselineSource
+/**
+ * One entry per saved target folder. Targets pair with a run's by dir.
+ */
+targets: BaselineTarget[]
+/**
+ * Rename links: a component that was removed from the page under one id and added under another is the same component.
+ */
+aliases: BaselineAlias[]
+/**
+ * What each save or promote replaced, oldest first. At most the last 20 are kept.
+ */
+promotions: BaselinePromotion[]
+}
+/**
+ * The run a baseline was made from.
+ */
+export interface BaselineSource {
+runId: string
+/**
+ * Or 'unknown' when the run had no run.json.
+ */
+engineVersion: string
+}
+/**
+ * One saved browser-and-viewport folder.
+ */
+export interface BaselineTarget {
+/**
+ * Folder name, for example chromium-1280x800.
+ */
+dir: string
+browser: BrowserInfo
+viewport: Viewport
+hasCrops: boolean
+}
+/**
+ * What actually ran, as reported by the driver.
+ */
+export interface BrowserInfo {
+name: string
+version: string
+}
+/**
+ * Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.
+ */
+export interface Viewport {
+width: number
+height: number
+}
+/**
+ * Says that the removed component `from` is the added component `to`. A diff then reports one renamed pair (a pairedWith link with reason 'aliased') and the removed, added and paired gates ignore it.
+ */
+export interface BaselineAlias {
+/**
+ * A component id in the baseline.
+ */
+from: string
+/**
+ * A component id in the new run.
+ */
+to: string
+/**
+ * Known values: rename, heal, manual.
+ */
+reason: string
+/**
+ * Free text: why they are the same.
+ */
+evidence?: string
+/**
+ * RFC 3339 timestamp in UTC.
+ */
+addedAt: string
+}
+/**
+ * One save or promote.
+ */
+export interface BaselinePromotion {
+runId: string
+at: string
+/**
+ * What changed against the baseline it replaced, for example '2 removed, 1 added, 0 changed', or 'first save'.
+ */
+summary: string
+}
+/**
+ * Output of `traceqa diff --against ... --format json`: one entry per baseline target, with a DiffFile whose side A is the baseline and side B the run, and the result of the gate.
+ */
+export interface BaselineReport {
+formatVersion: number
+baseline: BaselineRef
+/**
+ * The --fail-on tokens in effect, sorted. Known values: removed, added, changed, disabled, hidden, covered, paired.
+ */
+failOn: string[]
+/**
+ * True when at least one entry matched a token (the exit code is then 1).
+ */
+failed: boolean
+/**
+ * How many entries matched.
+ */
+matched: number
+targets: BaselineTargetReport[]
+}
+/**
+ * Which baseline was compared.
+ */
+export interface BaselineRef {
+key: string
+url: string
+promotedAt: string
+}
+/**
+ * The comparison of one baseline target. Exactly one of diff and error is set.
+ */
+export interface BaselineTargetReport {
+dir: string
+diff?: DiffFile
+/**
+ * Why the target could not be compared, for example that the run has no such target.
+ */
+error?: string
+}
+/**
+ * Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).
+ */
+export interface DiffFile {
+formatVersion: number
+/**
+ * What kind of comparison this is, worked out from the two sides. Known values: cross-browser (same run, same viewport, another browser), cross-viewport (same run, same browser, another viewport), run-to-run (different runs, same browser and viewport), custom.
+ */
+mode: string
+a: DiffSide
+b: DiffSide
+summary: DiffSummary
+entries: DiffEntry[]
+/**
+ * Things the reader should know about the comparison. Known codes: viewports_differ (components hidden by design are expected).
+ */
+warnings: Warning[]
+}
+/**
+ * One of the two compared pages.
+ */
+export interface DiffSide {
+/**
+ * What the person typed for this side.
+ */
+label: string
+runId: string
+/**
+ * The target folder name inside the run, when known.
+ */
+target?: string
+browser: BrowserInfo
+viewport: Viewport
+url: string
+finalUrl: string
+/**
+ * RFC 3339 timestamp in UTC, copied from the side's components.json.
+ */
+capturedAt: string
+fingerprintVersion: number
+componentCount: number
+}
+/**
+ * How many components fall in each group. A paired entry is counted under added or removed, and its pair once more in paired.
+ */
+export interface DiffSummary {
+added: number
+removed: number
+changed: number
+unchanged: number
+/**
+ * Pairs of one removed and one added component that look like the same component after a change.
+ */
+paired: number
+}
+/**
+ * One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.
+ */
+export interface DiffEntry {
+/**
+ * One of added, removed, changed. An added component is in B only, a removed one in A only.
+ */
+kind: ("added" | "removed" | "changed")
+/**
+ * The component id.
+ */
+id: string
+a?: ComponentSummary
+b?: ComponentSummary1
+/**
+ * For changed: the ComponentSummary fields that differ (instances, visible, enabled, covered, checked, expanded, selected, pressed, confidence). Empty otherwise.
+ */
+fields: string[]
+/**
+ * Ready-made facts for gating, in this order when present: became_hidden (some visible instances on A, none on B), became_visible, became_disabled (some enabled instances on A, none on B), became_enabled, became_covered (no covered instance on A, some on B), became_uncovered, count_up, count_down (instance count). Only on changed entries.
+ */
+flags: string[]
+pairedWith?: PairLink
+}
+/**
+ * The component on side A. Absent for added.
+ */
+export interface ComponentSummary {
+role: string
+name: string
+nameIsTemplate: boolean
+path: string
+instances: number
+visible: number
+enabled: number
+covered: number
+checked: number
+expanded: number
+selected: number
+pressed: number
+confidence: Confidence
+}
+/**
+ * The component on side B. Absent for removed.
+ */
+export interface ComponentSummary1 {
+role: string
+name: string
+nameIsTemplate: boolean
+path: string
+instances: number
+visible: number
+enabled: number
+covered: number
+checked: number
+expanded: number
+selected: number
+pressed: number
+confidence: Confidence
+}
+/**
+ * Set on a removed or added entry that looks like the other side's entry after a change of role or name.
+ */
+export interface PairLink {
+/**
+ * The id of the other entry.
+ */
+id: string
+/**
+ * Known values: role_changed (same path and name, other role), name_changed (same path and role, other name or template flag).
+ */
+reason: string
+confidence: Confidence
+}
+/**
+ * Something that did not stop the run but that the reader should know.
+ */
+export interface Warning {
+/**
+ * Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted, signed_in_pictures, collector_tampered, requests_failed.
+ */
+code: string
+message: string
 }
 export interface EngineHelloParams {
 protocolVersion: number
@@ -193,13 +489,6 @@ webdriverCapabilities?: {
 [k: string]: unknown
 }
 headless?: boolean
-}
-/**
- * Size of the browser window content area, in CSS pixels. Each side is 1 to 10000.
- */
-export interface Viewport {
-width: number
-height: number
 }
 /**
  * Start every browser with these cookies and stored values, for pages behind a sign-in or a first screen. Never written to the run folder.
@@ -336,13 +625,6 @@ timings?: Timings
  * Why this target failed, when it did.
  */
 error?: string
-}
-/**
- * What actually ran, as reported by the driver.
- */
-export interface BrowserInfo {
-name: string
-version: string
 }
 /**
  * Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.
@@ -500,16 +782,6 @@ confidence: Confidence
 signals: string[]
 }
 /**
- * Something that did not stop the run but that the reader should know.
- */
-export interface Warning {
-/**
- * Stable machine-readable code. Known values: cross_origin_frame_skipped, unnamed_interactive_element, scroll_limit_reached, frame_eval_failed, screenshot_failed, browsers_disagree, viewport_not_reached, http_error_status, page_load_incomplete, covered_elements, closed_shadow_roots, elements_removed_while_scrolling, session_not_accepted, signed_in_pictures, collector_tampered, requests_failed.
- */
-code: string
-message: string
-}
-/**
  * No fields.
  */
 export interface Empty {
@@ -594,135 +866,6 @@ forced: boolean
  * True when every instance is hidden, so a role locator only finds it with includeHidden.
  */
 needsIncludeHidden: boolean
-}
-/**
- * Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).
- */
-export interface DiffFile {
-formatVersion: number
-/**
- * What kind of comparison this is, worked out from the two sides. Known values: cross-browser (same run, same viewport, another browser), cross-viewport (same run, same browser, another viewport), run-to-run (different runs, same browser and viewport), custom.
- */
-mode: string
-a: DiffSide
-b: DiffSide
-summary: DiffSummary
-entries: DiffEntry[]
-/**
- * Things the reader should know about the comparison. Known codes: viewports_differ (components hidden by design are expected).
- */
-warnings: Warning[]
-}
-/**
- * One of the two compared pages.
- */
-export interface DiffSide {
-/**
- * What the person typed for this side.
- */
-label: string
-runId: string
-/**
- * The target folder name inside the run, when known.
- */
-target?: string
-browser: BrowserInfo
-viewport: Viewport
-url: string
-finalUrl: string
-/**
- * RFC 3339 timestamp in UTC, copied from the side's components.json.
- */
-capturedAt: string
-fingerprintVersion: number
-componentCount: number
-}
-/**
- * How many components fall in each group. A paired entry is counted under added or removed, and its pair once more in paired.
- */
-export interface DiffSummary {
-added: number
-removed: number
-changed: number
-unchanged: number
-/**
- * Pairs of one removed and one added component that look like the same component after a change.
- */
-paired: number
-}
-/**
- * One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.
- */
-export interface DiffEntry {
-/**
- * One of added, removed, changed. An added component is in B only, a removed one in A only.
- */
-kind: ("added" | "removed" | "changed")
-/**
- * The component id.
- */
-id: string
-a?: ComponentSummary
-b?: ComponentSummary1
-/**
- * For changed: the ComponentSummary fields that differ (instances, visible, enabled, covered, checked, expanded, selected, pressed, confidence). Empty otherwise.
- */
-fields: string[]
-/**
- * Ready-made facts for gating, in this order when present: became_hidden (some visible instances on A, none on B), became_visible, became_disabled (some enabled instances on A, none on B), became_enabled, became_covered (no covered instance on A, some on B), became_uncovered, count_up, count_down (instance count). Only on changed entries.
- */
-flags: string[]
-pairedWith?: PairLink
-}
-/**
- * The component on side A. Absent for added.
- */
-export interface ComponentSummary {
-role: string
-name: string
-nameIsTemplate: boolean
-path: string
-instances: number
-visible: number
-enabled: number
-covered: number
-checked: number
-expanded: number
-selected: number
-pressed: number
-confidence: Confidence
-}
-/**
- * The component on side B. Absent for removed.
- */
-export interface ComponentSummary1 {
-role: string
-name: string
-nameIsTemplate: boolean
-path: string
-instances: number
-visible: number
-enabled: number
-covered: number
-checked: number
-expanded: number
-selected: number
-pressed: number
-confidence: Confidence
-}
-/**
- * Set on a removed or added entry that looks like the other side's entry after a change of role or name.
- */
-export interface PairLink {
-/**
- * The id of the other entry.
- */
-id: string
-/**
- * Known values: role_changed (same path and name, other role), name_changed (same path and role, other name or template flag).
- */
-reason: string
-confidence: Confidence
 }
 /**
  * What a diff compares about one component. The state fields count the instances in that state (covered counts only instances that were tested and found covered).
@@ -1117,6 +1260,79 @@ suppressed: Finding[]
 warnings: Warning[]
 }
 /**
+ * The whole manifest.
+ */
+export interface ManifestFile {
+/**
+ * Absent in older files, which are version 1.
+ */
+formatVersion?: number
+/**
+ * Named viewports, for example desktop and mobile. `hidden` lists these names.
+ */
+viewports: {
+[k: string]: Viewport
+}
+/**
+ * Components that must NOT be reported, for example content that only exists after a click.
+ */
+absent?: ManifestAbsent[]
+/**
+ * Warning codes the page is expected to raise.
+ */
+warnings?: string[]
+components: ManifestComponent[]
+}
+/**
+ * A component that must not be found.
+ */
+export interface ManifestAbsent {
+role: string
+name: string
+}
+/**
+ * One expected component.
+ */
+export interface ManifestComponent {
+/**
+ * Which hard case it covers (free text, for reports).
+ */
+case?: string
+role: string
+/**
+ * The accessible name. Absent means an empty name unless template is true.
+ */
+name?: string
+/**
+ * True when the instances have different names.
+ */
+template?: boolean
+/**
+ * How many copies exist. Default 1.
+ */
+instances?: number
+/**
+ * How sure we are that an element is interactive. Low means it only looks clickable (for example a div with a pointer cursor).
+ */
+confidence?: ("high" | "low")
+/**
+ * Name of the iframe it lives in. Default: the main page.
+ */
+frame?: string
+/**
+ * True when it is inside shadow DOM.
+ */
+shadow?: boolean
+/**
+ * Names of the viewports where it is not visible.
+ */
+hidden?: string[]
+/**
+ * How many instances are disabled. Default 0.
+ */
+disabled?: number
+}
+/**
  * components.json: every interactive component found on one page, in one browser, at one viewport.
  */
 export interface ComponentsFile {
@@ -1268,6 +1484,8 @@ inShadowDom: boolean
 
 // Contract versions and method names.
 
+export const BASELINE_VERSION = 1;
+
 export const CLIENT_PROTOCOL_VERSION = 1;
 export const CLIENT_PROTOCOL_METHODS = {
   "engine.hello": {
@@ -1352,5 +1570,7 @@ export const DRIVER_PROTOCOL_NOTIFICATIONS = {
 } as const;
 
 export const FINDINGS_VERSION = 1;
+
+export const MANIFEST_VERSION = 1;
 
 export const RUN_FOLDER_VERSION = 1;

@@ -2,6 +2,8 @@
 
 """Contract versions and method names."""
 
+BASELINE_VERSION = 1
+
 CLIENT_PROTOCOL_VERSION = 1
 CLIENT_PROTOCOL_METHODS = {
     "engine.hello": {
@@ -86,5 +88,7 @@ DRIVER_PROTOCOL_NOTIFICATIONS = {
 }
 
 FINDINGS_VERSION = 1
+
+MANIFEST_VERSION = 1
 
 RUN_FOLDER_VERSION = 1
