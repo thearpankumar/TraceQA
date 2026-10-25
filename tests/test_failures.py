@@ -361,3 +361,32 @@ def test_second_signal_kills_the_whole_driver_tree(
                 if _process_alive(pid):
                     with contextlib.suppress(OSError):
                         os.kill(pid, signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
+
+
+def test_a_single_signal_to_extract_escalates_when_the_driver_is_deaf(
+    trouble: str, tmp_path: Path, run_folder_checker
+) -> None:
+    # The driver never answers closing its session (30 s) and ignores signals. `docker stop`
+    # sends SIGKILL 10 s after SIGTERM, so the command quits by itself after 7 s plus up to 2 s
+    # to close the run folder: under 10 s, with a folder that says what happened.
+    out = tmp_path / "runs"
+    driver = f'"{sys.executable}" "{DEAF_DRIVER}"'
+    result = _interrupted_extract(
+        trouble,
+        out,
+        signals=1,
+        extra=["--driver", driver, "--settle-ms", "60000"],
+        delay=0.5,
+        exit_timeout=30,
+    )
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and 6 < result.seconds < 10, f"quit after {result.seconds} s"
+    assert "Stopping took too long" in result.stderr
+    (folder,) = out.iterdir()
+    manifest = run_folder_checker(folder)
+    assert manifest.status.value == "cancelled"
+    assert manifest.finished_at is not None
+    assert [target.status.value for target in manifest.targets] == ["cancelled"]
+    last = json.loads((folder / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.finished"
+    assert result.left == [], f"the driver outlived the command: {result.left}"

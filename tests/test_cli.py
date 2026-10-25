@@ -12,6 +12,7 @@ A pipeline decides pass or fail from the exit code alone, so each one is pinned 
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -339,3 +340,122 @@ def test_out_that_is_a_file_names_the_flag_and_the_path(tmp_path: Path) -> None:
     result = traceqa("extract", "https://example.com", "--out", str(target))
     assert result.returncode == 2
     assert f"--out {target}" in result.stderr
+
+
+SUPPORT = ROOT / "tests" / "support"
+SLOW_DRIVER = SUPPORT / "slow_driver.py"
+DEAF_DRIVER = SUPPORT / "deaf_driver.py"
+WINDOWS_SIGNALS = "SIGTERM and SIGHUP cannot be sent to a Windows console command"
+# On Windows only the console break event can be sent, which is what SIGINT stands for there.
+SIGNALS = [
+    "SIGINT",
+    pytest.param("SIGTERM", marks=pytest.mark.skipif(os.name == "nt", reason=WINDOWS_SIGNALS)),
+    pytest.param("SIGHUP", marks=pytest.mark.skipif(os.name == "nt", reason=WINDOWS_SIGNALS)),
+]
+
+
+def _interrupt_module():
+    spec = importlib.util.spec_from_file_location("interrupt", SUPPORT / "interrupt.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["interrupt"] = module  # a dataclass in the module looks itself up here
+    spec.loader.exec_module(module)
+    return module
+
+
+def _serve_lines(out: Path) -> list[str]:
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "engine.hello", "params": {"protocolVersion": 1}},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "run.start",
+            "params": {
+                "feature": "extract",
+                "url": "http://127.0.0.1:9/",
+                "targets": [{"browser": "chromium"}],
+                "viewports": [{"width": 1280, "height": 800}],
+                "outDir": str(out),
+            },
+        },
+    ]
+    return [json.dumps(request) for request in requests]
+
+
+def _serve_in_flight(tmp_path: Path, signal_name: str, **options):
+    """Starts `traceqa serve` with a run stuck in the middle of a page, input open, and signals it."""
+    marker = tmp_path / "goto.marker"
+    out = tmp_path / "runs"
+    driver = f'"{sys.executable}" "{SLOW_DRIVER}" --marker "{marker}"'
+    result = _interrupt_module().run_interrupted(
+        [str(BINARY), "serve", "--driver", driver],
+        ready={"glob": str(marker)},
+        stdin_lines=_serve_lines(out),
+        signal_name=signal_name,
+        target="process",
+        exit_timeout=30,
+        **options,
+    )
+    assert result.ready, f"the run never reached its page:\n{result.stderr}"
+    assert result.returncode != "still running", f"serve did not end:\n{result.stderr}"
+    return result, out
+
+
+@pytest.mark.parametrize("signal_name", SIGNALS)
+def test_a_signal_to_serve_cancels_the_in_flight_run(tmp_path: Path, run_folder_checker, signal_name: str) -> None:
+    # `docker stop`, a closed terminal and a supervisor restart signal the process alone, with
+    # the client's pipe still open: the run must end cancelled and say so before the exit.
+    result, out = _serve_in_flight(tmp_path, signal_name)
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 6, f"stopped after {result.seconds} s"
+    (folder,) = out.iterdir()
+    manifest = run_folder_checker(folder)
+    assert manifest.status.value == "cancelled"
+    assert manifest.finished_at is not None
+    last = json.loads((folder / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.finished" and last["data"]["status"] == "cancelled"
+    messages = [json.loads(line) for line in result.stdout.splitlines()]
+    done = [m for m in messages if m.get("method") == "run.done"]
+    assert [m["params"]["status"] for m in done] == ["cancelled"], result.stdout
+    assert "stopping" in result.stderr
+    assert result.left == [], f"{signal_name} left processes running: {result.left}"
+
+
+@pytest.mark.parametrize("signal_name", SIGNALS)
+def test_a_signal_to_an_idle_serve_exits_130_at_once(tmp_path: Path, signal_name: str) -> None:
+    ready = tmp_path / "ready.marker"
+    # Nothing is running; the server waits for its client. "ready" is a file the test makes.
+    ready.write_text("x", encoding="utf-8")
+    result = _interrupt_module().run_interrupted(
+        [str(BINARY), "serve"],
+        ready={"glob": str(ready)},
+        stdin_lines=[json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}})],
+        signal_name=signal_name,
+        target="process",
+        delay=0.5,
+        exit_timeout=30,
+    )
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 3, f"stopped after {result.seconds} s"
+    assert result.left == []
+
+
+def test_a_second_signal_to_serve_quits_at_once_and_kills_a_deaf_driver(tmp_path: Path, run_folder_checker) -> None:
+    out = tmp_path / "runs"
+    driver = f'"{sys.executable}" "{DEAF_DRIVER}"'
+    result = _interrupt_module().run_interrupted(
+        [str(BINARY), "serve", "--driver", driver],
+        ready={"glob": str(out / "*" / "run.json")},
+        stdin_lines=_serve_lines(out),
+        signals=2,
+        delay=1.0,
+        gap=0.5,
+        signal_name="SIGINT",
+        target="process",
+        exit_timeout=30,
+    )
+    assert result.ready, result.stderr
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 5, f"quit after {result.seconds} s"
+    (folder,) = out.iterdir()
+    assert run_folder_checker(folder).status.value == "cancelled"
+    assert result.left == [], f"the driver outlived the server: {result.left}"

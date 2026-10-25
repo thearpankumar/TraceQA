@@ -336,7 +336,10 @@ impl Call<'_> {
         let report = self.report;
         let runs_dir = &self.config.runs_dir;
         let mut on_event = |event: &Event| report(event.seq + 1, &public_message(&event.message, runs_dir));
-        let manifest = run.execute(&execution, &mut on_event);
+        let manifest = match self.config.interrupt {
+            Some(interrupt) => run.execute_abortable(&execution, interrupt.abort, &mut on_event),
+            None => run.execute(&execution, &mut on_event),
+        };
 
         let targets: Vec<Value> = manifest
             .targets

@@ -138,6 +138,7 @@ fn try_login(args: &LoginArgs) -> Result<String, LoginError> {
         first_message: "
 traceqa login: interrupted; closing the browser. Press Ctrl-C again to quit at once.",
         waits_for_run_folder: false,
+        exits_when_idle: false,
         on_exit: || {
             remove_pending();
             interrupt::say("traceqa login: interrupted; nothing was saved");

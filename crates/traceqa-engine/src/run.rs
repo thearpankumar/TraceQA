@@ -200,10 +200,12 @@ impl Run {
         let finished: Mutex<Vec<Option<Finished>>> = Mutex::new(jobs.iter().map(|_| None).collect());
 
         let done = AtomicBool::new(false);
+        let registration = abort.register();
         let supervised = thread::scope(|scope| {
             scope.spawn(|| {
                 let watched = Watched {
                     abort,
+                    registration: &registration,
                     done: &done,
                     sink: &sink,
                     finished: &finished,
@@ -286,30 +288,48 @@ impl Run {
         if !sink.sealed {
             save(&sink.writer, &manifest);
         }
+        registration.release();
         manifest
     }
 }
 
-/// A request to end a run at once, for the person who presses Ctrl-C a second time. It is a
-/// flag and a signal that the run folder has been closed, so it is safe to set from a signal
-/// handler thread: the handler only calls [`request`](Self::request), and whoever wants to
-/// exit waits for [`wait_closed`](Self::wait_closed) first.
+/// A request to end the runs at once, for the person who presses Ctrl-C a second time, and a
+/// count of the runs that are still going. It is a flag and a signal that the run folders have
+/// been closed, so it is safe to set from a signal handler thread: the handler only calls
+/// [`request`](Self::request), and whoever wants to exit waits for
+/// [`wait_closed`](Self::wait_closed) first. One `Abort` may serve several runs (`serve`, `mcp`):
+/// it counts as closed only when every run that started under it has written its folder.
+#[derive(Debug)]
 pub struct Abort {
     requested: AtomicBool,
-    closed: Mutex<bool>,
-    closed_signal: Condvar,
+    counts: Mutex<Counts>,
+    changed: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct Counts {
+    /// Runs whose folder is not closed yet (an abort would still write it).
+    open: usize,
+    /// Runs whose folder has been closed, by an abort or by finishing.
+    closed: usize,
+    /// Holders of an [`InFlight`] guard: work that must be seen through to its last message.
+    in_flight: usize,
 }
 
 impl Abort {
     pub const fn new() -> Self {
         Self {
             requested: AtomicBool::new(false),
-            closed: Mutex::new(false),
-            closed_signal: Condvar::new(),
+            counts: Mutex::new(Counts {
+                open: 0,
+                closed: 0,
+                in_flight: 0,
+            }),
+            changed: Condvar::new(),
         }
     }
 
-    /// Asks the run to write its final state and stop waiting for the drivers.
+    /// Asks the runs to write their final state and stop waiting for the drivers.
     pub fn request(&self) {
         self.requested.store(true, Ordering::SeqCst);
     }
@@ -318,30 +338,101 @@ impl Abort {
         self.requested.load(Ordering::SeqCst)
     }
 
-    /// Waits until the run folder has been closed after a request, for at most `timeout`.
-    /// Returns whether it was closed.
+    /// Waits until every run started under this `Abort` has closed its folder, and at least one
+    /// did, for at most `timeout`. Returns whether that happened.
     pub fn wait_closed(&self, timeout: Duration) -> bool {
+        self.wait_until(timeout, |counts| counts.open == 0 && counts.closed > 0)
+    }
+
+    /// Like [`wait_closed`](Self::wait_closed), but also true when no run ever started.
+    pub fn wait_quiet(&self, timeout: Duration) -> bool {
+        self.wait_until(timeout, |counts| counts.open == 0)
+    }
+
+    /// Marks work as in flight until the guard drops. A run thread holds it until it has sent its
+    /// last message to the client, so [`wait_idle`](Self::wait_idle) means everything is out.
+    pub fn enter(&self) -> InFlight<'_> {
+        self.counts.lock_ok().in_flight += 1;
+        InFlight { abort: self }
+    }
+
+    /// Waits until no [`InFlight`] guard is held, for at most `timeout`. Returns whether none is.
+    pub fn wait_idle(&self, timeout: Duration) -> bool {
+        self.wait_until(timeout, |counts| counts.in_flight == 0)
+    }
+
+    fn wait_until(&self, timeout: Duration, ready: impl Fn(&Counts) -> bool) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut closed = self.closed.lock_ok();
-        while !*closed {
+        let mut counts = self.counts.lock_ok();
+        while !ready(&counts) {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return false;
             }
-            closed = self.closed_signal.wait_timeout_ok(closed, left);
+            counts = self.changed.wait_timeout_ok(counts, left);
         }
         true
     }
 
-    fn close(&self) {
-        *self.closed.lock_ok() = true;
-        self.closed_signal.notify_all();
+    /// A run under this `Abort` starts; its folder counts as open until the registration is released.
+    fn register(&self) -> Registration<'_> {
+        self.counts.lock_ok().open += 1;
+        Registration {
+            abort: self,
+            released: AtomicBool::new(false),
+        }
     }
 }
 
 impl Default for Abort {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// What a long-lived server (`serve`, `mcp`) is given by the process's signal handler: a flag
+/// the first signal sets (cancel every run, accept no new one) and the [`Abort`] the second one
+/// requests. Both live as long as the process.
+#[derive(Clone, Copy, Debug)]
+pub struct Interrupt {
+    pub cancel: &'static AtomicBool,
+    pub abort: &'static Abort,
+}
+
+/// Work in flight under an [`Abort`]; see [`Abort::enter`].
+pub struct InFlight<'a> {
+    abort: &'a Abort,
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.abort.counts.lock_ok().in_flight -= 1;
+        self.abort.changed.notify_all();
+    }
+}
+
+/// One run's claim on an [`Abort`]: released when its folder is closed, by the abort watcher or
+/// by the run finishing, whichever comes first.
+struct Registration<'a> {
+    abort: &'a Abort,
+    released: AtomicBool,
+}
+
+impl Registration<'_> {
+    fn release(&self) {
+        if !self.released.swap(true, Ordering::SeqCst) {
+            let mut counts = self.abort.counts.lock_ok();
+            counts.open -= 1;
+            counts.closed += 1;
+            drop(counts);
+            self.abort.changed.notify_all();
+        }
+    }
+}
+
+impl Drop for Registration<'_> {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
@@ -354,6 +445,7 @@ const ABORT_LOCK_WAIT: Duration = Duration::from_secs(1);
 /// What the abort watcher needs to see of the run.
 struct Watched<'a, 'b> {
     abort: &'a Abort,
+    registration: &'a Registration<'a>,
     done: &'a AtomicBool,
     sink: &'a Mutex<Sink<'b>>,
     finished: &'a Mutex<Vec<Option<Finished>>>,
@@ -429,7 +521,7 @@ fn watch_for_abort(watched: &Watched) {
             }
         }
     }
-    watched.abort.close();
+    watched.registration.release();
 }
 
 /// What a failed run says when it panicked. The text is bounded, and is the only place the
@@ -1236,15 +1328,52 @@ mod tests {
     fn abort_is_closed_only_once_the_run_folder_is() {
         let abort = Abort::new();
         assert!(!abort.is_requested());
+        let run = abort.register();
         abort.request();
         assert!(abort.is_requested());
         assert!(!abort.wait_closed(Duration::from_millis(30)));
         thread::scope(|scope| {
             scope.spawn(|| {
                 thread::sleep(Duration::from_millis(30));
-                abort.close();
+                run.release();
             });
             assert!(abort.wait_closed(Duration::from_secs(5)));
+        });
+    }
+
+    #[test]
+    fn abort_with_two_runs_is_closed_only_when_both_are() {
+        let abort = Abort::new();
+        assert!(abort.wait_quiet(Duration::ZERO), "no run, nothing to wait for");
+        assert!(!abort.wait_closed(Duration::from_millis(10)), "no run closed yet");
+        let first = abort.register();
+        let second = abort.register();
+        first.release();
+        assert!(
+            !abort.wait_closed(Duration::from_millis(30)),
+            "the second is still open"
+        );
+        second.release();
+        assert!(abort.wait_closed(Duration::from_millis(30)));
+        first.release();
+        assert!(abort.wait_closed(Duration::ZERO), "a second release changes nothing");
+    }
+
+    #[test]
+    fn abort_is_idle_when_every_in_flight_guard_has_dropped() {
+        let abort = Abort::new();
+        assert!(abort.wait_idle(Duration::ZERO));
+        let one = abort.enter();
+        let two = abort.enter();
+        assert!(!abort.wait_idle(Duration::from_millis(20)));
+        drop(one);
+        assert!(!abort.wait_idle(Duration::from_millis(20)));
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(30));
+                drop(two);
+            });
+            assert!(abort.wait_idle(Duration::from_secs(5)));
         });
     }
 }

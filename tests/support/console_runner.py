@@ -6,13 +6,16 @@ share a console with the command. A test process often has none (CI runners, IDE
 console of its own, starts the command in a new process group, and sends CTRL_BREAK_EVENT to
 that group only. It writes its result as JSON. On Unix the same `run` is called in-process and
 sends SIGINT to the command's session, which is what a terminal does to a foreground command.
-The spec can ask for `signal` (SIGINT, SIGTERM or SIGHUP) and `target` ("group" or "process").
+The spec can ask for `signal` (SIGINT, SIGTERM or SIGHUP) and `target` ("group" or "process"),
+and for `stdin_lines`: lines written to the command's input, which then stays open (a server
+that is not at the end of its input, as when a client is connected).
 
     python console_runner.py SPEC.json RESULT.json
 """
 
 from __future__ import annotations
 
+import contextlib
 import glob
 import json
 import os
@@ -226,9 +229,10 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     else:
         kwargs["start_new_session"] = True
     env = {**os.environ, **spec.get("env", {})}
+    lines = spec.get("stdin_lines")
     process = subprocess.Popen(
         spec["command"],
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE if lines else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -238,6 +242,10 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
         **kwargs,
     )
     root_created = _creation_time(process.pid) if WINDOWS else None  # before the pid can be reused
+    if lines:
+        for line in lines:
+            process.stdin.write(line + "\n")
+        process.stdin.flush()
     out: list[str] = []
     err: list[str] = []
     ready = spec["ready"]
@@ -281,6 +289,9 @@ def run(spec: dict[str, Any]) -> dict[str, Any]:
     if process.poll() is None:
         process.kill()
         process.wait()
+    if lines:
+        with contextlib.suppress(OSError):  # the command is gone, and so is the pipe
+            process.stdin.close()
     for thread in threads:
         thread.join(timeout=10)
 

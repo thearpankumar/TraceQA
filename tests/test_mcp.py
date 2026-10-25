@@ -7,10 +7,12 @@ connect, find the tools, run an extraction in a real browser and look at the res
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -256,3 +258,69 @@ def test_raw_lines_that_are_not_requests_get_the_right_json_rpc_error(tmp_path: 
     codes = [(reply["id"], reply["error"]["code"]) for reply in replies if "error" in reply]
     assert codes == [(5, -32600), (None, -32600), (None, -32600), ("a", -32600), (None, -32700)]
     assert any(reply.get("id") == 9 and "result" in reply for reply in replies)
+
+
+SUPPORT = ROOT / "tests" / "support"
+SLOW_DRIVER = SUPPORT / "slow_driver.py"
+WINDOWS_SIGNALS = "SIGTERM and SIGHUP cannot be sent to a Windows console command"
+# On Windows only the console break event can be sent, which is what SIGINT stands for there.
+SIGNALS = [
+    "SIGINT",
+    pytest.param("SIGTERM", marks=pytest.mark.skipif(os.name == "nt", reason=WINDOWS_SIGNALS)),
+    pytest.param("SIGHUP", marks=pytest.mark.skipif(os.name == "nt", reason=WINDOWS_SIGNALS)),
+]
+
+
+def _interrupt_module():
+    spec = importlib.util.spec_from_file_location("interrupt", SUPPORT / "interrupt.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["interrupt"] = module  # a dataclass in the module looks itself up here
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("signal_name", SIGNALS)
+def test_a_signal_to_mcp_cancels_the_in_flight_extract(tmp_path: Path, run_folder_checker, signal_name: str) -> None:
+    # The host's pipe stays open, as it does while a host is connected: the signal alone must end
+    # the call, close its run folder as cancelled, and end the server with 130.
+    marker = tmp_path / "goto.marker"
+    out = tmp_path / "runs"
+    driver = f'"{sys.executable}" "{SLOW_DRIVER}" --marker "{marker}"'
+    lines = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "t", "version": "0"},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "extract", "arguments": {"url": "http://127.0.0.1:9/"}},
+        },
+    ]
+    result = _interrupt_module().run_interrupted(
+        [str(BINARY), "mcp", "--out", str(out), "--driver", driver],
+        ready={"glob": str(marker)},
+        stdin_lines=[json.dumps(line) for line in lines],
+        signal_name=signal_name,
+        target="process",
+        exit_timeout=30,
+    )
+    assert result.ready, f"the extraction never reached its page:\n{result.stderr}"
+    assert result.returncode == 130, result.stderr
+    assert result.seconds is not None and result.seconds < 6, f"stopped after {result.seconds} s"
+    (folder,) = out.iterdir()
+    manifest = run_folder_checker(folder)
+    assert manifest.status.value == "cancelled"
+    last = json.loads((folder / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["type"] == "run.finished" and last["data"]["status"] == "cancelled"
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    assert [reply["id"] for reply in replies if "id" in reply] == [1], "a cancelled call is not answered"
+    assert result.left == [], f"{signal_name} left processes running: {result.left}"

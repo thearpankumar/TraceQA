@@ -135,7 +135,7 @@ second target's folder ends in `-2` (`chromium-1280x800-2`).
 | `0` | Every target completed. |
 | `1` | At least one target failed. |
 | `2` | The request was invalid, for example a malformed URL or viewport. Nothing was run. |
-| `130` | The run was stopped with Ctrl-C, or on Unix with SIGTERM or SIGHUP. |
+| `130` | The run was stopped with Ctrl-C, or on Unix with SIGTERM or SIGHUP. Also the exit code of `traceqa serve` and `traceqa mcp` after such a signal. |
 
 Ctrl-C stops the run within about a second, even while a page is loading or a
 target waits for a browser that only one target may use at a time. It closes the
@@ -162,6 +162,13 @@ a second one quits at once. The exit code is 130 for all three, because the
 program cannot tell them apart. On Windows, closing the console window ends the
 process as soon as the handler returns, so that case cannot be cancelled
 cleanly: use Ctrl-C or Ctrl-Break.
+
+A first signal whose cleanup gets stuck (a driver that never answers closing its
+session) does not wait for ever: after 7 seconds the command quits as if a
+second signal had come, closing the run folder and killing the drivers, and
+exits 130. With the 2 seconds that closing may take, that is under 9 seconds,
+because `docker stop` sends SIGTERM and then SIGKILL after 10 seconds by
+default, and a SIGKILL would leave the run folder at `running`.
 
 ### Examples
 
@@ -206,6 +213,18 @@ folder is finalised with status `cancelled`, and the engine exits. No browser
 is left running for a client that is gone. The SDKs send `engine.shutdown` in
 `close()`.
 
+Signals: `serve` stops the way `extract` does. Ctrl-C (Ctrl-Break on Windows),
+SIGTERM or SIGHUP cancels every run through the same path as `run.cancel`, stops
+accepting `run.start` (refused with kind `busy`, "shutting down"), lets each run
+write its last events and `run.done`, and exits **130** once none is going; an
+idle engine exits 130 at once. A second signal quits at once: the run folders
+are closed as `cancelled`, the drivers and everything they started are killed,
+and the engine exits 130 within about two seconds. A first signal whose runs
+cannot stop does the same by itself after 7 seconds, so a `docker stop` (SIGKILL
+after 10 seconds) still finds closed folders. Standard output carries protocol
+lines only; the messages go to standard error. A client that sees the engine
+exit 130 without having sent `engine.shutdown` knows it was signalled.
+
 ## `traceqa mcp`
 
 ```
@@ -227,6 +246,14 @@ claude mcp add traceqa -- traceqa mcp
 
 Other AI tools take the same command in their MCP settings: the program
 `traceqa` with the argument `mcp`.
+
+Signals: Ctrl-C (Ctrl-Break on Windows), SIGTERM or SIGHUP, as sent by `docker
+stop`, a closed terminal or a supervisor restart, cancels every running call
+(a cancelled call is not answered, as with `notifications/cancelled`), refuses
+new `extract` calls ("shutting down"), lets each run folder end `cancelled`
+with `run.finished` written, and exits **130**. A second signal, or 7 seconds
+without the calls ending, closes the folders at once, kills the drivers and
+exits 130 as well. See the signal paragraphs under [Exit codes](#exit-codes).
 
 | Tool | What it does |
 |---|---|
