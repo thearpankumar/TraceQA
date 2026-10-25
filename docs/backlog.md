@@ -222,7 +222,7 @@ is useful for two things only, and must stay outside the engine core.
   `required`) produce a plausible value; (b) the optional judge (ORA-9).
 - Without a model the explorer still works: it uses a deterministic generator keyed by (seed, component id)
   (`user@example.test`, `12345`, a fixed sentence). Output with and without a model has the same schema.
-- Model calls are made behind a trait in a separate crate (`traceqa-models`, planned in the project plan), not in
+- Model calls are made behind a trait in a separate crate (`traceqa-models`, a new crate), not in
   `traceqa-engine`. The engine core depends on the trait only.
 - Every model call and answer is written to `events.jsonl`, so a replay uses the recorded values and makes no
   call.
