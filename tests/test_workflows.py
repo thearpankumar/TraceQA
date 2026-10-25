@@ -246,6 +246,15 @@ def test_dtolnay_toolchain_steps_name_their_toolchain() -> None:
     assert seen >= 3
 
 
+def test_ci_builds_with_the_release_rust() -> None:
+    """Lint and Test use the toolchain the release builds with, so CI checks what ships (the MSRV job is apart)."""
+    release = load("release.yml")["env"]["RUST_TOOLCHAIN"]
+    ci = load("ci.yml")
+    for job in ("lint", "test"):
+        toolchains = [s for s in ci["jobs"][job]["steps"] if s.get("uses", "").startswith("dtolnay/rust-toolchain@")]
+        assert [s["with"]["toolchain"] for s in toolchains] == [release], job
+
+
 def declared_rust_version() -> str:
     """`rust-version` under [workspace.package] in the root Cargo.toml."""
     text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
