@@ -5,7 +5,7 @@
   "description": "Runs the page objects that `traceqa codegen --lang ts` writes against the demo shop. tests/test_codegen.py drives it.",
   "type": "module",
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24"
   },
   "scripts": {
     "test": "playwright test"

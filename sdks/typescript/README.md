@@ -1,7 +1,7 @@
 # traceqa (TypeScript)
 
 TypeScript client for TraceQA. It starts the `traceqa` engine and talks to it;
-all logic lives in the engine. Node 22 or later, no runtime dependencies.
+all logic lives in the engine. Node 24 or later, no runtime dependencies.
 
 ```ts
 import { extract } from "traceqa";
@@ -69,8 +69,8 @@ it as above. From CommonJS, use a dynamic import:
 const { extract } = await import("traceqa");
 ```
 
-On Node 22.12 or later, `require("traceqa")` also works, because Node can load
-ES modules with `require`.
+`require("traceqa")` also works, because Node 24 can load ES modules with
+`require`.
 
 ## Development
 

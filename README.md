@@ -85,7 +85,7 @@ change is tested on all three in continuous integration.
 | [Rust](https://rustup.rs), stable | Building the `traceqa` binary |
 | [uv](https://docs.astral.sh/uv/) | Installing the browser drivers |
 | [Git](https://git-scm.com) | Getting the source |
-| [Node.js](https://nodejs.org) 18 or later | Only for the TypeScript SDK |
+| [Node.js](https://nodejs.org) 24 or later | Only for the TypeScript SDK |
 
 Install uv if it is not already present:
 
@@ -455,7 +455,7 @@ uv run bench/run.py
 ```
 
 These are the Rust crates, then the collector cases, drivers, SDKs, MCP server and
-installer, then the TypeScript SDK (it needs Node 22 or later), then the end-to-end bench
+installer, then the TypeScript SDK (it needs Node 24 or later), then the end-to-end bench
 on the demo site. Every command runs unchanged from the repository root in Bash,
 PowerShell and cmd on Windows, and in a POSIX shell on macOS and Linux.
 
