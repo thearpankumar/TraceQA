@@ -1,0 +1,477 @@
+{
+  "browser": {
+    "name": "chromium",
+    "version": "156.0.8078.4"
+  },
+  "fingerprintVersion": 2,
+  "pages": {
+    "pattern-accordion": {
+      "all": [
+        "c_062c68428eda",
+        "c_0ca4338a9476",
+        "c_2e5c980f1a11",
+        "c_2f846c173787",
+        "c_4620d61f0f3b",
+        "c_7c6be2fb4b67",
+        "c_bca34f6f6837"
+      ],
+      "url": "http://127.0.0.1:4180/accordion.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_0ca4338a9476",
+        "c_2f846c173787",
+        "c_4620d61f0f3b",
+        "c_7c6be2fb4b67",
+        "c_bca34f6f6837"
+      ]
+    },
+    "pattern-carousel": {
+      "all": [
+        "c_356030fa5987",
+        "c_3db7d91d82be",
+        "c_4c3bdf564fe7",
+        "c_74766e2785a2",
+        "c_e5053119b13a",
+        "c_e999f831ff11"
+      ],
+      "url": "http://127.0.0.1:4180/carousel.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_356030fa5987",
+        "c_3db7d91d82be",
+        "c_4c3bdf564fe7",
+        "c_74766e2785a2",
+        "c_e5053119b13a",
+        "c_e999f831ff11"
+      ]
+    },
+    "pattern-cookie-banner": {
+      "all": [
+        "c_42389a93e942",
+        "c_7186697f9ce3",
+        "c_7d17c3ce1f1b",
+        "c_9b5936c1aafd",
+        "c_a6485fc69723"
+      ],
+      "url": "http://127.0.0.1:4180/cookie-banner.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_42389a93e942",
+        "c_7186697f9ce3",
+        "c_7d17c3ce1f1b",
+        "c_9b5936c1aafd",
+        "c_a6485fc69723"
+      ]
+    },
+    "pattern-data-table": {
+      "all": [
+        "c_5ec20d278dab",
+        "c_6331bf875376",
+        "c_963e14ab07df",
+        "c_acc965e8090d",
+        "c_b4806feade0c",
+        "c_cc040d2ed48f",
+        "c_ee4d5a86a2bb",
+        "c_f3c072fb16a9"
+      ],
+      "url": "http://127.0.0.1:4180/data-table.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_5ec20d278dab",
+        "c_6331bf875376",
+        "c_963e14ab07df",
+        "c_acc965e8090d",
+        "c_b4806feade0c",
+        "c_cc040d2ed48f",
+        "c_ee4d5a86a2bb",
+        "c_f3c072fb16a9"
+      ]
+    },
+    "pattern-login-form": {
+      "all": [
+        "c_0f6dd9436922",
+        "c_33628b7db542",
+        "c_39d1a19d299a",
+        "c_3b43fefd74d5",
+        "c_550e6009fe09",
+        "c_715f558cc691",
+        "c_c33689b7e549",
+        "c_cb84861d3a36",
+        "c_d38794930230",
+        "c_e0138d1b8c86"
+      ],
+      "url": "http://127.0.0.1:4180/login-form.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_0f6dd9436922",
+        "c_33628b7db542",
+        "c_39d1a19d299a",
+        "c_3b43fefd74d5",
+        "c_550e6009fe09",
+        "c_715f558cc691",
+        "c_c33689b7e549",
+        "c_cb84861d3a36",
+        "c_d38794930230",
+        "c_e0138d1b8c86"
+      ]
+    },
+    "pattern-mega-menu": {
+      "all": [
+        "c_07114ca9268a",
+        "c_0deb09f2def0",
+        "c_1897ba8c0e99",
+        "c_260abc8ddeb7",
+        "c_678a765cb913",
+        "c_7febe366ab70",
+        "c_99886bede048",
+        "c_a05edbd71909",
+        "c_adffecf2a184",
+        "c_e192384ea5ee"
+      ],
+      "url": "http://127.0.0.1:4180/mega-menu.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_7febe366ab70",
+        "c_99886bede048",
+        "c_a05edbd71909",
+        "c_adffecf2a184",
+        "c_e192384ea5ee"
+      ]
+    },
+    "pattern-modal": {
+      "all": [
+        "c_740112b59388",
+        "c_8ad7bc8630fe",
+        "c_8fbe33416402",
+        "c_c512de31bee9",
+        "c_d9d40d09c510",
+        "c_e218677c7f7c"
+      ],
+      "url": "http://127.0.0.1:4180/modal.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_740112b59388",
+        "c_8ad7bc8630fe",
+        "c_8fbe33416402",
+        "c_c512de31bee9",
+        "c_d9d40d09c510",
+        "c_e218677c7f7c"
+      ]
+    },
+    "pattern-product-grid": {
+      "all": [
+        "c_15c3bfe7434e",
+        "c_1bae212807d2",
+        "c_1c6379b0c92c",
+        "c_55936171092b",
+        "c_5e19c7835bfe",
+        "c_69980bc5ad7a",
+        "c_b7d0a044113c",
+        "c_e02126a46de7"
+      ],
+      "url": "http://127.0.0.1:4180/product-grid.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_15c3bfe7434e",
+        "c_1bae212807d2",
+        "c_1c6379b0c92c",
+        "c_55936171092b",
+        "c_5e19c7835bfe",
+        "c_69980bc5ad7a",
+        "c_b7d0a044113c",
+        "c_e02126a46de7"
+      ]
+    },
+    "pattern-tabs": {
+      "all": [
+        "c_23d1371f131c",
+        "c_66c996f6530f",
+        "c_950b122e44c2",
+        "c_b8a0f57ef159",
+        "c_c59b513c09b8",
+        "c_c8af4fd42745"
+      ],
+      "url": "http://127.0.0.1:4180/tabs.html",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_23d1371f131c",
+        "c_66c996f6530f",
+        "c_c59b513c09b8",
+        "c_c8af4fd42745"
+      ]
+    },
+    "shop-desktop": {
+      "all": [
+        "c_015589123eaf",
+        "c_044f5febdd6e",
+        "c_06e7f1592e0c",
+        "c_0f4b2a722613",
+        "c_1c6379b0c92c",
+        "c_1d02b9badd7f",
+        "c_1d776447f7e3",
+        "c_22db864e0a14",
+        "c_26503b4e0472",
+        "c_2c123b89375c",
+        "c_30d47485819f",
+        "c_38a4abbc53b5",
+        "c_5c4f0ff66a79",
+        "c_5e19c7835bfe",
+        "c_60a1fb5f8a59",
+        "c_663c9dccbb31",
+        "c_74ffbbcb593a",
+        "c_7a1136e6d1f7",
+        "c_7e3842decc6b",
+        "c_89a9dfe5727b",
+        "c_948ccf95e547",
+        "c_97a7e9e06ef5",
+        "c_9d67ff4c4556",
+        "c_a5c85999c99e",
+        "c_aa4f4bb1284f",
+        "c_b440c13a06a7",
+        "c_b5129c6a7e99",
+        "c_b54c3bf7e8ca",
+        "c_c37156de2774",
+        "c_c6dd003e68d8",
+        "c_cf32bca1f4ff",
+        "c_dac70a8cd81e",
+        "c_df985bb1a5b2",
+        "c_eca8b583b606",
+        "c_ecf0cab6efc4",
+        "c_fa675de52c52",
+        "c_fa70c38310a9"
+      ],
+      "url": "http://127.0.0.1:4173/",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_015589123eaf",
+        "c_044f5febdd6e",
+        "c_06e7f1592e0c",
+        "c_0f4b2a722613",
+        "c_1c6379b0c92c",
+        "c_1d02b9badd7f",
+        "c_1d776447f7e3",
+        "c_22db864e0a14",
+        "c_26503b4e0472",
+        "c_2c123b89375c",
+        "c_30d47485819f",
+        "c_38a4abbc53b5",
+        "c_5e19c7835bfe",
+        "c_60a1fb5f8a59",
+        "c_663c9dccbb31",
+        "c_74ffbbcb593a",
+        "c_7a1136e6d1f7",
+        "c_7e3842decc6b",
+        "c_89a9dfe5727b",
+        "c_948ccf95e547",
+        "c_97a7e9e06ef5",
+        "c_9d67ff4c4556",
+        "c_a5c85999c99e",
+        "c_aa4f4bb1284f",
+        "c_b440c13a06a7",
+        "c_b5129c6a7e99",
+        "c_b54c3bf7e8ca",
+        "c_c37156de2774",
+        "c_c6dd003e68d8",
+        "c_cf32bca1f4ff",
+        "c_dac70a8cd81e",
+        "c_df985bb1a5b2",
+        "c_ecf0cab6efc4",
+        "c_fa675de52c52",
+        "c_fa70c38310a9"
+      ]
+    },
+    "shop-desktop-again": {
+      "all": [
+        "c_015589123eaf",
+        "c_044f5febdd6e",
+        "c_06e7f1592e0c",
+        "c_0f4b2a722613",
+        "c_1c6379b0c92c",
+        "c_1d02b9badd7f",
+        "c_1d776447f7e3",
+        "c_22db864e0a14",
+        "c_26503b4e0472",
+        "c_2c123b89375c",
+        "c_30d47485819f",
+        "c_38a4abbc53b5",
+        "c_5c4f0ff66a79",
+        "c_5e19c7835bfe",
+        "c_60a1fb5f8a59",
+        "c_663c9dccbb31",
+        "c_74ffbbcb593a",
+        "c_7a1136e6d1f7",
+        "c_7e3842decc6b",
+        "c_89a9dfe5727b",
+        "c_948ccf95e547",
+        "c_97a7e9e06ef5",
+        "c_9d67ff4c4556",
+        "c_a5c85999c99e",
+        "c_aa4f4bb1284f",
+        "c_b440c13a06a7",
+        "c_b5129c6a7e99",
+        "c_b54c3bf7e8ca",
+        "c_c37156de2774",
+        "c_c6dd003e68d8",
+        "c_cf32bca1f4ff",
+        "c_dac70a8cd81e",
+        "c_df985bb1a5b2",
+        "c_eca8b583b606",
+        "c_ecf0cab6efc4",
+        "c_fa675de52c52",
+        "c_fa70c38310a9"
+      ],
+      "url": "http://127.0.0.1:4173/",
+      "viewport": [
+        1280,
+        800
+      ],
+      "visible": [
+        "c_015589123eaf",
+        "c_044f5febdd6e",
+        "c_06e7f1592e0c",
+        "c_0f4b2a722613",
+        "c_1c6379b0c92c",
+        "c_1d02b9badd7f",
+        "c_1d776447f7e3",
+        "c_22db864e0a14",
+        "c_26503b4e0472",
+        "c_2c123b89375c",
+        "c_30d47485819f",
+        "c_38a4abbc53b5",
+        "c_5e19c7835bfe",
+        "c_60a1fb5f8a59",
+        "c_663c9dccbb31",
+        "c_74ffbbcb593a",
+        "c_7a1136e6d1f7",
+        "c_7e3842decc6b",
+        "c_89a9dfe5727b",
+        "c_948ccf95e547",
+        "c_97a7e9e06ef5",
+        "c_9d67ff4c4556",
+        "c_a5c85999c99e",
+        "c_aa4f4bb1284f",
+        "c_b440c13a06a7",
+        "c_b5129c6a7e99",
+        "c_b54c3bf7e8ca",
+        "c_c37156de2774",
+        "c_c6dd003e68d8",
+        "c_cf32bca1f4ff",
+        "c_dac70a8cd81e",
+        "c_df985bb1a5b2",
+        "c_ecf0cab6efc4",
+        "c_fa675de52c52",
+        "c_fa70c38310a9"
+      ]
+    },
+    "shop-mobile": {
+      "all": [
+        "c_015589123eaf",
+        "c_044f5febdd6e",
+        "c_06e7f1592e0c",
+        "c_0f4b2a722613",
+        "c_1c6379b0c92c",
+        "c_1d02b9badd7f",
+        "c_1d776447f7e3",
+        "c_22db864e0a14",
+        "c_26503b4e0472",
+        "c_2c123b89375c",
+        "c_30d47485819f",
+        "c_38a4abbc53b5",
+        "c_5c4f0ff66a79",
+        "c_5e19c7835bfe",
+        "c_60a1fb5f8a59",
+        "c_663c9dccbb31",
+        "c_74ffbbcb593a",
+        "c_7a1136e6d1f7",
+        "c_7e3842decc6b",
+        "c_89a9dfe5727b",
+        "c_948ccf95e547",
+        "c_97a7e9e06ef5",
+        "c_9d67ff4c4556",
+        "c_a5c85999c99e",
+        "c_aa4f4bb1284f",
+        "c_b440c13a06a7",
+        "c_b5129c6a7e99",
+        "c_b54c3bf7e8ca",
+        "c_c37156de2774",
+        "c_c6dd003e68d8",
+        "c_cf32bca1f4ff",
+        "c_dac70a8cd81e",
+        "c_df985bb1a5b2",
+        "c_eca8b583b606",
+        "c_ecf0cab6efc4",
+        "c_fa675de52c52",
+        "c_fa70c38310a9"
+      ],
+      "url": "http://127.0.0.1:4173/",
+      "viewport": [
+        390,
+        844
+      ],
+      "visible": [
+        "c_015589123eaf",
+        "c_044f5febdd6e",
+        "c_06e7f1592e0c",
+        "c_0f4b2a722613",
+        "c_1c6379b0c92c",
+        "c_1d02b9badd7f",
+        "c_1d776447f7e3",
+        "c_22db864e0a14",
+        "c_26503b4e0472",
+        "c_2c123b89375c",
+        "c_30d47485819f",
+        "c_38a4abbc53b5",
+        "c_5c4f0ff66a79",
+        "c_5e19c7835bfe",
+        "c_60a1fb5f8a59",
+        "c_663c9dccbb31",
+        "c_74ffbbcb593a",
+        "c_7e3842decc6b",
+        "c_89a9dfe5727b",
+        "c_948ccf95e547",
+        "c_97a7e9e06ef5",
+        "c_9d67ff4c4556",
+        "c_a5c85999c99e",
+        "c_b440c13a06a7",
+        "c_b5129c6a7e99",
+        "c_c37156de2774",
+        "c_cf32bca1f4ff",
+        "c_dac70a8cd81e",
+        "c_df985bb1a5b2",
+        "c_ecf0cab6efc4",
+        "c_fa675de52c52",
+        "c_fa70c38310a9"
+      ]
+    }
+  }
+}

@@ -61,6 +61,23 @@ that tree edit distance is too slow, which is why it supports configurable compa
 
 **Size.** M
 
+**Status (branch `backlog/exp-1-screen-identity`).** Built as a module with no command and no output file:
+`crates/traceqa-engine/src/state.rs` (`Screens::observe`, `clean_url`, `chrome_ids`, `Similarity`). A look is taken for the screen it
+is most alike (the earliest of equals) among those of the same cleaned address and dialog, or becomes the next `s<n>`; the
+share is kept in thousandths and compared with whole numbers; a screen keeps the ids of its first look; frames are kept and not
+compared; an address that cannot be read, is not http or https, or is over 4096 characters, and a look with no component, are
+errors. Tests: 29 unit tests, and 7 on ids the real engine found (`tests/data/screen_ids.json`, made by
+`scripts/capture_screen_ids.py` from the Buggy Shop and `testbed/sites/patterns`; the test says when the fingerprint version
+has moved on), mutation testing on `state.rs` with nothing missed. Measured on the real ids: the shop read twice is one screen
+(35 of 35); the shop with and without its two hidden controls is one (35 of 37, 94.6%); the shop on a phone is another screen at
+90% and the same at 85% (31 of 36, 86.1%); no two pattern pages share an id.
+Not done: the shop has no cookie banner, so "banner open or closed" is shown with its two hidden controls instead, and "the
+product list and the cart are two screens" needs the walk to reach both (EXP-2, EXP-10); `--state-similarity` and `graph.json` do
+not exist yet. Known limits, from the module notes: small pages (one change is a big share), addresses with an id in them
+(`/product/123`), and lists that grow after the look. Tried on the real pages of two sites (read-only extractions, 9 and 8 looks): the home page read twice was one screen and every other page its own,
+with overlaps between different pages of 10% to 44%, so the 90% line was never close. A same-address case with a large shared header is covered by
+unit tests only; no real site gave one.
+
 ### EXP-2: Walk algorithm and budgets
 
 **Why.** A walker without limits never finishes on a large site, and one that picks actions in random order
@@ -94,6 +111,7 @@ cannot be debugged.
 - Candidate order: a test that shuffles the extraction order of a fixture page gives the same action sequence.
 
 **Carried forward.** From EXP-5 (safety), which built the rules but nothing that calls them: the `explore` command must (1) refuse to start on an address that `policy::is_local_origin` says is not local, with exit code 2 and no browser opened, unless `--i-understand-this-interacts` is given; (2) take `--allow-writes` (which requires `--allow-origin`), `--allow-origin` and `--deny-name`; (3) open its session with `policy::Rules::driver_policy()` and close the session when `policy::enforced` says the driver did not say the same policy back; (4) ask `policy::Rules::decide` before every action and never act on a `Skip`. Nothing else calls `page.act` yet.
+From EXP-1 (screens), which built the rule and nothing that supplies its inputs: the walk must (5) take `--state-similarity` (`state::Similarity::new`, default `DEFAULT_SIMILARITY`); (6) give `state::Screens` the page-wide ids (`state::chrome_ids`, from the ids shown on at least 80% of the pages read). `traceqa map` lists only the ids on every page today, so it needs that share added first, or the walk reads a few pages itself; (7) build a `Look` from each extraction (the ids of the components with a visible instance, the open dialog's id, the frame ids) and treat an `Err` from `observe` as a failed read, not as a screen; (8) measure the known limits on real sites (address ids, small pages, growing lists) and tune the share with those numbers.
 
 **Size.** L
 
@@ -163,6 +181,12 @@ the schema (all new fields optional, five examples), the five actions, dialogs, 
 reports, `domChanged` (shadow roots included) and `settle`, `actionKinds` and `eventKinds` in `session.open`, and the tests in
 `web-drivers/playwright-py/tests/test_act.py` against `testbed/sites/act` in Chromium, Firefox and WebKit. The WebDriver driver
 lists no actions and no events and still answers `page.act` with `unsupported`; clicking in Safari is not built (optional, and only needed if the explorer must run in Safari).
+Tried read-only on three real sites (a Next.js portfolio with a 3D hero, a company site, a learning app; 40, 26 and 28 controls). It found three
+bugs, all fixed with tests: scroll-linked effects were credited to the click, a stopped new tab was reported as an error page, and a blocked
+same-tab link reported a change. It also showed `blocked_by_policy` doing its job: clicking "Start Learning" tries to `POST /api/auth/guest` on the live
+backend, which read-only mode stopped. Limits seen: a click is also a first gesture, so a page that starts music or shows a banner on the first click
+reports it on whatever action comes first; a control in a scroll-driven panel that is hidden on a fresh page times out, though extraction (which
+leaves the panel on its last state) listed it.
 Not done: the engine never calls `page.act` (no safety policy yet, EXP-5); `driver.log` is not used for actions; transcripts were
 not re-recorded because the client protocol did not change; `npm run gen` no longer exists (the TypeScript SDK was removed).
 Rust readers cannot tell an absent list from an empty one (the generated types use an empty `Vec`), so a reader relies on

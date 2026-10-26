@@ -30,6 +30,9 @@ mod locator;
 pub mod policy;
 pub mod run;
 pub mod serve;
+pub mod state;
+#[cfg(test)]
+mod state_real_tests;
 pub mod url_policy;
 mod url_safety;
 mod util;

@@ -4,6 +4,8 @@ examine_globs = [
   "crates/traceqa-engine/src/group.rs",
   # What the explorer may touch: a wrong rule here is a click on something it should have left alone.
   "crates/traceqa-engine/src/policy.rs",
+  # When two looks at a page are one screen: a wrong rule here makes fake screens or merges real ones.
+  "crates/traceqa-engine/src/state.rs",
 ]
 # The baseline is the whole `traceqa-engine --lib` test run, and a loaded machine can be several
 # times slower than an idle one. cargo-mutants' default is 5 times the baseline with a floor of
