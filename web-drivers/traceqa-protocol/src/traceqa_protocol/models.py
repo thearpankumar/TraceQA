@@ -957,7 +957,7 @@ class PageActResult(BaseModel):
     navigated: ActNavigation | None = None
     popups: list[str] | None = Field(
         default=None,
-        description="Addresses of new pages the action opened. The driver closes them.",
+        description="Addresses of new pages the action opened. The driver closes them. A page the policy stopped is given as the address it was going to, not that of the error page the browser shows instead, and a page with no address (one that became a download) as `about:blank`.",
     )
     dialogs: list[ActDialog] | None = None
     downloads: list[ActDownload] | None = None
@@ -970,7 +970,7 @@ class PageActResult(BaseModel):
     dom_changed: bool | None = Field(
         default=None,
         validation_alias="domChanged", serialization_alias="domChanged",
-        description="A mutation observer saw a change in some frame, or the page navigated.",
+        description="The page changed because of the action: it navigated, or a mutation observer saw, in some frame, more changes of some kind than three times what the page changes of that kind by itself at rest, over the time the action took. The kinds are elements added or removed, text, attributes other than `style`, and `style` changes that show or hide something (`display` or `visibility`). A style change that only moves or fades an element is not counted, because pages restyle themselves that way in answer to any mouse move or scroll. A page at rest makes no changes, so for it any change counts. A change that is no bigger than the page's own noise of the same kind (a label changing on a page with a ticking clock) is not seen.",
     )
     settle: ActSettle | None = None
     not_observed: list[str] | None = Field(

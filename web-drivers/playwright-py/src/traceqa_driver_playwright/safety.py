@@ -68,6 +68,9 @@ class Guard:
         self._on_block = on_block
         # WebSockets the page opened, which have not been closed yet. See `drain_web_sockets`.
         self._web_sockets: list[WebSocketRoute] = []
+        # Addresses of top-level navigations that were stopped before the page they were for existed (the first request
+        # of a new tab), in the order they happened. See `take_unowned`.
+        self._unowned: list[str] = []
 
     def allows_page(self, address: str) -> bool:
         """Whether the top-level page may be at this address."""
@@ -88,13 +91,18 @@ class Guard:
 
     def _route(self, route: Route, request: Request) -> None:
         try:
+            has_frame = True
             try:
                 top = request.is_navigation_request() and request.frame.parent_frame is None
             except PlaywrightError:
-                # Cannot tell what kind of request it is: treat it as the most dangerous kind.
+                # Cannot tell what kind of request it is: treat it as the most dangerous kind. This is what a new tab's
+                # first request looks like: its page does not exist yet.
                 top = True
+                has_frame = False
             if self.blocks(request.method, request.url, top_level_navigation=top):
                 self._on_block(request.url, request.method, request)
+                if top and not has_frame:
+                    self._unowned.append(request.url)
                 route.abort("blockedbyclient")
             else:
                 route.continue_()
@@ -110,6 +118,12 @@ class Guard:
         # connection is closed by `drain_web_sockets`, once the handler is done.
         self._on_block(route.url, "GET", None)
         self._web_sockets.append(route)
+
+    def take_unowned(self) -> list[str]:
+        """The addresses stopped since the last call that belong to no page yet, oldest first, and forgets them. A new
+        tab that was stopped shows an error page, and this is where it was going."""
+        taken, self._unowned = self._unowned, []
+        return taken
 
     def drain_web_sockets(self) -> None:
         """Closes the WebSockets the page opened since the last call, so that the page sees the refusal."""

@@ -27,6 +27,8 @@ DEFAULT_TIMEOUT_MS = 10_000
 SETTLE_LIMIT_S = 1.5
 # How long to wait for a new page's content, and for a started navigation to load.
 LOAD_WAIT_MS = 5_000
+# How long to wait for the element to be scrolled into view, before the action does its own waiting.
+SCROLL_WAIT_MS = 2_000
 POPUP_WAIT_MS = 2_000
 
 MAX_FAILED_REQUESTS = 50
@@ -46,28 +48,66 @@ ACTION_KINDS = [
 # A navigation, a redirect or a replaced frame cancels its requests. That is normal, not a failure.
 CANCELLED = ("ERR_ABORTED", "NS_BINDING_ABORTED", "aborted", "cancelled")
 
-# Counts the changes a page makes to itself. Installed once per frame, read before and after an action.
-# A mutation observer does not see inside shadow roots, so every open one that exists when it is installed
-# is observed too; a shadow root created later, and a closed one, are not. A page that replaced
+# Counts the changes a page makes, by kind: elements added or removed, text, attributes (any but `style`), and `style`
+# changes that show or hide something (`display` or `visibility`). A style change that only moves or fades an element
+# (a transform, an opacity) is not counted: pages restyle themselves that way in answer to any mouse move or scroll
+# (parallax, a cursor that is followed), so it says nothing about what an action did. Installed once per frame and read
+# before and after an action. A mutation observer does not see inside shadow roots, so every open one that exists when
+# it is installed is observed too; a shadow root created later, and a closed one, are not. A page that replaced
 # MutationObserver is not defended against: the answer is then simply "no change".
 MUTATIONS_JS = """() => {
   if (!window.__traceqa_mutations__) {
-    var counter = { n: 0 };
-    var options = { subtree: true, childList: true, attributes: true, characterData: true };
+    var counts = { elements: 0, text: 0, attributes: 0, style: 0 };
+    var options = { subtree: true, childList: true, attributes: true, attributeOldValue: true, characterData: true };
+    var hasElement = function (nodes) {
+      for (var i = 0; i < nodes.length; i++) if (nodes[i].nodeType === 1) return true;
+      return false;
+    };
+    var property = function (style, name) {
+      var parts = (style || "").split(";");
+      for (var i = 0; i < parts.length; i++) {
+        var colon = parts[i].indexOf(":");
+        if (colon > 0 && parts[i].slice(0, colon).trim().toLowerCase() === name) {
+          return parts[i].slice(colon + 1).trim().toLowerCase();
+        }
+      }
+      return "";
+    };
+    var shows = function (style) { return property(style, "display") + "|" + property(style, "visibility"); };
     try {
-      var observer = new MutationObserver(function (records) { counter.n += records.length; });
+      var observer = new MutationObserver(function (records) {
+        for (var i = 0; i < records.length; i++) {
+          var record = records[i];
+          if (record.type === "childList") {
+            if (hasElement(record.addedNodes) || hasElement(record.removedNodes)) counts.elements++;
+            else counts.text++;
+          } else if (record.type === "characterData") counts.text++;
+          else if (record.attributeName === "style") {
+            if (shows(record.oldValue) !== shows(record.target.getAttribute("style"))) counts.style++;
+          } else counts.attributes++;
+        }
+      });
       var watch = function (root) {
         observer.observe(root, options);
         var all = root.querySelectorAll("*");
         for (var i = 0; i < all.length; i++) if (all[i].shadowRoot) watch(all[i].shadowRoot);
       };
       watch(document);
-    } catch (e) { return -1; }
-    Object.defineProperty(window, "__traceqa_mutations__", { value: counter, configurable: true });
+    } catch (e) { return null; }
+    Object.defineProperty(window, "__traceqa_mutations__", { value: counts, configurable: true });
   }
-  return window.__traceqa_mutations__.n;
+  var now = window.__traceqa_mutations__;
+  return { elements: now.elements, text: now.text, attributes: now.attributes, style: now.style };
 }"""
-READ_MUTATIONS_JS = "() => (window.__traceqa_mutations__ ? window.__traceqa_mutations__.n : null)"
+KINDS = ("elements", "text", "attributes", "style")
+# How long the page is watched at rest before an action, to learn how much it changes by itself. A page that animates,
+# runs a ticker or plays a video changes all the time, and "it changed" then says nothing about the action.
+AT_REST_S = 0.3
+# An action changed the page when some kind of change happened more than this many times as often as at rest.
+NOISE_FACTOR = 3
+
+Counts = dict[str, int]
+Rates = dict[str, float]
 
 
 @dataclass
@@ -207,8 +247,9 @@ def _need_value(params: models.PageActParams) -> str:
     return params.value
 
 
-def _mutations(page: Page) -> dict[Frame, int | None]:
-    counts: dict[Frame, int | None] = {}
+def _mutations(page: Page) -> dict[Frame, Counts | None]:
+    """How many changes of each kind every frame has had since the observer was installed (it is, on the first call)."""
+    counts: dict[Frame, Counts | None] = {}
     for frame in page.frames:
         try:
             counts[frame] = frame.evaluate(MUTATIONS_JS)
@@ -217,19 +258,48 @@ def _mutations(page: Page) -> dict[Frame, int | None]:
     return counts
 
 
-def _dom_changed(page: Page, before: dict[Frame, int | None], navigated: bool) -> bool:
+def _at_rest(page: Page) -> tuple[dict[Frame, Counts | None], dict[Frame, Rates]]:
+    """Watches the page for a moment, and returns where the counts stand and how fast each kind of change goes by
+    itself, per second, in each frame."""
+    start = _mutations(page)
+    page.wait_for_timeout(AT_REST_S * 1000)
+    later = _mutations(page)
+    rates: dict[Frame, Rates] = {}
+    for frame, was in start.items():
+        now = later.get(frame)
+        if was is not None and now is not None:
+            rates[frame] = {kind: max(0, now[kind] - was[kind]) / AT_REST_S for kind in KINDS}
+    return later, rates
+
+
+def _dom_changed(
+    before: dict[Frame, Counts | None],
+    rates: dict[Frame, Rates],
+    window_s: float,
+    navigated: bool,
+) -> bool:
+    """Whether an action changed the page: some kind of change happened in some frame more than NOISE_FACTOR times as
+    often as the page changes by itself at rest, over the `window_s` the action took. A page at rest makes none, so for
+    it any change counts. Kinds are judged one by one, so a page that restyles itself all the time still shows an
+    element that appears. What this cannot see: a change of a kind the page also makes by itself, that is no bigger than
+    its noise (a label changing on a page with a ticking clock)."""
     if navigated:
         return True
     for frame, was in before.items():
-        if was is None or was < 0 or frame.is_detached():
+        if was is None or frame.is_detached():
             continue
         try:
-            now = frame.evaluate(READ_MUTATIONS_JS)
+            now = frame.evaluate(MUTATIONS_JS)
         except PlaywrightError:
             # The frame's page went away or was replaced under the action.
             return True
-        if now is None or now != was:
+        if now is None:
             return True
+        quiet = rates.get(frame, dict.fromkeys(KINDS, 0.0))
+        for kind in KINDS:
+            happened = now[kind] - was[kind]
+            if happened > 0 and happened > NOISE_FACTOR * quiet[kind] * window_s:
+                return True
     return False
 
 
@@ -271,6 +341,26 @@ def _left_the_allowed_origins(page: Page, watch: Watch, guard: Guard, before_url
     return True
 
 
+def _scroll_y(page: Page) -> float | None:
+    try:
+        return page.evaluate("() => window.scrollY")
+    except PlaywrightError:
+        return None
+
+
+def _bring_into_view(page: Page, locator: Locator, timeout_ms: int) -> None:
+    """Scrolls the element into view before anything is measured, and lets the page finish reacting to the scroll.
+
+    A click scrolls the element into view first, and many pages answer a scroll (an image sequence, classes on the
+    page, parallax). If that happened inside the measured time, the action would be credited with it. Nothing is
+    waited for when the page did not move, and a failure here is left for the action itself to report, in its own words."""
+    before = _scroll_y(page)
+    with contextlib.suppress(PlaywrightError):
+        locator.scroll_into_view_if_needed(timeout=min(timeout_ms, SCROLL_WAIT_MS))
+    if _scroll_y(page) != before:
+        _settle(page)
+
+
 def _perform(locator: Locator, params: models.PageActParams, timeout_ms: int) -> None:
     action = params.action
     if action == models.ActionKind.click:
@@ -305,8 +395,11 @@ def act(page: Page, watch: Watch, guard: Guard, frame: Frame, params: models.Pag
             raise RpcError(
                 "element_not_found", f"no element matches {params.target.selector!r} within {timeout_ms} ms"
             ) from error
-        before = _mutations(page)
+        _bring_into_view(page, locator, timeout_ms)
+        before, rates = _at_rest(page)
         watch.recorder = recorder
+        guard.take_unowned()  # what was stopped before this action is not this action's
+        started = time.monotonic()
         _perform(locator, params, timeout_ms)
     except PlaywrightTimeout as error:
         watch.recorder = None
@@ -327,16 +420,25 @@ def act(page: Page, watch: Watch, guard: Guard, frame: Frame, params: models.Pag
                 page.wait_for_load_state("load", timeout=LOAD_WAIT_MS)
         guard.drain_web_sockets()
         settle = _settle(page)
-        if _left_the_allowed_origins(page, watch, guard, before_url):
-            # What came back is the page that was there; whatever it was doing has restarted.
+        taken_back = _left_the_allowed_origins(page, watch, guard, before_url)
+        if taken_back:
+            # What came back is the page that was there, loaded again: nothing is different, and the counters of the
+            # page that was lost with it say nothing.
             recorder.navigated = False
             recorder.navigated_status = None
             settle = _settle(page)
         popups = []
+        stopped_tabs = guard.take_unowned()
         for popup in recorder.popups:
             with contextlib.suppress(PlaywrightError):
                 popup.wait_for_load_state("domcontentloaded", timeout=POPUP_WAIT_MS)
-            popups.append(without_query(popup.url))
+            # A popup that was stopped shows an error page, and one that became a download has no address: say where
+            # the first was going (the stops the guard could not tie to a page, in the order they happened, match the
+            # pages that show an error), and call the second what it is.
+            address = without_query(popup.url)
+            if origin_of(popup.url) is None and stopped_tabs:
+                address = without_query(stopped_tabs.pop(0))
+            popups.append(address or "about:blank")
             with contextlib.suppress(PlaywrightError):
                 popup.close()
         url = without_query(page.url)
@@ -350,7 +452,7 @@ def act(page: Page, watch: Watch, guard: Guard, frame: Frame, params: models.Pag
             downloads=recorder.downloads,
             console_errors=recorder.console_errors,
             failed_requests=recorder.failed,
-            dom_changed=_dom_changed(page, before, moved),
+            dom_changed=False if taken_back else _dom_changed(before, rates, time.monotonic() - started, moved),
             settle=settle,
         )
     finally:

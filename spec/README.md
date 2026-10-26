@@ -91,9 +91,14 @@ Limits on what a driver sends:
   DOM as `host >>> inner` is accepted. `type`, `select` and `press` need `value`; `select` takes an option's value or
   its label. `timeoutMs` (default 10000) limits the wait for the element and the action itself. The reply says what the
   action did: `url` after it, `navigated` (with the main document's `status` when the driver sees it; a download is not
-  a navigation), `popups` (the driver closes them), `dialogs` (the driver dismisses them), `downloads` (the driver
+  a navigation), `popups` (the driver closes them; one the policy stopped is named by the address it was going to), `dialogs` (the driver dismisses them), `downloads` (the driver
   cancels them: no file is stored), `consoleErrors` (`uncaught` or `console`), `failedRequests` (status 400 or more,
-  or the browser's reason, at most 50), `domChanged` and `settle`. Every address and message in it is cut as the
+  or the browser's reason, at most 50), `domChanged` and `settle`. `domChanged` is judged against what the page changes by
+  itself: the driver watches the page at rest for 0.3 s before the action, and counts a change only when some kind of
+  change (elements added or removed, text, attributes, or a style that shows or hides) happens more than three times as
+  often during the action. A style that only moves or fades is not counted. A page that answers the first click anywhere on it (starting music, a banner) shows that answer in whatever action comes first on it. Measured on a real site: it is quiet at rest,
+  and clicking plain text made 28 style changes (parallax, answering the mouse), while opening a menu also added
+  elements and changed classes, so counting every change said "changed" for a click that did nothing. Every address and message in it is cut as the
   driver's errors are: no query, no fragment, at most 500 characters. A caller must not read an empty list as "nothing
   happened" for a kind the session does not list in `eventKinds`, and no reader may depend on the difference between an
   absent and an empty list. Errors: `element_not_found` (nothing matches within the time), `timeout` (the element was

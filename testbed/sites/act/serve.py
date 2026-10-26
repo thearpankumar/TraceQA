@@ -11,6 +11,7 @@ web-drivers/playwright-py/tests/test_act.py.
 | /                 | The page with the controls (index.html). |
 | /next.html        | A second page. |
 | /frame.html       | The page inside the iframe. |
+| /noisy.html       | A page that changes all the time by itself (a clock, a spinner). |
 | /files/receipt.txt| A download (Content-Disposition: attachment). |
 | /api/fail         | 500. |
 | /api/ok           | 200. |
@@ -39,7 +40,13 @@ sys.path.insert(0, str(HERE.parent))
 
 from _server import FixtureServer, serve_in_thread  # noqa: E402
 
-PAGES = {"/": "index.html", "/index.html": "index.html", "/next.html": "next.html", "/frame.html": "frame.html"}
+PAGES = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/next.html": "next.html",
+    "/frame.html": "frame.html",
+    "/noisy.html": "noisy.html",
+}
 
 
 class Server(FixtureServer):

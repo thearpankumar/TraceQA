@@ -26,6 +26,8 @@
   <button id="websocket" onclick="try { var s = new WebSocket('ws://' + location.host + '/ws'); s.onopen = function () { document.getElementById('status').textContent = 'open'; }; s.onclose = function () { document.getElementById('status').textContent = 'closed'; }; s.onerror = function () { document.getElementById('status').textContent = 'error'; }; } catch (e) { document.getElementById('status').textContent = 'threw'; }">WebSocket</button>
   <button id="worker" onclick="var out = document.getElementById('status'); try { navigator.serviceWorker.register('/sw.js').then(function () { out.textContent = 'registered'; }, function (e) { out.textContent = 'refused ' + e.name; }); } catch (e) { out.textContent = 'refused ' + e.name; }">Service worker</button>
   <a id="outside" href="/next.html">Another site</a>
+  <a id="outside-blank" href="/next.html" target="_blank">Another site, in a new tab</a>
+  <a id="download-blank" href="/files/receipt.txt" target="_blank">A download, in a new tab</a>
   <span id="status"></span>
   <button id="disabled" disabled>Disabled</button>
   <button id="hovered" onmouseover="this.dataset.hovered = 'yes'">Hover me</button>

@@ -260,6 +260,85 @@ def test_the_driver_still_answers_after_refusals(page: Page) -> None:
     assert page.click("dead").ok is True
 
 
+# ---- a page that changes by itself ---------------------------------------------------------------
+
+
+def noisy(page: Page) -> Page:
+    """The same session, on a page whose clock ticks and whose spinner is restyled many times a second."""
+    page.driver.call(
+        "page.goto", {"sessionId": page.session_id, "url": page.site.base + "noisy.html", "waitUntil": "settled"}
+    )
+    return page
+
+
+def test_a_click_that_does_nothing_is_not_a_change_on_a_page_that_changes_by_itself(page: Page) -> None:
+    result = noisy(page).click("n-dead")
+    assert result.dom_changed is False
+
+
+def test_the_noisy_page_really_does_change_by_itself(page: Page) -> None:
+    # Why the test above matters: on this page "something changed" is always true, so a report that said so
+    # for every click would say nothing. A page that is read as it changes by itself shows it in the counts.
+    page = noisy(page)
+    first = page.evaluate("() => document.getElementById('clock').textContent")
+    page.driver.call("page.act", {"sessionId": page.session_id, "action": "hover", "target": {"selector": "#n-dead"}})
+    second = page.evaluate("() => document.getElementById('clock').textContent")
+    assert first != second
+
+
+def test_an_element_that_appears_is_seen_on_a_page_that_changes_by_itself(page: Page) -> None:
+    assert noisy(page).click("n-open").dom_changed is True
+    assert page.evaluate("() => document.getElementById('panel') !== null") is True
+
+
+def test_a_class_that_changes_is_seen_on_a_page_whose_text_and_style_change_by_themselves(page: Page) -> None:
+    # Each kind of change is judged against its own noise: the clock is text, the spinner is style, this is an attribute.
+    assert noisy(page).click("n-class").dom_changed is True
+
+
+def test_a_page_that_moves_an_element_whenever_the_mouse_moves_is_not_changed_by_a_click_that_does_nothing(
+    page: Page,
+) -> None:
+    # The click moves the mouse, the page answers by restyling an element, and that is motion and not a change.
+    page = noisy(page)
+    assert page.click("n-dead").dom_changed is False
+    assert page.evaluate("() => document.getElementById('parallax').style.transform !== ''") is True
+
+
+def test_hiding_an_element_with_a_style_is_a_change_and_only_fading_it_is_not(page: Page) -> None:
+    assert noisy(page).click("n-fade").dom_changed is False
+    assert noisy(page).click("n-hide").dom_changed is True
+
+
+def test_scrolling_to_a_control_far_below_is_not_credited_to_its_click(page: Page) -> None:
+    # The page answers every scroll with a class and an attribute. Reaching the button scrolls, the click does nothing.
+    assert noisy(page).click("far-dead").dom_changed is False
+
+
+def test_a_control_far_below_that_does_something_is_still_seen(page: Page) -> None:
+    assert noisy(page).click("far-open").dom_changed is True
+
+
+def test_a_new_tab_to_another_origin_is_reported_with_the_address_it_was_stopped_from(
+    page: Page, other_site: Any
+) -> None:
+    target = f"{other_site.base}next.html"
+    page.evaluate(f"() => {{ document.getElementById('outside-blank').href = '{target}'; }}")
+    result = page.click("outside-blank")
+    # Not an error page's address: where the tab was going.
+    assert result.popups == [target]
+    assert [f.url for f in blocked(result)] == [target]
+    assert other_site.requests == []
+    # The page that opened it is as it was.
+    assert (result.url, result.dom_changed) == (page.site.base, False)
+
+
+def test_a_new_tab_that_becomes_a_download_is_not_reported_with_an_empty_address(page: Page) -> None:
+    result = page.click("download-blank")
+    assert all(address for address in result.popups or [])
+    assert [d.suggested_name for d in result.downloads or []] == ["receipt.txt"]
+
+
 # ---- the safety policy -------------------------------------------------------------------------
 
 
@@ -288,6 +367,9 @@ def test_a_read_only_session_sends_no_write_whatever_the_control_is_called(page:
     result = page.click(control)
     assert [(f.url.endswith(path), f.failure) for f in blocked(result)] == [(True, "blocked_by_policy")]
     assert result.url == page.site.base  # a blocked form post leaves the page where it was
+    if control == "continue":
+        # Chromium shows an error page and the page is taken back: it is the page it was, loaded again.
+        assert result.dom_changed is False
     assert only_reads(page.site), page.site.requests
     assert not any(p == path for _, p in page.site.requests)
 
@@ -318,6 +400,7 @@ def test_a_link_to_another_origin_is_blocked_and_nothing_reaches_it(page: Page, 
     result = page.click("outside")
     assert [f.url for f in blocked(result)] == [other_site.base + "next.html"]
     assert result.url == page.site.base
+    assert result.dom_changed is False
     assert other_site.requests == []
 
 
