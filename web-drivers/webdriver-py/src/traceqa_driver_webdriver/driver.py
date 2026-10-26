@@ -213,6 +213,10 @@ class WebDriverDriver(BaseDriver[Session]):
     # ---- session ---------------------------------------------------------
 
     def session_open(self, params: models.SessionOpenParams) -> models.SessionOpenResult:
+        if params.policy is not None:
+            # Before anything starts. A session that asks for a policy is going to be acted on, and this driver can
+            # neither route the browser's requests nor act, so it must not say it keeps one.
+            raise RpcError("unsupported", "this driver cannot keep a safety policy: it does not offer page.act")
         target = params.target
         server = None
         if target.browser == SAFARI:

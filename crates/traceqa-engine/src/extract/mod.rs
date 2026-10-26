@@ -104,6 +104,8 @@ pub(crate) fn extract_target(
         viewport: job.viewport.clone(),
         locale: None,
         storage_state: job.storage_state.cloned(),
+        // Reading a page never needs a safety policy: it clicks nothing.
+        policy: None,
     })?;
     clock.open = opening.elapsed();
 

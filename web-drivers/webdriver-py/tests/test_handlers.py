@@ -33,3 +33,22 @@ def test_it_says_it_offers_no_actions_and_observes_no_events() -> None:
     assert WEBDRIVER.action_kinds == [] and WEBDRIVER.event_kinds == []
     assert PLAYWRIGHT.event_kinds
     assert len(WEBDRIVER.event_kinds or []) < len(PLAYWRIGHT.event_kinds)
+
+
+def test_a_session_that_asks_for_a_safety_policy_is_refused_before_anything_starts() -> None:
+    import pytest
+    from traceqa_protocol import models
+    from traceqa_protocol.rpc import RpcError
+
+    driver = WebDriverDriver(Channel(io.StringIO(), io.StringIO()))
+    params = models.SessionOpenParams.model_validate(
+        {
+            "target": {"browser": "webdriver", "webdriverUrl": "http://127.0.0.1:1"},
+            "viewport": {"width": 1280, "height": 800},
+            "policy": {"allowOrigins": ["http://127.0.0.1:4173"]},
+        }
+    )
+    with pytest.raises(RpcError) as refused:
+        driver.session_open(params)
+    assert refused.value.kind == "unsupported"
+    assert "safety policy" in refused.value.message

@@ -15,6 +15,11 @@ web-drivers/playwright-py/tests/test_act.py.
 | /api/fail         | 500. |
 | /api/ok           | 200. |
 | /api/drop         | Closes the connection without answering. |
+| /checkout         | 200 for any method: where the page's forms post to. |
+| /api/post, /api/beacon | 200 for any method. |
+| /redirect-out?to=X| 302 to X (another origin, in a test). |
+| /sw.js            | A service worker script. |
+| /ws               | 404: nothing speaks WebSocket here, so any request to it is a connection attempt that got through. |
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 HERE = Path(__file__).resolve().parent
 # This file runs as a script and is also loaded by path, so the shared module is found by path too.
@@ -70,6 +75,13 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             with contextlib.suppress(OSError):
                 self.connection.shutdown(socket.SHUT_RDWR)
+        elif path in ("/checkout", "/api/post", "/api/beacon"):
+            self._send(200, b"done", "text/plain")
+        elif path == "/redirect-out":
+            target = parse_qs(urlsplit(self.path).query).get("to", [""])[0]
+            self._send(302, b"", "text/plain", Location=target)
+        elif path == "/sw.js":
+            self._send(200, b"self.addEventListener('fetch', () => {});", "text/javascript")
         elif path == "/api/ok":
             self._send(200, b"ok", "text/plain")
         elif path == "/favicon.ico":

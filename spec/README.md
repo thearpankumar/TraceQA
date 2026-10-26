@@ -98,9 +98,36 @@ Limits on what a driver sends:
   happened" for a kind the session does not list in `eventKinds`, and no reader may depend on the difference between an
   absent and an empty list. Errors: `element_not_found` (nothing matches within the time), `timeout` (the element was
   found but the action did not finish, for example a disabled button), `invalid_params` (a selector that matches several
-  elements, an unknown frame, a missing `value`), `session_not_found`, `unsupported`. The WebDriver driver lists no
-  actions yet. **No safety policy applies yet**: the engine never sends `page.act`, and nothing in this protocol blocks
-  a click that submits a form (backlog EXP-5).
+  elements, an unknown frame, a missing `value`, a session opened without a policy), `session_not_found`, `unsupported`.
+  The WebDriver driver lists no actions yet.
+
+- **Safety policy:** `page.act` only works on a session opened with `session.open`'s `policy` (`ActPolicy`: `allowOrigins`,
+  at least one `http` or `https` origin, and `allowWrites`, false when absent). The driver enforces it on the browser's own
+  requests, so it does not depend on what a button is called or on anything the page says. Unless `allowWrites`: every
+  request whose method is not GET or HEAD is aborted (form posts, `fetch`, XHR, `sendBeacon`), and every WebSocket is never
+  connected to its server and is closed. Always: a navigation of the top-level page to an origin that is not in
+  `allowOrigins` is aborted before the request is made. A blocked request is reported in the action's `failedRequests` with
+  the failure `blocked_by_policy`. The reply to `session.open` says the policy back (`policy`), and a caller that did not
+  get the policy it asked for must close the session: a driver that does not know about policies says nothing. A driver
+  that cannot keep a policy (the WebDriver driver, or a browser reached over CDP whose context the driver did not create)
+  refuses to open a session that asks for one with `unsupported`; a policy no one can read (no origin, an origin that is
+  not http or https) is `invalid_params`, before any browser starts.
+  **Limits, all measured in Chromium, Firefox and WebKit:**
+  - A redirect to another origin cannot be stopped: the browser follows a redirect without asking Playwright, so the
+    request to the other site is made. The driver notices where the page ended, reports it as blocked and goes back. This
+    is the same limit as the operator's address rules in `docs/usage.md`. A redirect that keeps the method (307, 308) of
+    a request that read-only mode let through is a GET, so only a read can reach the other site.
+  - Going back is only done when the page really moved. Aborting a navigation leaves Chromium on an error page and leaves
+    Firefox and WebKit on the page; the state of the page the action started from (an open menu, typed text) is lost in
+    Chromium when the page is restored.
+  - Playwright's `service_workers="block"` does not stop a page from registering a service worker in any of the three
+    browsers, and a service worker's own requests do not pass through the driver's routes. The driver therefore hides
+    `navigator.serviceWorker` from every page. That is not enforced by the browser: a dedicated worker that a page starts
+    does not run the driver's script, so a service worker registered from one is not covered.
+  - Images, scripts and other subresources from other origins are not stopped (pages would not render); only navigations
+    are checked against `allowOrigins`.
+  - A GET can still have an effect on a site (`/logout`, `/delete?id=3`). That is why the engine's `policy` module also
+    skips components by name and by address.
 
 The method names, with their parameter and result types, are listed in the
 `x-traceqa` block at the top of each protocol file.

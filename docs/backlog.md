@@ -93,6 +93,8 @@ cannot be debugged.
   command exits with code 130.
 - Candidate order: a test that shuffles the extraction order of a fixture page gives the same action sequence.
 
+**Carried forward.** From EXP-5 (safety), which built the rules but nothing that calls them: the `explore` command must (1) refuse to start on an address that `policy::is_local_origin` says is not local, with exit code 2 and no browser opened, unless `--i-understand-this-interacts` is given; (2) take `--allow-writes` (which requires `--allow-origin`), `--allow-origin` and `--deny-name`; (3) open its session with `policy::Rules::driver_policy()` and close the session when `policy::enforced` says the driver did not say the same policy back; (4) ask `policy::Rules::decide` before every action and never act on a `Skip`. Nothing else calls `page.act` yet.
+
 **Size.** L
 
 ### EXP-3: Reset between branches
@@ -160,7 +162,7 @@ action did: whether the page navigated, whether a popup, dialog or download appe
 the schema (all new fields optional, five examples), the five actions, dialogs, popups, downloads, console and failed-request
 reports, `domChanged` (shadow roots included) and `settle`, `actionKinds` and `eventKinds` in `session.open`, and the tests in
 `web-drivers/playwright-py/tests/test_act.py` against `testbed/sites/act` in Chromium, Firefox and WebKit. The WebDriver driver
-lists no actions and no events and still answers `page.act` with `unsupported`; clicking in Safari is not built.
+lists no actions and no events and still answers `page.act` with `unsupported`; clicking in Safari is not built (optional, and only needed if the explorer must run in Safari).
 Not done: the engine never calls `page.act` (no safety policy yet, EXP-5); `driver.log` is not used for actions; transcripts were
 not re-recorded because the client protocol did not change; `npm run gen` no longer exists (the TypeScript SDK was removed).
 Rust readers cannot tell an absent list from an empty one (the generated types use an empty `Vec`), so a reader relies on
@@ -204,6 +206,23 @@ and are translated.
 - Deny-list unit tests cover at least five languages and the names above.
 
 **Size.** M
+
+**Status (branch `backlog/explorer-page-act-and-safety`).** Built: layer 1 and the layers that belong to the driver, in
+`web-drivers/playwright-py/src/traceqa_driver_playwright/safety.py`, and the deny-list and address rules (layers 3 and 5) as
+functions in `crates/traceqa-engine/src/policy.rs`. `session.open` takes an `ActPolicy` and says it back; `page.act` is
+refused on a session without one (fail closed); in read-only mode (the default) the browser aborts every request that is
+not GET or HEAD and no WebSocket is ever connected, and a navigation of the top-level page to another origin is aborted
+before it is made. The deny-list is in English, Spanish, French, German, Hindi and Arabic and has not been reviewed by
+native speakers. Tests: `web-drivers/playwright-py/tests/test_act.py` in Chromium, Firefox and WebKit against
+`testbed/sites/act` (whose server records every request), and unit tests in `policy.rs`.
+Measured limits (details in `spec/README.md`): a redirect to another origin cannot be stopped, because the browser follows
+it without asking Playwright, so that request is made (a GET in read-only mode) and the driver then notices, reports it and
+goes back; Playwright's `service_workers="block"` does not stop registration in any of the three browsers, so pages are not
+given `navigator.serviceWorker` instead, which does not cover a dedicated worker the page starts; a GET with a side effect
+is stopped only by the name and address lists. Writing a blocked request to `events.jsonl` waits for the explorer.
+Not done: the `explore` command, so the refusal to start on a non-local origin exists only as `policy::is_local_origin`
+and the flags `--allow-writes`, `--allow-origin`, `--deny-name` and `--i-understand-this-interacts` do not exist yet;
+`page.act` still has no caller in the engine; layer 4 (dialogs, downloads, popups) is done in the driver by EXP-4.
 
 ### EXP-6: Language model boundary (A7)
 
@@ -259,6 +278,8 @@ tools and the CI gate can read them.
   actions. "Discoverable" is the set of component ids that `traceqa extract` finds on every state that a
   read-only action can open; it is listed in `coverage.json` as `discovered`.
 - `events.jsonl` has one `explore.action.end` per edge in `graph.json`.
+
+**Carried forward.** From EXP-5: `coverage.json` lists a skipped component with the reason `policy::Skip::reason()` gives (`destructive`, `blocked` or `read-only`), and a request the driver stopped (`failedRequests` entry with the failure `blocked_by_policy`) is written to `events.jsonl`.
 
 **Size.** M
 
@@ -323,6 +344,8 @@ shop's server logs nothing today, so it gains the request-method log that EXP-5 
 - Replay of the recorded edges reproduces at least 95% of the transitions.
 - A cancel at action 40 yields a folder that validates.
 
+**Carried forward.** From EXP-5: the buggy shop's `serve.py` records the method of every request (`testbed/sites/act/serve.py` already does, and is the model), and the test asserts that a read-only walk produced only GET and HEAD, in all three browsers. "Clear cart" must appear as skipped, not touched.
+
 **Size.** S (on top of EXP-1 to EXP-9)
 
 ## 2. Interaction oracles (F7)
@@ -364,6 +387,8 @@ messages from non-allow-listed origins are dropped. Rule ids `uncaught-error`, `
 fixture that calls `console.error` gives one `console-error`; a third-party script that logs from another origin
 gives none. The `not_observed` marker appears on the WebDriver driver. The `consoleEvents` capability exists
 today but is false in both drivers, and `not_observed` is a new marker set from it.
+
+**Carried forward.** From EXP-4: a driver says which events it observes in `Capabilities.eventKinds`; the findings of an oracle mark a signal `not_observed` when the session's driver does not list its kind (the WebDriver driver lists none), and must not read an empty list as "nothing happened". Same for ORA-3.
 
 **Size.** S
 
@@ -880,7 +905,7 @@ component's locator from the detailed answer.
 
 ## How to read this file
 
-Every item is a heading of the form `### ID: title`, followed by four labelled parts:
+Every item is a heading of the form `### ID: title`, followed by four labelled parts, and sometimes a fifth, **Carried forward**, for work that an earlier item left for this one because it needs something this item builds:
 
 - **Why.** The problem, in a sentence or two.
 - **Design.** Notes on how to build it, including the existing code it builds on.

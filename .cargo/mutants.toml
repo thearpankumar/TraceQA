@@ -2,6 +2,8 @@
 examine_globs = [
   "crates/traceqa-engine/src/fingerprint.rs",
   "crates/traceqa-engine/src/group.rs",
+  # What the explorer may touch: a wrong rule here is a click on something it should have left alone.
+  "crates/traceqa-engine/src/policy.rs",
 ]
 # The baseline is the whole `traceqa-engine --lib` test run, and a loaded machine can be several
 # times slower than an idle one. cargo-mutants' default is 5 times the baseline with a floor of

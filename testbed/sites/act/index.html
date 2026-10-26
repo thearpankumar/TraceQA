@@ -18,6 +18,15 @@
   <button id="grow" onclick="document.getElementById('list').appendChild(document.createElement('li')).textContent = 'new'">Grow</button>
   <ul id="list"></ul>
   <button id="dead">Dead</button>
+  <!-- Things that write. A read-only session must stop every one of them before it leaves the browser. -->
+  <form id="form" method="post" action="/checkout"><button id="continue">Continue</button></form>
+  <button id="fetchpost" onclick="fetch('/api/post', { method: 'POST', body: 'x' })">Fetch POST</button>
+  <button id="fetchdelete" onclick="fetch('/api/post', { method: 'DELETE' })">Fetch DELETE</button>
+  <button id="beacon" onclick="navigator.sendBeacon('/api/beacon', 'x')">Beacon</button>
+  <button id="websocket" onclick="try { var s = new WebSocket('ws://' + location.host + '/ws'); s.onopen = function () { document.getElementById('status').textContent = 'open'; }; s.onclose = function () { document.getElementById('status').textContent = 'closed'; }; s.onerror = function () { document.getElementById('status').textContent = 'error'; }; } catch (e) { document.getElementById('status').textContent = 'threw'; }">WebSocket</button>
+  <button id="worker" onclick="var out = document.getElementById('status'); try { navigator.serviceWorker.register('/sw.js').then(function () { out.textContent = 'registered'; }, function (e) { out.textContent = 'refused ' + e.name; }); } catch (e) { out.textContent = 'refused ' + e.name; }">Service worker</button>
+  <a id="outside" href="/next.html">Another site</a>
+  <span id="status"></span>
   <button id="disabled" disabled>Disabled</button>
   <button id="hovered" onmouseover="this.dataset.hovered = 'yes'">Hover me</button>
   <label>Name <input id="name"></label>

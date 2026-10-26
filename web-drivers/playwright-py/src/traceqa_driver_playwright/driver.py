@@ -36,7 +36,7 @@ from traceqa_protocol.rpc import Channel, RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
 from traceqa_protocol.urls import without_query
 
-from . import act
+from . import act, safety
 
 NAME = "traceqa-driver-playwright"
 VERSION = installed_version(NAME)
@@ -97,7 +97,10 @@ class Session:
     failed_count: int = 0
     failed_urls: list[str] = field(default_factory=list)
     failed_seen: set[Request] = field(default_factory=set)
-    # Watchers for `page.act`, installed by the first one. A session that only reads pages never has them.
+    # Present only on a session opened with a safety policy, which is the only kind `page.act` works on. A session
+    # that only reads pages has neither, and nothing in this file's guard or watchers runs for it.
+    policy: models.ActPolicy | None = None
+    guard: safety.Guard | None = None
     watch: act.Watch | None = None
 
     def note_failed(self, request: Request) -> None:
@@ -542,6 +545,8 @@ class PlaywrightDriver(BaseDriver[Session]):
             self._playwright = sync_playwright().start()
         target = params.target
         viewport = ViewportSize(width=params.viewport.width, height=params.viewport.height)
+        # Read before any browser starts: a policy nobody can read is refused without launching anything.
+        guard = safety.Guard(params.policy, self._note_blocked) if params.policy is not None else None
         browser = None
         try:
             if target.browser == CDP:
@@ -559,19 +564,34 @@ class PlaywrightDriver(BaseDriver[Session]):
             state = playwright_state(params.storage_state)
             try:
                 context = browser.new_context(
-                    viewport=viewport, locale=params.locale, storage_state=cast(PlaywrightStorageState | None, state)
+                    viewport=viewport,
+                    locale=params.locale,
+                    storage_state=cast(PlaywrightStorageState | None, state),
+                    # A service worker makes requests of its own that the guard's routes do not see.
+                    service_workers="block" if guard else "allow",
                 )
                 owns_context = True
-            except PlaywrightError:
+            except PlaywrightError as unavailable:
                 # Some remote browsers only expose the context they started with.
                 if not browser.contexts:
                     raise
+                if guard:
+                    # Service workers cannot be blocked in a context the driver did not create, so the policy
+                    # cannot be kept. Closing a browser reached over CDP lets go of it and does not end it.
+                    with contextlib.suppress(PlaywrightError):
+                        browser.close()
+                    raise RpcError(
+                        "unsupported",
+                        "a safety policy needs a browser context the driver creates, and this browser only offers its own",
+                    ) from unavailable
                 context = browser.contexts[0]
                 owns_context = False
                 if state:
                     give_state(context, state)
             # Also for a context the driver did not create: its pages are opened after this.
             install_pristine(context)
+            if guard:
+                guard.install(context)
             page = context.new_page()
             if not owns_context:
                 page.set_viewport_size(viewport)
@@ -599,13 +619,25 @@ class PlaywrightDriver(BaseDriver[Session]):
         chromium = target.browser == CDP or BROWSERS.get(target.browser, ("",))[0] == "chromium"
         session = Session(browser, context, page, owns_context, chromium)
         session.watch_requests()
+        if guard:
+            session.policy = guard.policy
+            session.guard = guard
+            session.watch = act.Watch(page, context)
         self._sessions[session_id] = session
         self._channel.log("info", f"opened {target.browser} {browser.version}")
         return models.SessionOpenResult(
             session_id=session_id,
             browser=models.BrowserInfo(name=target.browser, version=browser.version),
             capabilities=CAPABILITIES,
+            # Said back, so the caller can see that this driver really understood the policy.
+            policy=guard.policy if guard else None,
         )
+
+    def _note_blocked(self, address: str, method: str, request: Request | None) -> None:
+        """The guard aborted a request. Whichever session it belonged to reports it to the action under way."""
+        for session in self._sessions.values():
+            if session.watch is not None:
+                session.watch.note_blocked(address, method, request)
 
     def session_storage(self, params: models.SessionStorageParams) -> models.StorageState:
         session = self._session(params.session_id)
@@ -746,6 +778,11 @@ class PlaywrightDriver(BaseDriver[Session]):
 
     def page_act(self, params: models.PageActParams) -> models.PageActResult:
         session = self._session(params.session_id)
+        if session.policy is None or session.guard is None or session.watch is None:
+            raise RpcError(
+                "invalid_params",
+                "this session was opened without a safety policy, and page.act only works on one that has a policy",
+            )
         wanted = params.target.frame_id or "main"
         if wanted == "main":
             frame = session.page.main_frame
@@ -755,6 +792,4 @@ class PlaywrightDriver(BaseDriver[Session]):
             if not known:
                 raise RpcError("invalid_params", f"no frame {wanted!r}; read the page first so its frames have ids")
             frame = known[0]
-        if session.watch is None:
-            session.watch = act.Watch(session.page, session.context)
-        return act.act(session.page, session.watch, frame, params)
+        return act.act(session.page, session.watch, session.guard, frame, params)

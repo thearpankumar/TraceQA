@@ -27,6 +27,7 @@ mod fingerprint;
 mod group;
 pub mod home;
 mod locator;
+pub mod policy;
 pub mod run;
 pub mod serve;
 pub mod url_policy;

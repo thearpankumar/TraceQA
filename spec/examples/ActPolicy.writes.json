@@ -1,0 +1,4 @@
+{
+  "allowOrigins": ["http://127.0.0.1:4173", "http://shop.test"],
+  "allowWrites": true
+}

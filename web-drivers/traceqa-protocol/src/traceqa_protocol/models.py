@@ -609,6 +609,27 @@ class DriverHelloResult(BaseModel):
     )
 
 
+class ActPolicy(BaseModel):
+    """
+    What the browser of a session may do while it is being acted on. Enforced by the driver on the browser's own requests, so it does not depend on what a button is called. Unless `allowWrites` is true: every request whose method is not GET or HEAD is aborted, and every WebSocket is never connected and is closed. Whatever `allowWrites` says: a navigation of the top-level page to an origin that is not in `allowOrigins` is aborted, and a page that ends up at such an origin anyway (a redirect, which the browser follows without asking the driver) is taken back to the page it came from. A blocked request is reported in `failedRequests` with the failure `blocked_by_policy`. Pages are not given `navigator.serviceWorker`, because a service worker makes requests of its own that the driver cannot see; a worker that a page starts itself is not covered.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    allow_origins: list[str] = Field(
+        ...,
+        validation_alias="allowOrigins", serialization_alias="allowOrigins",
+        description="Origins (scheme, host and port, for example http://127.0.0.1:4173) the top-level page may navigate to. At least one.",
+        min_length=1,
+    )
+    allow_writes: bool | None = Field(
+        default=None,
+        validation_alias="allowWrites", serialization_alias="allowWrites",
+        description="Let requests other than GET and HEAD through. Absent means false.",
+    )
+
+
 class SessionStorageParams(BaseModel):
     """
     Asks for the session's cookies and stored values, to save them after someone has signed in.
@@ -827,7 +848,7 @@ class ElementTarget(BaseModel):
 
 class PageActParams(BaseModel):
     """
-    Performs one action on one element and reports what it did. Component extraction never sends it. A driver whose capabilities list no actionKinds answers it with `unsupported`.
+    Performs one action on one element and reports what it did. Component extraction never sends it. A driver whose capabilities list no actionKinds answers it with `unsupported`; a session opened without a policy answers `invalid_params`.
     """
 
     model_config = ConfigDict(
@@ -904,7 +925,8 @@ class ActFailedRequest(BaseModel):
     method: str
     status: int | None = Field(default=None, description="HTTP status, 400 or more.")
     failure: str | None = Field(
-        default=None, description="The browser's reason when there was no response."
+        default=None,
+        description="The browser's reason when there was no response, or `blocked_by_policy` when the session's policy aborted the request.",
     )
 
 
@@ -1827,6 +1849,10 @@ class SessionOpenResult(BaseModel):
         default=None,
         description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
     )
+    policy: ActPolicy | None = Field(
+        default=None,
+        description="The policy the session enforces, as the driver understood it. Sent when the request carried one. A caller compares it with what it asked for and closes the session when they differ: a driver that does not know about policies would send none.",
+    )
 
 
 class PageGotoResult(BaseModel):
@@ -2311,6 +2337,10 @@ class SessionOpenParams(BaseModel):
         default=None,
         validation_alias="storageState", serialization_alias="storageState",
         description="Cookies and stored values to put in place before the first page is loaded.",
+    )
+    policy: ActPolicy | None = Field(
+        default=None,
+        description="The safety policy of a session that will be given page.act. A driver refuses page.act on a session opened without one, and a driver that cannot enforce a policy refuses to open a session that asks for one.",
     )
 
 

@@ -39,3 +39,14 @@ def act_site() -> Iterator[Any]:
     yield server
     server.shutdown()
     server.server_close()
+
+
+@pytest.fixture
+def other_site() -> Iterator[Any]:
+    """A second act fixture on another port, which is another origin, for tests of what must not be reached."""
+    site = _load_by_path("act_serve_other", ROOT / "testbed" / "sites" / "act" / "serve.py")
+    server = site.start()
+    server.base = f"http://127.0.0.1:{server.server_address[1]}/"
+    yield server
+    server.shutdown()
+    server.server_close()

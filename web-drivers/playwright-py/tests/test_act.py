@@ -15,14 +15,24 @@ BROWSERS = ["chromium", "firefox", "webkit"]
 SHORT = 1500
 
 
-class Page:
-    """An open session on the act fixture, and the calls a test makes on it."""
+def origin(site: Any) -> str:
+    return str(site.base).rstrip("/")
 
-    def __init__(self, driver: DriverClient, site: Any, browser: str) -> None:
+
+class Page:
+    """An open session on the act fixture, and the calls a test makes on it. Without `policy` the session is opened
+    with the safest one there is: read-only, and this site is the only one the page may navigate to."""
+
+    def __init__(self, driver: DriverClient, site: Any, browser: str, policy: dict[str, Any] | None = None) -> None:
         self.driver = driver
         self.site = site
         driver.call("driver.hello", HELLO)
-        opened = driver.call("session.open", {"target": {"browser": browser}, "viewport": VIEWPORT})
+        params: dict[str, Any] = {
+            "target": {"browser": browser},
+            "viewport": VIEWPORT,
+            "policy": policy or {"allowOrigins": [origin(site)]},
+        }
+        opened = driver.call("session.open", params)
         self.opened = models.SessionOpenResult.model_validate(opened)
         self.session_id = self.opened.session_id
         driver.call("page.goto", {"sessionId": self.session_id, "url": site.base, "waitUntil": "settled"})
@@ -248,3 +258,124 @@ def test_an_unknown_session_is_session_not_found(driver: DriverClient) -> None:
 def test_the_driver_still_answers_after_refusals(page: Page) -> None:
     refused(page, "element_not_found", "click", "#nothing-here", timeout=300)
     assert page.click("dead").ok is True
+
+
+# ---- the safety policy -------------------------------------------------------------------------
+
+
+def blocked(result: models.PageActResult) -> list[models.ActFailedRequest]:
+    return [f for f in result.failed_requests or [] if f.failure == "blocked_by_policy"]
+
+
+def only_reads(site: Any) -> bool:
+    return {method for method, _ in site.requests} <= {"GET", "HEAD"}
+
+
+def test_the_session_says_back_which_policy_it_enforces(page: Page) -> None:
+    assert page.opened.policy == models.ActPolicy(allow_origins=[origin(page.site)])
+
+
+@pytest.mark.parametrize(
+    ("control", "path"),
+    [
+        ("continue", "/checkout"),  # a form whose button is labelled only "Continue"
+        ("fetchpost", "/api/post"),
+        ("fetchdelete", "/api/post"),
+        ("beacon", "/api/beacon"),
+    ],
+)
+def test_a_read_only_session_sends_no_write_whatever_the_control_is_called(page: Page, control: str, path: str) -> None:
+    result = page.click(control)
+    assert [(f.url.endswith(path), f.failure) for f in blocked(result)] == [(True, "blocked_by_policy")]
+    assert result.url == page.site.base  # a blocked form post leaves the page where it was
+    assert only_reads(page.site), page.site.requests
+    assert not any(p == path for _, p in page.site.requests)
+
+
+def test_a_blocked_request_names_its_method_and_not_its_query(page: Page) -> None:
+    [one] = blocked(page.click("fetchpost"))
+    assert one.method == "POST"
+    assert "?" not in one.url
+
+
+def test_a_read_only_session_closes_every_websocket(page: Page) -> None:
+    result = page.click("websocket")
+    assert any(f.url.startswith("ws://") and f.url.endswith("/ws") for f in blocked(result))
+    status = page.evaluate("() => document.getElementById('status').textContent")
+    assert status in ("closed", "error"), status
+    # Nothing reached the server: the connection was never made.
+    assert ("GET", "/ws") not in page.site.requests
+
+
+def test_a_read_only_session_blocks_service_workers(page: Page) -> None:
+    page.click("worker")
+    status = page.evaluate("() => document.getElementById('status').textContent")
+    assert str(status).startswith("refused"), status
+
+
+def test_a_link_to_another_origin_is_blocked_and_nothing_reaches_it(page: Page, other_site: Any) -> None:
+    page.evaluate(f"() => {{ document.getElementById('outside').href = '{other_site.base}next.html'; }}")
+    result = page.click("outside")
+    assert [f.url for f in blocked(result)] == [other_site.base + "next.html"]
+    assert result.url == page.site.base
+    assert other_site.requests == []
+
+
+def test_a_redirect_to_another_origin_is_noticed_and_the_page_is_taken_back(page: Page, other_site: Any) -> None:
+    target = f"{page.site.base}redirect-out?to={other_site.base}next.html"
+    page.evaluate(f"() => {{ document.getElementById('outside').href = '{target}'; }}")
+    result = page.click("outside")
+    assert result.url == page.site.base
+    assert result.navigated is None
+    assert [f.url for f in blocked(result)] == [other_site.base + "next.html"]
+    # The limit the policy documents: the browser follows a redirect without asking, so this request was made. It was
+    # a GET, which read-only mode lets through anyway.
+    assert other_site.requests == [("GET", "/next.html")]
+    # And the page is usable afterwards.
+    assert page.click("dead").ok is True
+
+
+def test_a_session_that_allows_writes_still_stays_on_its_origins(
+    driver: DriverClient, act_site: Any, other_site: Any
+) -> None:
+    page = Page(driver, act_site, "chromium", {"allowOrigins": [origin(act_site)], "allowWrites": True})
+    page.evaluate(f"() => {{ document.getElementById('outside').href = '{other_site.base}next.html'; }}")
+    assert [f.url for f in blocked(page.click("outside"))] == [other_site.base + "next.html"]
+    assert other_site.requests == []
+
+
+def test_a_session_that_allows_writes_lets_a_write_through(driver: DriverClient, act_site: Any) -> None:
+    page = Page(driver, act_site, "chromium", {"allowOrigins": [origin(act_site)], "allowWrites": True})
+    result = page.click("fetchpost")
+    assert blocked(result) == []
+    assert ("POST", "/api/post") in act_site.requests
+
+
+def test_page_act_is_refused_on_a_session_without_a_policy(driver: DriverClient, act_site: Any) -> None:
+    driver.call("driver.hello", HELLO)
+    opened = driver.call("session.open", {"target": {"browser": "chromium"}, "viewport": VIEWPORT})
+    assert "policy" not in opened
+    driver.call("page.goto", {"sessionId": opened["sessionId"], "url": act_site.base, "waitUntil": "settled"})
+    with pytest.raises(RpcFailure) as failure:
+        driver.call("page.act", {"sessionId": opened["sessionId"], "action": "click", "target": {"selector": "#dead"}})
+    assert failure.value.kind == "invalid_params"
+    assert "safety policy" in str(failure.value)
+    assert only_reads(act_site)
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {"allowOrigins": []},
+        {"allowOrigins": ["ftp://files.test"]},
+        {"allowOrigins": ["not an origin"]},
+        {"allowOrigins": ["http://127.0.0.1:1", "data:text/html,x"]},
+    ],
+)
+def test_a_policy_nobody_can_read_is_refused_before_a_browser_starts(
+    driver: DriverClient, policy: dict[str, Any]
+) -> None:
+    driver.call("driver.hello", HELLO)
+    with pytest.raises(RpcFailure) as failure:
+        driver.call("session.open", {"target": {"browser": "chromium"}, "viewport": VIEWPORT, "policy": policy})
+    assert failure.value.kind == "invalid_params"

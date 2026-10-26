@@ -19,6 +19,8 @@ from traceqa_protocol.rpc import RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
 from traceqa_protocol.urls import redact_text, without_query
 
+from .safety import BLOCKED, Guard, origin_of
+
 # How long to wait for the element and for the action when the request names no time.
 DEFAULT_TIMEOUT_MS = 10_000
 # How long to wait for the page to come to rest after an action.
@@ -148,6 +150,16 @@ class Watch:
             )
         )
 
+    def note_blocked(self, address: str, method: str, request: Request | None) -> None:
+        """The session's policy aborted a request. Said as `blocked_by_policy`, and the browser's own report of the
+        same request, which follows, is not counted a second time."""
+        recorder = self.recorder
+        if recorder is None or len(recorder.failed) >= MAX_FAILED_REQUESTS:
+            return
+        if request is not None:
+            recorder.failed_seen.add(request)
+        recorder.failed.append(models.ActFailedRequest(url=without_query(address), method=method, failure=BLOCKED))
+
     def _request_failed(self, request: Request) -> None:
         reason = request.failure or ""
         if not any(mark in reason for mark in CANCELLED):
@@ -161,7 +173,13 @@ class Watch:
         with contextlib.suppress(PlaywrightError):
             # A response that is a download replaces nothing: the page stays where it was.
             attachment = response.headers.get("content-disposition", "").lower().startswith("attachment")
-            if request.is_navigation_request() and request.frame == self.page.main_frame and not attachment:
+            # A navigation the policy answered with 204 is a request that was stopped, not a page that was loaded.
+            stopped = request in recorder.failed_seen
+            if (
+                request.is_navigation_request()
+                and request.frame == self.page.main_frame
+                and not (attachment or stopped)
+            ):
                 recorder.navigated = True
                 recorder.navigated_status = response.status
         if response.status >= 400:
@@ -233,6 +251,26 @@ def _settle(page: Page) -> models.ActSettle:
     return models.ActSettle(waited_ms=int((time.monotonic() - started) * 1000), quiet=quiet)
 
 
+def _left_the_allowed_origins(page: Page, watch: Watch, guard: Guard, before_url: str) -> bool:
+    """Puts the page back when an action took it somewhere the policy does not allow. Returns True when it did.
+
+    A navigation to such a place is stopped before it is made. Two cases get past that. A redirect: the browser
+    follows it without asking Playwright, so the request to the other site has already been made when this notices
+    (the same limit as the operator's address rules). And a navigation that was stopped: Chromium then shows an error
+    page instead of the page, where Firefox and WebKit stay on it. Either way the way back is the browser's history,
+    and only when the page really moved: with nothing to go back to, in WebKit, going back lands on a blank page."""
+    landed = page.url
+    if landed == before_url or guard.allows_page(landed):
+        return False
+    if origin_of(landed) is not None:
+        # A real address of another site, so nothing stopped it: a redirect. An error page has no origin, and what led
+        # to it was reported by the guard when it stopped it.
+        watch.note_blocked(landed, "GET", None)
+    with contextlib.suppress(PlaywrightError):
+        page.go_back(wait_until="load", timeout=LOAD_WAIT_MS)
+    return True
+
+
 def _perform(locator: Locator, params: models.PageActParams, timeout_ms: int) -> None:
     action = params.action
     if action == models.ActionKind.click:
@@ -248,7 +286,7 @@ def _perform(locator: Locator, params: models.PageActParams, timeout_ms: int) ->
         locator.press(_need_value(params), timeout=timeout_ms)
 
 
-def act(page: Page, watch: Watch, frame: Frame, params: models.PageActParams) -> models.PageActResult:
+def act(page: Page, watch: Watch, guard: Guard, frame: Frame, params: models.PageActParams) -> models.PageActResult:
     """Performs the action in `frame` and reports what happened. Raises `RpcError` when it cannot."""
     timeout_ms = params.timeout_ms or DEFAULT_TIMEOUT_MS
     if params.value is None and params.action in (
@@ -287,7 +325,13 @@ def act(page: Page, watch: Watch, frame: Frame, params: models.PageActParams) ->
         if recorder.navigated:
             with contextlib.suppress(PlaywrightError):
                 page.wait_for_load_state("load", timeout=LOAD_WAIT_MS)
+        guard.drain_web_sockets()
         settle = _settle(page)
+        if _left_the_allowed_origins(page, watch, guard, before_url):
+            # What came back is the page that was there; whatever it was doing has restarted.
+            recorder.navigated = False
+            recorder.navigated_status = None
+            settle = _settle(page)
         popups = []
         for popup in recorder.popups:
             with contextlib.suppress(PlaywrightError):

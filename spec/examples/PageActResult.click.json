@@ -1,15 +1,51 @@
 {
   "ok": true,
   "url": "http://127.0.0.1:4173/cart",
-  "navigated": { "status": 200 },
-  "popups": ["http://127.0.0.1:4173/help"],
-  "dialogs": [{ "type": "confirm", "message": "Empty the cart?", "handled": true }],
-  "downloads": [{ "url": "http://127.0.0.1:4173/files/receipt.pdf", "suggestedName": "receipt.pdf" }],
-  "consoleErrors": [{ "text": "Uncaught TypeError: x is not a function", "source": "uncaught" }],
+  "navigated": {
+    "status": 200
+  },
+  "popups": [
+    "http://127.0.0.1:4173/help"
+  ],
+  "dialogs": [
+    {
+      "type": "confirm",
+      "message": "Empty the cart?",
+      "handled": true
+    }
+  ],
+  "downloads": [
+    {
+      "url": "http://127.0.0.1:4173/files/receipt.pdf",
+      "suggestedName": "receipt.pdf"
+    }
+  ],
+  "consoleErrors": [
+    {
+      "text": "Uncaught TypeError: x is not a function",
+      "source": "uncaught"
+    }
+  ],
   "failedRequests": [
-    { "url": "http://127.0.0.1:4173/api/cart", "method": "GET", "status": 500 },
-    { "url": "http://127.0.0.1:4173/api/track", "method": "POST", "failure": "net::ERR_BLOCKED_BY_CLIENT" }
+    {
+      "url": "http://127.0.0.1:4173/api/cart",
+      "method": "GET",
+      "status": 500
+    },
+    {
+      "url": "http://127.0.0.1:4173/api/track",
+      "method": "POST",
+      "failure": "net::ERR_BLOCKED_BY_CLIENT"
+    },
+    {
+      "url": "http://127.0.0.1:4173/checkout",
+      "method": "POST",
+      "failure": "blocked_by_policy"
+    }
   ],
   "domChanged": true,
-  "settle": { "waitedMs": 320, "quiet": true }
+  "settle": {
+    "waitedMs": 320,
+    "quiet": true
+  }
 }
