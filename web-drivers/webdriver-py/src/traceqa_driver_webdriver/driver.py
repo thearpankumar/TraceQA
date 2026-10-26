@@ -56,6 +56,10 @@ CAPABILITIES = models.Capabilities(
     network_events=False,
     failed_requests=False,
     eval_async=True,
+    # page.act is not implemented here yet, so no action is offered and no event is observed. Said out loud
+    # (an empty list, not an absent one) so a caller can tell "none" from "an older driver".
+    action_kinds=[],
+    event_kinds=[],
 )
 
 # The body page.eval runs when the engine asks to wait for a Promise. /execute/sync cannot wait, so this

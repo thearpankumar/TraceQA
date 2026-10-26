@@ -85,6 +85,23 @@ Limits on what a driver sends:
   and gives the resolved value. A rejection is that frame's `eval_failed`. Playwright always waits; the WebDriver driver
   uses `/execute/async` for it, because `/execute/sync` cannot wait. The engine needs this for `--axe` (axe-core is asynchronous).
 
+- **Actions:** a driver whose capabilities list `actionKinds` (optional; absent or empty means none) accepts `page.act`:
+  one `click`, `hover`, `type`, `select` or `press` on the element `target.selector` names, in `target.frameId`
+  (default `main`; only a frame id the engine has already been given by a `page.eval`). A selector written inside shadow
+  DOM as `host >>> inner` is accepted. `type`, `select` and `press` need `value`; `select` takes an option's value or
+  its label. `timeoutMs` (default 10000) limits the wait for the element and the action itself. The reply says what the
+  action did: `url` after it, `navigated` (with the main document's `status` when the driver sees it; a download is not
+  a navigation), `popups` (the driver closes them), `dialogs` (the driver dismisses them), `downloads` (the driver
+  cancels them: no file is stored), `consoleErrors` (`uncaught` or `console`), `failedRequests` (status 400 or more,
+  or the browser's reason, at most 50), `domChanged` and `settle`. Every address and message in it is cut as the
+  driver's errors are: no query, no fragment, at most 500 characters. A caller must not read an empty list as "nothing
+  happened" for a kind the session does not list in `eventKinds`, and no reader may depend on the difference between an
+  absent and an empty list. Errors: `element_not_found` (nothing matches within the time), `timeout` (the element was
+  found but the action did not finish, for example a disabled button), `invalid_params` (a selector that matches several
+  elements, an unknown frame, a missing `value`), `session_not_found`, `unsupported`. The WebDriver driver lists no
+  actions yet. **No safety policy applies yet**: the engine never sends `page.act`, and nothing in this protocol blocks
+  a click that submits a form (backlog EXP-5).
+
 The method names, with their parameter and result types, are listed in the
 `x-traceqa` block at the top of each protocol file.
 

@@ -9,7 +9,7 @@ import pytest
 from traceqa_protocol import BaseDriver, contracts, models
 from traceqa_protocol.driver import check_scroll_target, png_dimensions, scrolled_to_end
 from traceqa_protocol.rpc import Channel, RpcError
-from traceqa_protocol.urls import without_query
+from traceqa_protocol.urls import redact_text, without_query
 
 
 class Fake(BaseDriver[str]):
@@ -108,3 +108,13 @@ def test_without_query_strips_credentials_query_fragment() -> None:
     assert without_query("https://user:pw@example.com:8080/a/b?token=x#frag") == "https://example.com:8080/a/b"
     assert without_query("http://[::1]:3000/p?q=1") == "http://[::1]:3000/p"
     assert without_query("not a url?secret=1#x") == "not a url"
+
+
+def test_redact_text_cuts_every_address_and_then_the_text() -> None:
+    text = "failed GET https://u:pw@shop.test/api?token=SECRET#x and (http://a.test/p?k=v) done"
+    assert redact_text(text) == "failed GET https://shop.test/api and (http://a.test/p) done"
+    assert redact_text("no address here") == "no address here"
+    # The addresses are cut first, so a limit cannot keep the start of a secret.
+    long = "x" * 90 + " https://h.test/p?token=SECRET123456"
+    assert "SEC" not in redact_text(long, 110)
+    assert redact_text("é" * 600, 500) == "é" * 500

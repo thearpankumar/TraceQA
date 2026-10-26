@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Act fixture</title></head>
+<body>
+  <h1>Act fixture</h1>
+  <!-- One control for each thing an action can cause. A test names the id it needs. -->
+  <a id="go" href="/next.html">Go to the next page</a>
+  <button id="alert" onclick="alert('Hello from the page')">Alert</button>
+  <button id="confirm" onclick="document.getElementById('answer').textContent = String(confirm('Sure?'))">Confirm</button>
+  <span id="answer"></span>
+  <button id="popup" onclick="window.open('/next.html?token=SECRET#frag')">Popup</button>
+  <a id="download" href="/files/receipt.txt?token=SECRET">Download</a>
+  <button id="throws" onclick="throw new Error('handler failed')">Throws</button>
+  <button id="logs" onclick="console.error('boom at https://example.test/p?token=SECRET')">Logs</button>
+  <button id="fetch500" onclick="fetch('/api/fail?token=SECRET')">Fetch 500</button>
+  <button id="fetchdrop" onclick="fetch('/api/drop?token=SECRET')">Fetch dropped</button>
+  <button id="fetchok" onclick="fetch('/api/ok')">Fetch ok</button>
+  <button id="grow" onclick="document.getElementById('list').appendChild(document.createElement('li')).textContent = 'new'">Grow</button>
+  <ul id="list"></ul>
+  <button id="dead">Dead</button>
+  <button id="disabled" disabled>Disabled</button>
+  <button id="hovered" onmouseover="this.dataset.hovered = 'yes'">Hover me</button>
+  <label>Name <input id="name"></label>
+  <label>Size
+    <select id="size"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select>
+  </label>
+  <input id="keys" aria-label="Keys" onkeydown="document.getElementById('keylog').textContent += event.key + ';'">
+  <span id="keylog"></span>
+  <div id="host"></div>
+  <iframe id="frame" name="inner" src="/frame.html" title="Inner"></iframe>
+  <script>
+    var root = document.getElementById('host').attachShadow({ mode: 'open' });
+    root.innerHTML = '<button id="shadow-button" onclick="this.textContent = \'clicked\'">Shadow</button>';
+  </script>
+</body>
+</html>

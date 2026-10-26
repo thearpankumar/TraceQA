@@ -152,7 +152,7 @@ caller.
 | `page.screenshot` | Write a screenshot to a path the engine provides. |
 | `session.close` | Close the session. |
 | `driver.shutdown` | Close everything and exit. |
-| `page.act` | Reserved for interaction. |
+| `page.act` | One click, hover, type, select or key press on one element, and a report of what it did (navigation, popups, dialogs, downloads, console errors, failed requests, DOM change). Only for sessions that list `actionKinds`; the engine does not send it yet. |
 
 A driver may also send `driver.log` notifications.
 

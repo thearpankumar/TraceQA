@@ -609,56 +609,6 @@ class DriverHelloResult(BaseModel):
     )
 
 
-class Capabilities(BaseModel):
-    """
-    What this browser session can do. The engine adapts to these instead of knowing browser names.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    clip_screenshot: bool = Field(
-        ...,
-        validation_alias="clipScreenshot", serialization_alias="clipScreenshot",
-        description="Can screenshot one rectangle of the page.",
-    )
-    full_page_screenshot: bool = Field(
-        ...,
-        validation_alias="fullPageScreenshot", serialization_alias="fullPageScreenshot",
-        description="Can screenshot the whole scrollable page.",
-    )
-    eval_all_frames: bool = Field(
-        ...,
-        validation_alias="evalAllFrames", serialization_alias="evalAllFrames",
-        description="Can run a script in every frame, not only the top one.",
-    )
-    cross_origin_frames: bool = Field(
-        ...,
-        validation_alias="crossOriginFrames", serialization_alias="crossOriginFrames",
-        description="Can run a script inside frames from another origin.",
-    )
-    parallel_sessions: bool = Field(
-        ...,
-        validation_alias="parallelSessions", serialization_alias="parallelSessions",
-        description="Can hold more than one session at a time.",
-    )
-    set_viewport: bool = Field(
-        ..., validation_alias="setViewport", serialization_alias="setViewport", description="Can set an exact viewport size."
-    )
-    console_events: bool = Field(..., validation_alias="consoleEvents", serialization_alias="consoleEvents")
-    network_events: bool = Field(..., validation_alias="networkEvents", serialization_alias="networkEvents")
-    failed_requests: bool | None = Field(
-        default=None,
-        validation_alias="failedRequests", serialization_alias="failedRequests",
-        description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
-    )
-    eval_async: bool | None = Field(
-        default=None,
-        validation_alias="evalAsync", serialization_alias="evalAsync",
-        description="page.eval accepts awaitPromise. Absent means false.",
-    )
-
-
 class SessionStorageParams(BaseModel):
     """
     Asks for the session's cookies and stored values, to save them after someone has signed in.
@@ -668,19 +618,6 @@ class SessionStorageParams(BaseModel):
         populate_by_name=True,
     )
     session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
-
-
-class SessionOpenResult(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
-    browser: BrowserInfo
-    capabilities: Capabilities
-    viewport: Viewport | None = Field(
-        default=None,
-        description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
-    )
 
 
 class SessionCloseParams(BaseModel):
@@ -890,7 +827,7 @@ class ElementTarget(BaseModel):
 
 class PageActParams(BaseModel):
     """
-    Reserved for the explorer. Component extraction never sends it.
+    Performs one action on one element and reports what it did. Component extraction never sends it. A driver whose capabilities list no actionKinds answers it with `unsupported`.
     """
 
     model_config = ConfigDict(
@@ -902,13 +839,123 @@ class PageActParams(BaseModel):
     value: str | None = Field(
         default=None, description="Text to type, option to select, or key to press."
     )
+    timeout_ms: int | None = Field(
+        default=None,
+        validation_alias="timeoutMs", serialization_alias="timeoutMs",
+        description="How long to wait for the element and for the action itself. Default 10000.",
+        ge=1,
+    )
+
+
+class ActNavigation(BaseModel):
+    """
+    The main document was loaded because of the action.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: int | None = Field(
+        default=None,
+        description="HTTP status of the main document, when the driver can see it.",
+    )
+
+
+class ActDialog(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: str = Field(..., description="alert, confirm, prompt or beforeunload.")
+    message: str = Field(..., description="Cut to 500 characters.")
+    handled: bool = Field(..., description="The driver dismissed it.")
+
+
+class ActDownload(BaseModel):
+    """
+    A download the action started. The driver cancels it: the file is never stored.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    url: str = Field(..., description="Without query or fragment.")
+    suggested_name: str | None = Field(default=None, validation_alias="suggestedName", serialization_alias="suggestedName")
+
+
+class ActConsoleError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    text: str = Field(
+        ...,
+        description="Cut to 500 characters, with query and fragment removed from any address in it.",
+    )
+    source: str = Field(
+        ...,
+        description="`uncaught` for an uncaught exception, `console` for console.error.",
+    )
+
+
+class ActFailedRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    url: str = Field(..., description="Without query or fragment.")
+    method: str
+    status: int | None = Field(default=None, description="HTTP status, 400 or more.")
+    failure: str | None = Field(
+        default=None, description="The browser's reason when there was no response."
+    )
+
+
+class ActSettle(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    waited_ms: int = Field(..., validation_alias="waitedMs", serialization_alias="waitedMs", ge=0)
+    quiet: bool = Field(
+        ...,
+        description="False when the wait ended at its limit with the page still changing.",
+    )
 
 
 class PageActResult(BaseModel):
+    """
+    What an action did. Every field except `ok` is optional. A list is empty when nothing of that kind happened, or when the driver cannot observe that kind: the session's Capabilities.eventKinds says which kinds it observes, and a caller must not read an empty list as 'nothing happened' for a kind the session does not list. Readers in some languages cannot tell an absent list from an empty one, so no reader may depend on the difference.
+    """
+
     model_config = ConfigDict(
         populate_by_name=True,
     )
     ok: bool
+    url: str | None = Field(
+        default=None,
+        description="The address of the page after the action and after settling.",
+    )
+    navigated: ActNavigation | None = None
+    popups: list[str] | None = Field(
+        default=None,
+        description="Addresses of new pages the action opened. The driver closes them.",
+    )
+    dialogs: list[ActDialog] | None = None
+    downloads: list[ActDownload] | None = None
+    console_errors: list[ActConsoleError] | None = Field(
+        default=None, validation_alias="consoleErrors", serialization_alias="consoleErrors"
+    )
+    failed_requests: list[ActFailedRequest] | None = Field(
+        default=None, validation_alias="failedRequests", serialization_alias="failedRequests", description="At most 50."
+    )
+    dom_changed: bool | None = Field(
+        default=None,
+        validation_alias="domChanged", serialization_alias="domChanged",
+        description="A mutation observer saw a change in some frame, or the page navigated.",
+    )
+    settle: ActSettle | None = None
+    not_observed: list[str] | None = Field(
+        default=None,
+        validation_alias="notObserved", serialization_alias="notObserved",
+        description="The event kinds this driver could not observe for this action.",
+    )
 
 
 class LogLevel(StrEnum):
@@ -936,7 +983,7 @@ class RpcErrorData(BaseModel):
     )
     kind: str = Field(
         ...,
-        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal.",
+        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal, element_not_found.",
     )
     retryable: bool
 
@@ -1706,6 +1753,79 @@ class DiffEntry(BaseModel):
         default=None,
         validation_alias="pairedWith", serialization_alias="pairedWith",
         description="Set on a removed or added entry that looks like the other side's entry after a change of role or name.",
+    )
+
+
+class Capabilities(BaseModel):
+    """
+    What this browser session can do. The engine adapts to these instead of knowing browser names.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    clip_screenshot: bool = Field(
+        ...,
+        validation_alias="clipScreenshot", serialization_alias="clipScreenshot",
+        description="Can screenshot one rectangle of the page.",
+    )
+    full_page_screenshot: bool = Field(
+        ...,
+        validation_alias="fullPageScreenshot", serialization_alias="fullPageScreenshot",
+        description="Can screenshot the whole scrollable page.",
+    )
+    eval_all_frames: bool = Field(
+        ...,
+        validation_alias="evalAllFrames", serialization_alias="evalAllFrames",
+        description="Can run a script in every frame, not only the top one.",
+    )
+    cross_origin_frames: bool = Field(
+        ...,
+        validation_alias="crossOriginFrames", serialization_alias="crossOriginFrames",
+        description="Can run a script inside frames from another origin.",
+    )
+    parallel_sessions: bool = Field(
+        ...,
+        validation_alias="parallelSessions", serialization_alias="parallelSessions",
+        description="Can hold more than one session at a time.",
+    )
+    set_viewport: bool = Field(
+        ..., validation_alias="setViewport", serialization_alias="setViewport", description="Can set an exact viewport size."
+    )
+    console_events: bool = Field(..., validation_alias="consoleEvents", serialization_alias="consoleEvents")
+    network_events: bool = Field(..., validation_alias="networkEvents", serialization_alias="networkEvents")
+    failed_requests: bool | None = Field(
+        default=None,
+        validation_alias="failedRequests", serialization_alias="failedRequests",
+        description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
+    )
+    eval_async: bool | None = Field(
+        default=None,
+        validation_alias="evalAsync", serialization_alias="evalAsync",
+        description="page.eval accepts awaitPromise. Absent means false.",
+    )
+    action_kinds: list[ActionKind] | None = Field(
+        default=None,
+        validation_alias="actionKinds", serialization_alias="actionKinds",
+        description="The action kinds page.act accepts. Absent or empty means page.act is not supported by this session.",
+    )
+    event_kinds: list[str] | None = Field(
+        default=None,
+        validation_alias="eventKinds", serialization_alias="eventKinds",
+        description="What page.act reports about an action. Known values: navigation, popups, dialogs, downloads, console, network, dom. A kind that is not listed is not observed: an empty list for it in a page.act result does not mean nothing happened. Absent means none.",
+    )
+
+
+class SessionOpenResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
+    browser: BrowserInfo
+    capabilities: Capabilities
+    viewport: Viewport | None = Field(
+        default=None,
+        description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
     )
 
 

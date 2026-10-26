@@ -83,6 +83,16 @@
         "evalAsync": {
           "description": "page.eval accepts awaitPromise. Absent means false.",
           "type": "boolean"
+        },
+        "actionKinds": {
+          "description": "The action kinds page.act accepts. Absent or empty means page.act is not supported by this session.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/ActionKind" }
+        },
+        "eventKinds": {
+          "description": "What page.act reports about an action. Known values: navigation, popups, dialogs, downloads, console, network, dom. A kind that is not listed is not observed: an empty list for it in a page.act result does not mean nothing happened. Absent means none.",
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },
@@ -298,20 +308,85 @@
       }
     },
     "PageActParams": {
-      "description": "Reserved for the explorer. Component extraction never sends it.",
+      "description": "Performs one action on one element and reports what it did. Component extraction never sends it. A driver whose capabilities list no actionKinds answers it with `unsupported`.",
       "type": "object",
       "required": ["sessionId", "action", "target"],
       "properties": {
         "sessionId": { "type": "string" },
         "action": { "$ref": "#/$defs/ActionKind" },
         "target": { "$ref": "#/$defs/ElementTarget" },
-        "value": { "description": "Text to type, option to select, or key to press.", "type": "string" }
+        "value": { "description": "Text to type, option to select, or key to press.", "type": "string" },
+        "timeoutMs": { "description": "How long to wait for the element and for the action itself. Default 10000.", "type": "integer", "minimum": 1 }
+      }
+    },
+    "ActNavigation": {
+      "description": "The main document was loaded because of the action.",
+      "type": "object",
+      "properties": {
+        "status": { "description": "HTTP status of the main document, when the driver can see it.", "type": "integer" }
+      }
+    },
+    "ActDialog": {
+      "type": "object",
+      "required": ["type", "message", "handled"],
+      "properties": {
+        "type": { "description": "alert, confirm, prompt or beforeunload.", "type": "string" },
+        "message": { "description": "Cut to 500 characters.", "type": "string" },
+        "handled": { "description": "The driver dismissed it.", "type": "boolean" }
+      }
+    },
+    "ActDownload": {
+      "description": "A download the action started. The driver cancels it: the file is never stored.",
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "description": "Without query or fragment.", "type": "string" },
+        "suggestedName": { "type": "string" }
+      }
+    },
+    "ActConsoleError": {
+      "type": "object",
+      "required": ["text", "source"],
+      "properties": {
+        "text": { "description": "Cut to 500 characters, with query and fragment removed from any address in it.", "type": "string" },
+        "source": { "description": "`uncaught` for an uncaught exception, `console` for console.error.", "type": "string" }
+      }
+    },
+    "ActFailedRequest": {
+      "type": "object",
+      "required": ["url", "method"],
+      "properties": {
+        "url": { "description": "Without query or fragment.", "type": "string" },
+        "method": { "type": "string" },
+        "status": { "description": "HTTP status, 400 or more.", "type": "integer" },
+        "failure": { "description": "The browser's reason when there was no response.", "type": "string" }
+      }
+    },
+    "ActSettle": {
+      "type": "object",
+      "required": ["waitedMs", "quiet"],
+      "properties": {
+        "waitedMs": { "type": "integer", "minimum": 0 },
+        "quiet": { "description": "False when the wait ended at its limit with the page still changing.", "type": "boolean" }
       }
     },
     "PageActResult": {
+      "description": "What an action did. Every field except `ok` is optional. A list is empty when nothing of that kind happened, or when the driver cannot observe that kind: the session's Capabilities.eventKinds says which kinds it observes, and a caller must not read an empty list as 'nothing happened' for a kind the session does not list. Readers in some languages cannot tell an absent list from an empty one, so no reader may depend on the difference.",
       "type": "object",
       "required": ["ok"],
-      "properties": { "ok": { "type": "boolean" } }
+      "properties": {
+        "ok": { "type": "boolean" },
+        "url": { "description": "The address of the page after the action and after settling.", "type": "string" },
+        "navigated": { "$ref": "#/$defs/ActNavigation" },
+        "popups": { "description": "Addresses of new pages the action opened. The driver closes them.", "type": "array", "items": { "type": "string" } },
+        "dialogs": { "type": "array", "items": { "$ref": "#/$defs/ActDialog" } },
+        "downloads": { "type": "array", "items": { "$ref": "#/$defs/ActDownload" } },
+        "consoleErrors": { "type": "array", "items": { "$ref": "#/$defs/ActConsoleError" } },
+        "failedRequests": { "description": "At most 50.", "type": "array", "items": { "$ref": "#/$defs/ActFailedRequest" } },
+        "domChanged": { "description": "A mutation observer saw a change in some frame, or the page navigated.", "type": "boolean" },
+        "settle": { "$ref": "#/$defs/ActSettle" },
+        "notObserved": { "description": "The event kinds this driver could not observe for this action.", "type": "array", "items": { "type": "string" } }
+      }
     },
     "LogLevel": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
     "DriverLogParams": {
@@ -328,7 +403,7 @@
       "required": ["kind", "retryable"],
       "properties": {
         "kind": {
-          "description": "Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal.",
+          "description": "Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal, element_not_found.",
           "type": "string"
         },
         "retryable": { "type": "boolean" }

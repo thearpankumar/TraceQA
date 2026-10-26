@@ -1,0 +1,16 @@
+{
+  "sessionId": "s1",
+  "browser": { "name": "chromium", "version": "143.0" },
+  "capabilities": {
+    "clipScreenshot": true,
+    "fullPageScreenshot": true,
+    "evalAllFrames": true,
+    "crossOriginFrames": true,
+    "parallelSessions": true,
+    "setViewport": true,
+    "consoleEvents": false,
+    "networkEvents": false,
+    "actionKinds": ["click", "hover", "type", "select", "press"],
+    "eventKinds": ["navigation", "popups", "dialogs", "downloads", "console", "network", "dom"]
+  }
+}

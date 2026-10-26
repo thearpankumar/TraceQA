@@ -23,3 +23,13 @@ EXPECTED = {
 def test_handlers_are_exactly_the_methods_the_driver_implements() -> None:
     driver = WebDriverDriver(Channel(io.StringIO(), io.StringIO()))
     assert set(driver.handlers()) == EXPECTED
+
+
+def test_it_says_it_offers_no_actions_and_observes_no_events() -> None:
+    from traceqa_driver_playwright.driver import CAPABILITIES as PLAYWRIGHT
+    from traceqa_driver_webdriver.driver import CAPABILITIES as WEBDRIVER
+
+    # An empty list, not an absent one: "none" is told apart from "an older driver".
+    assert WEBDRIVER.action_kinds == [] and WEBDRIVER.event_kinds == []
+    assert PLAYWRIGHT.event_kinds
+    assert len(WEBDRIVER.event_kinds or []) < len(PLAYWRIGHT.event_kinds)

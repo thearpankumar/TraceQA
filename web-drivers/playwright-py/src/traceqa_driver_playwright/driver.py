@@ -36,6 +36,8 @@ from traceqa_protocol.rpc import Channel, RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
 from traceqa_protocol.urls import without_query
 
+from . import act
+
 NAME = "traceqa-driver-playwright"
 VERSION = installed_version(NAME)
 DEFAULT_TIMEOUT_MS = 30_000
@@ -65,6 +67,8 @@ CAPABILITIES = models.Capabilities(
     failed_requests=True,
     # frame.evaluate always waits for a returned Promise, so params.await_promise needs no code here.
     eval_async=True,
+    action_kinds=act.ACTION_KINDS,
+    event_kinds=act.EVENT_KINDS,
 )
 
 # Requests that change the list of components when they fail. Pictures, fonts and media do not, and a
@@ -93,6 +97,8 @@ class Session:
     failed_count: int = 0
     failed_urls: list[str] = field(default_factory=list)
     failed_seen: set[Request] = field(default_factory=set)
+    # Watchers for `page.act`, installed by the first one. A session that only reads pages never has them.
+    watch: act.Watch | None = None
 
     def note_failed(self, request: Request) -> None:
         # One request counts once, even when the browser reports both its answer and its failure.
@@ -737,3 +743,18 @@ class PlaywrightDriver(BaseDriver[Session]):
             raise RpcError("internal", f"screenshot failed: {first_line(error.message)}") from error
         width, height = png_dimensions(path.read_bytes()[:24])
         return models.PageScreenshotResult(path=str(path), width=width, height=height)
+
+    def page_act(self, params: models.PageActParams) -> models.PageActResult:
+        session = self._session(params.session_id)
+        wanted = params.target.frame_id or "main"
+        if wanted == "main":
+            frame = session.page.main_frame
+        else:
+            # Only frames the engine has already been told about: asking must not hand out new ids.
+            known = [f for f, frame_id in session.frame_ids.items() if frame_id == wanted and not f.is_detached()]
+            if not known:
+                raise RpcError("invalid_params", f"no frame {wanted!r}; read the page first so its frames have ids")
+            frame = known[0]
+        if session.watch is None:
+            session.watch = act.Watch(session.page, session.context)
+        return act.act(session.page, session.watch, frame, params)

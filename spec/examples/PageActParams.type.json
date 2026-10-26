@@ -1,0 +1,7 @@
+{
+  "sessionId": "s1",
+  "action": "type",
+  "target": { "selector": "#search", "frameId": "main" },
+  "value": "blue shirt",
+  "timeoutMs": 5000
+}

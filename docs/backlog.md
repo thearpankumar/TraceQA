@@ -156,6 +156,17 @@ action did: whether the page navigated, whether a popup, dialog or download appe
   difference.
 - `uv run scripts/gen_python_protocol.py` and `npm run gen` leave no diff after the change is committed.
 
+**Status (branch `backlog/explorer-page-act-and-safety`).** Built for the Playwright driver and the engine's `Driver::act`:
+the schema (all new fields optional, five examples), the five actions, dialogs, popups, downloads, console and failed-request
+reports, `domChanged` (shadow roots included) and `settle`, `actionKinds` and `eventKinds` in `session.open`, and the tests in
+`web-drivers/playwright-py/tests/test_act.py` against `testbed/sites/act` in Chromium, Firefox and WebKit. The WebDriver driver
+lists no actions and no events and still answers `page.act` with `unsupported`; clicking in Safari is not built.
+Not done: the engine never calls `page.act` (no safety policy yet, EXP-5); `driver.log` is not used for actions; transcripts were
+not re-recorded because the client protocol did not change; `npm run gen` no longer exists (the TypeScript SDK was removed).
+Rust readers cannot tell an absent list from an empty one (the generated types use an empty `Vec`), so a reader relies on
+`Capabilities.eventKinds` and not on an absent field. Firefox does not report a failed cross-origin `fetch` as a failed request
+(it reports an uncaught error), so the failed-request test uses a same-origin request the server drops.
+
 **Size.** L
 
 ### EXP-5: Safety policy and read-only mode (A10)
