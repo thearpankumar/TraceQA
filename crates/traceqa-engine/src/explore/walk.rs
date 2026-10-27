@@ -93,6 +93,9 @@ struct Walker<'a> {
     skipped: Vec<Skipped>,
     skipped_seen: BTreeSet<(usize, String)>,
     unreachable: BTreeSet<usize>,
+    /// Screens the address does not bring back (a dialog, an open drawer): they are reopened by replaying the actions
+    /// that led to them, without trying the address first.
+    needs_replay: BTreeSet<usize>,
     actions: u32,
     timeouts_in_a_row: u32,
     /// Some screens were not explored because they are too deep.
@@ -119,6 +122,7 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
         skipped: Vec::new(),
         skipped_seen: BTreeSet::new(),
         unreachable: BTreeSet::new(),
+        needs_replay: BTreeSet::new(),
         actions: 0,
         timeouts_in_a_row: 0,
         depth_cut: false,
@@ -342,9 +346,11 @@ impl Walker<'_> {
     /// Makes sure the browser is on `screen` as it was first read. `Ok(None)` when it cannot be, and the screen is
     /// then given up.
     ///
-    /// A page can look a little different from one load to the next, so a load that is not the screen is tried once
-    /// more before the screen is given up. A screen that cannot be reached by its address at all (a dialog) fails
-    /// both times, and costs one extra load, once.
+    /// First the screen's address is opened. A page can look a little different from one load to the next, so a load
+    /// that is not the screen is tried once more. A screen that its address does not bring back (a dialog, an open
+    /// drawer) fails both times; it is then remembered, and from then on it is reopened by replaying the shortest
+    /// chain of actions that led to it, which costs actions from the budget. A replay that does not end on the screen
+    /// is tried once more and then the screen is given up. Nothing is tried a third time.
     fn stand_on(&mut self, screen: usize) -> Result<Option<View>, Halt> {
         if let Some((at, view)) = &self.at {
             if *at == screen {
@@ -352,31 +358,165 @@ impl Walker<'_> {
             }
         }
         self.at = None;
-        let address = self.infos[screen].open_at.clone();
+        if !self.needs_replay.contains(&screen) {
+            let address = self.infos[screen].open_at.clone();
+            for _attempt in 0..2 {
+                self.check_limits()?;
+                let view = match self.browser.load(&address) {
+                    Ok(view) => view,
+                    Err(StepError::Cancelled) => return Err(Halt::Stop(Stop::Cancelled)),
+                    Err(StepError::Fatal(message)) => return Err(Halt::Error(message)),
+                    Err(_) => continue,
+                };
+                // Is it that screen by the rule? Not whether that screen is the closest of all: two screens at one
+                // address that are not alike can both be within the share of a page opened again.
+                if self.screens.matches(self.screens.all()[screen].id, &look_of(&view)) {
+                    self.at = Some((screen, view.clone()));
+                    return Ok(Some(view));
+                }
+            }
+            self.needs_replay.insert(screen);
+        }
+        // The start page is the screen its own address opens, so there is nothing to replay for it.
+        let Some(path) = (screen != 0).then(|| self.path_to(screen)).flatten() else {
+            return Ok(self.give_up(screen, "no recorded way to reach it"));
+        };
         for _attempt in 0..2 {
-            self.check_limits()?;
-            let view = match self.browser.load(&address) {
-                Ok(view) => view,
-                Err(StepError::Cancelled) => return Err(Halt::Stop(Stop::Cancelled)),
-                Err(StepError::Fatal(message)) => return Err(Halt::Error(message)),
-                Err(_) => continue,
-            };
-            // Is it that screen by the rule? Not whether that screen is the closest of all: two screens at one address
-            // that are not alike can both be within the share of a page opened again.
-            if self.screens.matches(self.screens.all()[screen].id, &look_of(&view)) {
+            if let Some(view) = self.replay(screen, &path)? {
+                self.say(&format!("s{screen} reopened by replaying {} actions", path.len()));
                 self.at = Some((screen, view.clone()));
                 return Ok(Some(view));
             }
         }
-        Ok(self.give_up(screen))
+        Ok(self.give_up(screen, "replaying the actions that led to it did not bring it back"))
     }
 
-    fn give_up(&mut self, screen: usize) -> Option<View> {
+    fn give_up(&mut self, screen: usize, why: &str) -> Option<View> {
         self.unreachable.insert(screen);
         self.say(&format!(
-            "s{screen} cannot be opened again, so what is left on it is not tried"
+            "s{screen} cannot be opened again ({why}), so what is left on it is not tried"
         ));
         None
+    }
+
+    /// The shortest chain of recorded edges from the start screen to `screen`, as (component, screen it led to).
+    /// Edges that typed text are left out: doing a write again could do its harm again.
+    fn path_to(&self, screen: usize) -> Option<Vec<(String, usize)>> {
+        let index = |name: &str| name.strip_prefix('s').and_then(|n| n.parse::<usize>().ok());
+        // How each screen was first reached from screen 0, as the edge that did it.
+        let mut via: BTreeMap<usize, (usize, &Edge)> = BTreeMap::new();
+        let mut queue = VecDeque::from([0usize]);
+        while let Some(here) = queue.pop_front() {
+            if here == screen {
+                break;
+            }
+            for edge in &self.edges {
+                if edge.status != Status::Ok || edge.action == "type" || index(&edge.from) != Some(here) {
+                    continue;
+                }
+                let Some(to) = edge.to.as_deref().and_then(index) else {
+                    continue;
+                };
+                if to != 0 && to != here && !via.contains_key(&to) {
+                    via.insert(to, (here, edge));
+                    queue.push_back(to);
+                }
+            }
+        }
+        let mut path = Vec::new();
+        let mut at = screen;
+        while at != 0 {
+            let (from, edge) = via.get(&at)?;
+            path.push((edge.component.clone(), at));
+            at = *from;
+        }
+        path.reverse();
+        Some(path)
+    }
+
+    /// Opens the start page and does `path` on it, checking after every action that the page is the screen the edge
+    /// led to. `Ok(None)` at the first thing that is not as it was recorded. Every action is asked of the rules again
+    /// and counts against the budget.
+    fn replay(&mut self, screen: usize, path: &[(String, usize)]) -> Result<Option<View>, Halt> {
+        self.check_limits()?;
+        let start = self.infos[0].open_at.clone();
+        let mut view = match self.browser.load(&start) {
+            Ok(view) => view,
+            Err(StepError::Cancelled) => return Err(Halt::Stop(Stop::Cancelled)),
+            Err(StepError::Fatal(message)) => return Err(Halt::Error(message)),
+            Err(_) => return Ok(None),
+        };
+        if !self.screens.matches(self.screens.all()[0].id, &look_of(&view)) {
+            return Ok(None);
+        }
+        let timeout_ms = self.options.budgets.action_timeout.as_millis() as u64;
+        for (component, to) in path {
+            self.check_limits()?;
+            let found = view
+                .components
+                .iter()
+                .find(|c| &c.id == component)
+                .and_then(|c| c.instances.iter().find(|i| i.is_actionable()).map(|i| (c, i)));
+            let Some((comp, instance)) = found else {
+                return Ok(None);
+            };
+            let Some(kind) = kind_of(&comp.role) else {
+                return Ok(None);
+            };
+            if self.reason_to_skip(comp, instance, &view.url, kind).is_some() {
+                return Ok(None);
+            }
+            if self.actions >= self.options.budgets.max_actions {
+                return Err(Halt::Stop(Stop::MaxActions));
+            }
+            let key = key_for(&comp.role);
+            let (_, result) = self.act_with_key_fallback(instance, &Act::Click, kind, key, timeout_ms)?;
+            self.actions += 1;
+            view = match result {
+                Ok(acted) => acted.view,
+                Err(StepError::Cancelled) => return Err(Halt::Stop(Stop::Cancelled)),
+                Err(StepError::Fatal(message)) => return Err(Halt::Error(message)),
+                Err(_) => return Ok(None),
+            };
+            if !self.screens.matches(self.screens.all()[*to].id, &look_of(&view)) {
+                return Ok(None);
+            }
+        }
+        debug_assert!(path.last().is_none_or(|(_, last)| *last == screen));
+        Ok(Some(view))
+    }
+
+    /// Does `act` on `instance`. A click that fails or times out is tried once with the key that does the same. The
+    /// word is the action that gave the result, for the graph.
+    fn act_with_key_fallback(
+        &mut self,
+        instance: &ViewInstance,
+        act: &Act,
+        kind: Kind,
+        key: &'static str,
+        timeout_ms: u64,
+    ) -> Result<(&'static str, Result<Acted, StepError>), Halt> {
+        let mut name = act.name();
+        let mut result = self.browser.act(instance, act, timeout_ms);
+        let blocked = matches!(result, Err(StepError::Failed(_) | StepError::Timeout(_)));
+        if blocked && kind == Kind::Click {
+            self.check_limits()?;
+            let retried = self
+                .browser
+                .act(instance, &Act::Press(key), timeout_ms.min(PRESS_TIMEOUT_MS));
+            match retried {
+                Ok(_) => {
+                    name = "press";
+                    result = retried;
+                }
+                // The browser or the run is gone: that is what to tell.
+                Err(StepError::Cancelled | StepError::Fatal(_)) => result = retried,
+                // Otherwise the click is what failed. A key press that finds the page gone (the click started a
+                // navigation that never finished) says "not found", which would hide the timeout.
+                Err(_) => {}
+            }
+        }
+        Ok((name, result))
     }
 
     /// Tries one component on one screen.
@@ -412,26 +552,7 @@ impl Walker<'_> {
             _ => Act::Click,
         };
         let key = key_for(&comp.role);
-        let mut name = act.name();
-        let mut result = self.browser.act(instance, &act, timeout_ms);
-        let blocked = matches!(result, Err(StepError::Failed(_) | StepError::Timeout(_)));
-        if blocked && kind == Kind::Click {
-            self.check_limits()?;
-            let retried = self
-                .browser
-                .act(instance, &Act::Press(key), timeout_ms.min(PRESS_TIMEOUT_MS));
-            match retried {
-                Ok(_) => {
-                    name = "press";
-                    result = retried;
-                }
-                // The browser or the run is gone: that is what to tell.
-                Err(StepError::Cancelled | StepError::Fatal(_)) => result = retried,
-                // Otherwise the click is what failed. A key press that finds the page gone (the click started a
-                // navigation that never finished) says "not found", which would hide the timeout.
-                Err(_) => {}
-            }
-        }
+        let (name, result) = self.act_with_key_fallback(instance, &act, kind, key, timeout_ms)?;
         self.at = None;
 
         let acted = match result {

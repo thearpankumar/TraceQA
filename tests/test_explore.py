@@ -124,7 +124,8 @@ def check_graph(graph: dict[str, Any]) -> None:
         assert edge.get("to", ids[0]) in ids
         assert (edge["status"] == "ok") == ("to" in edge)
     made = [e for e in graph["edges"] if e["status"] != "missing"]
-    assert graph["actions"] == len(made), "one action for each edge that was not missing"
+    # One action for each edge that was not missing, and the actions of the replays that reopened a screen.
+    assert graph["actions"] >= len(made)
     assert all(s["depth"] >= 0 for s in graph["states"])
     assert graph["states"][0]["depth"] == 0
     assert set(graph["unreachable"]) <= set(ids)
@@ -183,8 +184,12 @@ def test_a_read_only_walk_reads_everything_it_can_and_touches_nothing_it_must_no
     dialogs = [s for s in graph["states"] if s.get("modal")]
     assert [s["modal"] for s in dialogs] == ['dialog "help"'], graph["states"]
     assert dialogs[0]["url"] == server.base + "/", "the dialog is the home page with something on top"
-    # The dialog can only be reached by opening it, so after the walk leaves it the walk cannot come back (EXP-3).
-    assert dialogs[0]["id"] in graph["unreachable"]
+    # The dialog has no address of its own, so each time the walk leaves it, it is reopened by opening the home page
+    # and clicking "Help" again (EXP-3): nothing in it is left untried.
+    assert dialogs[0]["id"] not in graph["unreachable"]
+    inside = {e["label"] for e in graph["edges"] if e["from"] == dialogs[0]["id"]}
+    assert {'link "Shipping"', 'link "Returns"'} <= inside, inside
+    assert graph["actions"] > len([e for e in graph["edges"] if e["status"] != "missing"]), "a replay cost actions"
 
     # The header and the footer are tried once, on the first screen, and not on every screen.
     nav = [e for e in graph["edges"] if e["label"] == 'link "Products"']

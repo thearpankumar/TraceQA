@@ -273,9 +273,10 @@ fn options() -> Options {
 fn run(fake: &mut Fake, options: &Options) -> Explored {
     static NEVER: AtomicBool = AtomicBool::new(false);
     let done = explore(fake, options, &NEVER, &mut |_| {});
-    // Whatever the walk was about, its parts agree: one action for each edge that was made.
+    // Whatever the walk was about, its parts agree: one action for each edge that was made, and the actions of the
+    // replays that reopened a screen, which make no edge.
     let made = done.graph.edges.iter().filter(|e| e.status != Status::Missing).count();
-    assert_eq!(done.graph.actions as usize, made, "{:?}", done.graph.edges);
+    assert!(done.graph.actions as usize >= made, "{:?}", done.graph.edges);
     done
 }
 
@@ -797,10 +798,232 @@ fn a_browser_failure_in_the_middle_keeps_what_was_found_and_says_error() {
     assert_eq!(done.graph.states.len(), 2);
 }
 
+/// home has "Open", which shows a dialog at the same address; the dialog has two links back to home. The dialog has no
+/// address of its own.
+fn shop_with_a_dialog() -> Vec<(&'static str, P)> {
+    let mut dialog = page(
+        "/",
+        vec![
+            c("Dialog title", "heading"),
+            C::link("Yes", "home", "/"),
+            C::link("Later", "home", "/"),
+        ],
+    );
+    dialog.modal = Some("c_dialog".to_string());
+    vec![
+        (
+            "home",
+            page(
+                "/",
+                vec![C::link("Open", "dialog", "/open"), C::link("About", "about", "/about")],
+            ),
+        ),
+        ("dialog", dialog),
+        ("about", leaf("/about", "About title")),
+    ]
+}
+
 #[test]
-fn a_screen_that_cannot_be_opened_again_is_listed_and_the_walk_goes_on() {
-    // "Open" shows a dialog; the dialog has two links, but its screen has no address of its own. The walk is standing
-    // in the dialog when it finds it, so it tries the first link there. Then it cannot come back for the second.
+fn a_screen_with_no_address_is_reopened_by_replaying_the_actions_that_led_to_it() {
+    // The walk finds the dialog by clicking "Open" and tries "Later" there. For "Yes" it must come back: the address
+    // shows the home page, so it opens the home page and clicks "Open" again.
+    let mut fake = Fake::new(shop_with_a_dialog());
+    let done = run(&mut fake, &options());
+    assert_eq!(done.graph.stopped, Stop::Complete);
+    assert_eq!(done.graph.states.len(), 3);
+    assert_eq!(done.graph.unreachable, Vec::<String>::new());
+    assert_eq!(fake.acted, ["c_about", "c_open", "c_later", "c_open", "c_yes"]);
+    // Four edges and one replayed action.
+    assert_eq!(done.graph.edges.len(), 4);
+    assert_eq!(done.graph.actions, 5);
+}
+
+#[test]
+fn a_screen_the_address_cannot_bring_back_is_not_tried_by_address_again() {
+    // The address is tried twice, once, for the dialog. Every later reset goes straight to the replay.
+    let mut fake = Fake::new(shop_with_a_dialog());
+    let mut opts = options();
+    // Two more links in the dialog make three resets to it.
+    fake.pages
+        .get_mut("dialog")
+        .unwrap()
+        .comps
+        .push(C::link("Maybe", "home", "/"));
+    opts.budgets.max_actions = 50;
+    run(&mut fake, &opts);
+    // Loads: the start, the dialog's address twice, then one start page for each replay (the third and fourth control).
+    let at_start = fake
+        .loaded
+        .iter()
+        .filter(|u| u.as_str() == format!("{ORIGIN}/"))
+        .count();
+    assert_eq!(
+        fake.loaded.len(),
+        at_start,
+        "only the start page is ever opened: {:?}",
+        fake.loaded
+    );
+    assert_eq!(
+        fake.acted.iter().filter(|a| *a == "c_open").count(),
+        3,
+        "{:?}",
+        fake.acted
+    );
+}
+
+#[test]
+fn replayed_actions_count_against_max_actions() {
+    // "About", "Open", "Later" and then one replayed "Open" is four actions: the fifth, "Yes", is not allowed.
+    let mut fake = Fake::new(shop_with_a_dialog());
+    let mut opts = options();
+    opts.budgets.max_actions = 4;
+    let done = run(&mut fake, &opts);
+    assert_eq!(done.graph.stopped, Stop::MaxActions);
+    assert_eq!(done.graph.actions, 4);
+    assert_eq!(fake.acted, ["c_about", "c_open", "c_later", "c_open"]);
+
+    // Stopping while replaying is a stop and not a failure to reopen.
+    let mut fake = Fake::new(shop_with_a_dialog());
+    opts.budgets.max_actions = 3;
+    let done = run(&mut fake, &opts);
+    assert_eq!(done.graph.stopped, Stop::MaxActions);
+    assert_eq!(done.graph.unreachable, Vec::<String>::new());
+}
+
+#[test]
+fn a_replay_follows_every_step_of_a_chain_in_order() {
+    // home -> menu (same address) -> drawer (same address). The drawer is reopened by the two actions that led to it.
+    let drawer = |title: &str| {
+        let mut p = page(
+            "/",
+            vec![
+                c(title, "heading"),
+                C::link("Inner one", "home", "/"),
+                C::link("Inner two", "home", "/"),
+            ],
+        );
+        p.modal = Some("c_dialog".to_string());
+        p
+    };
+    let mut menu = page("/", vec![c("Menu title", "heading"), C::link("Deeper", "drawer", "/")]);
+    menu.modal = Some("c_menu".to_string());
+    let mut fake = Fake::new(vec![
+        ("home", page("/", vec![C::link("Menu", "menu", "/")])),
+        ("menu", menu),
+        ("drawer", drawer("Drawer title")),
+    ]);
+    let done = run(&mut fake, &options());
+    assert_eq!(done.graph.unreachable, Vec::<String>::new());
+    // Replay of the drawer: the menu, then deeper.
+    assert_eq!(
+        fake.acted,
+        ["c_menu", "c_deeper", "c_inner_one", "c_menu", "c_deeper", "c_inner_two"],
+        "{:?}",
+        fake.acted
+    );
+}
+
+#[test]
+fn a_screen_that_cannot_be_reopened_by_replay_either_is_listed_and_the_walk_goes_on() {
+    // The dialog only comes the first time: the second "Open" does nothing.
+    struct Once(Fake, u32);
+    impl Browser for Once {
+        fn load(&mut self, url: &str) -> Result<View, StepError> {
+            self.0.load(url)
+        }
+        fn act(&mut self, i: &ViewInstance, a: &Act, t: u64) -> Result<Acted, StepError> {
+            if i.selector == "sel:c_open" {
+                self.1 += 1;
+                if self.1 > 1 {
+                    return Ok(Acted {
+                        effect: Effect::default(),
+                        view: self.0.view(),
+                    });
+                }
+            }
+            self.0.act(i, a, t)
+        }
+        fn requests(&self) -> Option<BTreeMap<String, u64>> {
+            self.0.requests()
+        }
+    }
+    let mut browser = Once(Fake::new(shop_with_a_dialog()), 0);
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let done = explore(&mut browser, &options(), &NEVER, &mut |_| {});
+    assert_eq!(done.graph.stopped, Stop::Complete);
+    assert_eq!(done.graph.unreachable, ["s2"]);
+    // Tried: About, Open, Later. Then two replays of "Open" (two attempts, no more) and "Yes" never.
+    assert_eq!(
+        browser.0.acted,
+        ["c_about", "c_open", "c_later"],
+        "{:?}",
+        browser.0.acted
+    );
+    assert_eq!(browser.1, 3, "the dialog's link was clicked once and replayed twice");
+}
+
+#[test]
+fn a_replay_that_goes_wrong_halfway_stops_there() {
+    // "Next" leads to a page that is not the one that was recorded the second time: nothing more is clicked on it.
+    struct Moved(Fake, u32);
+    impl Browser for Moved {
+        fn load(&mut self, url: &str) -> Result<View, StepError> {
+            self.0.load(url)
+        }
+        fn act(&mut self, i: &ViewInstance, a: &Act, t: u64) -> Result<Acted, StepError> {
+            if i.selector == "sel:c_deeper" {
+                self.1 += 1;
+                if self.1 > 1 {
+                    self.0.current = "about";
+                    return Ok(Acted {
+                        effect: Effect {
+                            navigated: true,
+                            changed: true,
+                            ..Effect::default()
+                        },
+                        view: self.0.view(),
+                    });
+                }
+            }
+            self.0.act(i, a, t)
+        }
+        fn requests(&self) -> Option<BTreeMap<String, u64>> {
+            self.0.requests()
+        }
+    }
+    let mut drawer = page(
+        "/",
+        vec![
+            c("Drawer title", "heading"),
+            C::link("Inner one", "home", "/"),
+            C::link("Inner two", "home", "/"),
+        ],
+    );
+    drawer.modal = Some("c_dialog".to_string());
+    let mut menu = page("/", vec![c("Menu title", "heading"), C::link("Deeper", "drawer", "/")]);
+    menu.modal = Some("c_menu".to_string());
+    let mut browser = Moved(
+        Fake::new(vec![
+            ("home", page("/", vec![C::link("Menu", "menu", "/")])),
+            ("menu", menu),
+            ("drawer", drawer),
+            ("about", leaf("/about", "About title")),
+        ]),
+        0,
+    );
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let done = explore(&mut browser, &options(), &NEVER, &mut |_| {});
+    assert_eq!(done.graph.unreachable, ["s2"]);
+    assert!(
+        !browser.0.acted.iter().skip(4).any(|a| a.starts_with("c_inner")),
+        "nothing was clicked on a page that was not the drawer: {:?}",
+        browser.0.acted
+    );
+}
+
+#[test]
+fn a_chain_with_typed_text_is_never_replayed() {
+    // The dialog opens only after text is typed. Typing again could do its harm again, so the dialog is given up.
     let mut dialog = page(
         "/",
         vec![
@@ -815,17 +1038,63 @@ fn a_screen_that_cannot_be_opened_again_is_listed_and_the_walk_goes_on() {
             "home",
             page(
                 "/",
-                vec![C::link("Open", "dialog", "/open"), C::link("About", "about", "/about")],
+                vec![C {
+                    to: Some("dialog"),
+                    ..c("Search", "textbox")
+                }],
             ),
         ),
         ("dialog", dialog),
-        ("about", leaf("/about", "About title")),
     ]);
-    let done = run(&mut fake, &options());
-    assert_eq!(done.graph.stopped, Stop::Complete);
-    assert_eq!(done.graph.states.len(), 3);
+    let mut opts = options();
+    opts.rules = Rules::new(&opts.start_url, true, &[]).unwrap();
+    let done = run(&mut fake, &opts);
+    assert_eq!(done.graph.unreachable, ["s1"]);
+    assert_eq!(fake.kinds, ["type c_search", "click c_later"], "{:?}", fake.kinds);
+}
+
+#[test]
+fn the_rules_are_asked_again_for_every_replayed_action() {
+    // The page that opens the dialog starts to show a button that the rules skip, in place of the link that was
+    // clicked before. The replay must not click it.
+    struct Swapped(Fake, u32);
+    impl Browser for Swapped {
+        fn load(&mut self, url: &str) -> Result<View, StepError> {
+            self.1 += 1;
+            if self.0.acted.iter().any(|a| a == "c_open") {
+                let comps = &mut self.0.pages.get_mut("home").unwrap().comps;
+                comps.retain(|c| c.id != "c_open");
+                comps.push(C {
+                    id: "c_open".to_string(),
+                    ..C::button("Delete everything", "dialog")
+                });
+            }
+            self.0.load(url)
+        }
+        fn act(&mut self, i: &ViewInstance, a: &Act, t: u64) -> Result<Acted, StepError> {
+            self.0.act(i, a, t)
+        }
+        fn requests(&self) -> Option<BTreeMap<String, u64>> {
+            self.0.requests()
+        }
+    }
+    let mut browser = Swapped(Fake::new(shop_with_a_dialog()), 0);
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let done = explore(&mut browser, &options(), &NEVER, &mut |_| {});
     assert_eq!(done.graph.unreachable, ["s2"]);
-    assert_eq!(fake.acted, ["c_about", "c_open", "c_later"]);
+    assert_eq!(
+        browser.0.acted.iter().filter(|a| *a == "c_open").count(),
+        1,
+        "{:?}",
+        browser.0.acted
+    );
+}
+
+#[test]
+fn a_walk_with_a_replay_writes_the_same_bytes_each_time() {
+    let one = run(&mut Fake::new(shop_with_a_dialog()), &options()).graph.to_bytes();
+    let two = run(&mut Fake::new(shop_with_a_dialog()), &options()).graph.to_bytes();
+    assert_eq!(one, two);
 }
 
 #[test]
