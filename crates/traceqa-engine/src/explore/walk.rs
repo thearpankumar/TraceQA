@@ -12,7 +12,8 @@ use url::Url;
 
 use super::graph::{Edge, Graph, Settings, Skipped, State, Status, Stop};
 use super::model::{Act, Acted, Browser, StepError, View, ViewComponent, ViewInstance};
-use super::{data, Options, Strategy, MAX_TIMEOUTS_IN_A_ROW};
+use super::values::{Field, ModelCall, Stopped, Values};
+use super::{Options, Strategy, MAX_TIMEOUTS_IN_A_ROW};
 use crate::policy::{Candidate, Decision};
 use crate::state::{chrome_ids, clean_url, Look, Screens, DEFAULT_CHROME_SHARE};
 use crate::url_safety::redact;
@@ -22,6 +23,8 @@ pub struct Explored {
     pub graph: Graph,
     /// Why the browser failed, when `graph.stopped` is [`Stop::Error`].
     pub error: Option<String>,
+    /// Every call made to a model, in order. Written to `events.jsonl` as `model.call` events.
+    pub model_calls: Vec<ModelCall>,
 }
 
 /// A line for the person watching.
@@ -106,6 +109,7 @@ struct Walker<'a> {
     /// Page-wide components already queued or skipped, so each is dealt with on the first screen that has it.
     chrome_seen: BTreeSet<String>,
     chrome_pages: u32,
+    values: Values,
 }
 
 pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool, progress: Progress) -> Explored {
@@ -130,6 +134,7 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
         chrome: BTreeSet::new(),
         chrome_seen: BTreeSet::new(),
         chrome_pages: 0,
+        values: Values::new(options.seed, options.model.clone()),
     };
     let (stopped, error) = match walker.run() {
         Ok(()) => (
@@ -143,9 +148,11 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
         Err(Halt::Stop(stop)) => (stop, None),
         Err(Halt::Error(message)) => (Stop::Error, Some(message)),
     };
+    let model_calls = walker.values.take_calls();
     Explored {
         graph: walker.into_graph(stopped),
         error,
+        model_calls,
     }
 }
 
@@ -548,7 +555,7 @@ impl Walker<'_> {
 
         let timeout_ms = self.options.budgets.action_timeout.as_millis() as u64;
         let act = match kind {
-            Kind::Type => Act::Type(data::value_for(self.options.seed, component, &comp.name)),
+            Kind::Type => Act::Type(self.typed_value(component, comp, instance)?),
             _ => Act::Click,
         };
         let key = key_for(&comp.role);
@@ -599,6 +606,31 @@ impl Walker<'_> {
         };
         self.timeouts_in_a_row = 0;
         self.arrived(screen, component, &label, name, acted)
+    }
+
+    /// The text to type into a field. A model is asked only here, so only for a field that is really about to be typed
+    /// into: the rules have let it through and writes are on.
+    fn typed_value(&mut self, component: &str, comp: &ViewComponent, instance: &ViewInstance) -> Result<String, Halt> {
+        let field = Field {
+            component: component.to_string(),
+            role: comp.role.clone(),
+            label: comp.name.clone(),
+            input_type: instance.hints.input_type.clone(),
+            placeholder: instance.hints.placeholder.clone(),
+            autocomplete: instance.hints.autocomplete.clone(),
+            required: instance.hints.required,
+        };
+        let before = self.values.calls().len();
+        let time_left = self.options.budgets.timeout.saturating_sub(self.started.elapsed());
+        let value = self.values.value_for(&field, self.cancel, time_left);
+        let lines: Vec<String> = self.values.calls()[before..].iter().map(ModelCall::summary).collect();
+        for line in lines {
+            self.say(&line);
+        }
+        value.map_err(|stopped| match stopped {
+            Stopped::Cancelled => Halt::Stop(Stop::Cancelled),
+            Stopped::OutOfTime => Halt::Stop(Stop::Timeout),
+        })
     }
 
     /// The action worked and the page was read again: which screen is it?

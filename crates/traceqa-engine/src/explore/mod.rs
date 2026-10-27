@@ -10,6 +10,7 @@ mod live;
 mod model;
 mod runner;
 pub mod settle;
+mod values;
 mod walk;
 
 #[cfg(test)]
@@ -17,8 +18,12 @@ mod tests;
 
 pub use graph::{Edge, Graph, Skipped, State, Status, Stop, GRAPH_VERSION};
 pub use live::{Live, DEFAULT_LOAD_TIMEOUT_MS};
-pub use model::{Act, Acted, Browser, Effect, StepError, View, ViewComponent, ViewInstance};
+pub use model::{Act, Acted, Browser, Effect, Hints, StepError, View, ViewComponent, ViewInstance};
 pub use runner::{ExploreRun, Finished, Request, FEATURE};
+pub use values::{
+    CallOutcome, Field, ModelCall, ModelSettings, Recorded, SourceError, Stopped, ValueSource, Values,
+    DEFAULT_MAX_MODEL_CALLS, DEFAULT_MODEL_TIMEOUT, FAILURES_BEFORE_OFF,
+};
 pub use walk::{explore, Explored, Progress};
 
 use std::time::Duration;
@@ -88,4 +93,6 @@ pub struct Options {
     pub rules: Rules,
     /// Pages to read, besides the first, for the ids that are on every page. 0 skips it.
     pub chrome_pages: usize,
+    /// A source that is asked for the text of a field before the generator is. `None`: the generator only.
+    pub model: Option<ModelSettings>,
 }

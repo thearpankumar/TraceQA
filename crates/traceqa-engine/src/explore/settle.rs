@@ -80,6 +80,7 @@ mod tests {
                         enabled: true,
                         href: None,
                         expanded: None,
+                        hints: Default::default(),
                     }],
                 })
                 .collect(),

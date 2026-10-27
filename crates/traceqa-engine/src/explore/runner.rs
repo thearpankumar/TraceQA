@@ -116,6 +116,9 @@ impl ExploreRun {
                     progress.emit("progress", None, redact_text(line), json!({}));
                 });
                 browser.close();
+                for call in &explored.model_calls {
+                    progress.emit("model.call", None, redact_text(&call.summary()), call.data());
+                }
                 explored
             });
             done.store(true, Ordering::SeqCst);

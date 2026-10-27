@@ -2,8 +2,9 @@
 //! here: `tests/test_explore.py` runs the real command in Chromium, Firefox and WebKit.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::policy::Rules;
@@ -32,6 +33,7 @@ struct C {
     click_blocked: bool,
     /// What a key press does instead of working (the page has moved on, say).
     press_fails: Option<StepError>,
+    hints: Hints,
 }
 
 fn c(name: &str, role: &'static str) -> C {
@@ -48,6 +50,7 @@ fn c(name: &str, role: &'static str) -> C {
         fails: None,
         click_blocked: false,
         press_fails: None,
+        hints: Hints::default(),
     }
 }
 
@@ -79,6 +82,10 @@ impl C {
     }
     fn disabled(mut self) -> Self {
         self.enabled = false;
+        self
+    }
+    fn input_type(mut self, kind: &str) -> Self {
+        self.hints.input_type = Some(kind.to_string());
         self
     }
     fn expanded(mut self) -> Self {
@@ -118,6 +125,8 @@ struct Fake {
     kinds: Vec<String>,
     /// Every key pressed.
     keys: Vec<String>,
+    /// Every text typed.
+    typed: Vec<String>,
     /// A load that failed closed the session that was open, as the real browser does. Nothing can be acted on until
     /// a load works.
     stranded: bool,
@@ -139,6 +148,7 @@ impl Fake {
             acted: Vec::new(),
             kinds: Vec::new(),
             keys: Vec::new(),
+            typed: Vec::new(),
             stranded: false,
             loaded: Vec::new(),
             requests: 0,
@@ -167,6 +177,7 @@ impl Fake {
                     enabled: c.enabled,
                     href: c.href.clone(),
                     expanded: c.expanded,
+                    hints: c.hints.clone(),
                 }],
             })
             .collect();
@@ -215,6 +226,9 @@ impl Browser for Fake {
         self.kinds.push(format!("{} {id}", act.name()));
         if let Act::Press(key) = act {
             self.keys.push((*key).to_string());
+        }
+        if let Act::Type(text) = act {
+            self.typed.push(text.clone());
         }
         self.requests += self.per_request;
         if let Some((after, flag)) = self.cancel {
@@ -267,6 +281,7 @@ fn options() -> Options {
         budgets: Budgets::default(),
         rules: Rules::new(&format!("{ORIGIN}/"), false, &[]).unwrap(),
         chrome_pages: 0,
+        model: None,
     }
 }
 
@@ -1601,4 +1616,479 @@ fn addresses_in_the_file_have_their_secrets_hidden() {
     let text = String::from_utf8(done.graph.to_bytes()).unwrap();
     assert!(!text.contains("SECRET123"), "{text}");
     assert!(text.contains("page=2"));
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// A model for the text of fields (EXP-6)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A source that answers as it is told, counts its calls and keeps what it was asked.
+#[derive(Debug)]
+struct Said {
+    reply: Result<String, String>,
+    sleep: Duration,
+    panics: bool,
+    calls: Arc<AtomicU32>,
+    asked: Arc<Mutex<Vec<Field>>>,
+}
+
+impl Said {
+    fn new(reply: Result<&str, &str>) -> Self {
+        Self {
+            reply: reply.map(str::to_string).map_err(str::to_string),
+            sleep: Duration::ZERO,
+            panics: false,
+            calls: Arc::new(AtomicU32::new(0)),
+            asked: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+    fn slow(mut self, sleep: Duration) -> Self {
+        self.sleep = sleep;
+        self
+    }
+    fn calls(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.calls)
+    }
+    fn asked(&self) -> Arc<Mutex<Vec<Field>>> {
+        Arc::clone(&self.asked)
+    }
+}
+
+impl ValueSource for Said {
+    fn name(&self) -> &str {
+        "said"
+    }
+    fn value(&self, field: &Field) -> Result<String, SourceError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.asked.lock().unwrap().push(field.clone());
+        std::thread::sleep(self.sleep);
+        assert!(!self.panics, "the source panicked on purpose");
+        self.reply.clone().map_err(SourceError)
+    }
+}
+
+/// One page with a text field for each label, in a walk that is allowed to type.
+fn form(labels: &[&str]) -> Fake {
+    Fake::new(vec![(
+        "home",
+        page(
+            "/",
+            labels
+                .iter()
+                .enumerate()
+                .map(|(n, label)| c(label, "textbox").at(&format!("main > field {n:02}")))
+                .collect(),
+        ),
+    )])
+}
+
+fn with_writes() -> Options {
+    let mut opts = options();
+    opts.rules = Rules::new(&opts.start_url, true, &[]).unwrap();
+    opts
+}
+
+fn use_model(opts: &mut Options, source: Said) {
+    opts.model = Some(ModelSettings {
+        source: Arc::new(source),
+        max_calls: DEFAULT_MAX_MODEL_CALLS,
+        timeout: DEFAULT_MODEL_TIMEOUT,
+    });
+}
+
+fn outcomes(done: &Explored) -> Vec<&'static str> {
+    done.model_calls.iter().map(|call| call.outcome.as_str()).collect()
+}
+
+#[test]
+fn without_a_model_the_generator_types_and_no_call_is_recorded() {
+    let mut fake = form(&["Search products", "Your email"]);
+    let done = run(&mut fake, &with_writes());
+    assert_eq!(fake.typed.len(), 2);
+    assert!(done.model_calls.is_empty());
+    assert_eq!(fake.typed[1], "user@example.test");
+    let again = {
+        let mut other = form(&["Search products", "Your email"]);
+        run(&mut other, &with_writes());
+        other.typed
+    };
+    assert_eq!(fake.typed, again, "the same seed types the same");
+}
+
+#[test]
+fn the_answer_of_a_model_is_what_is_typed_and_the_call_is_recorded() {
+    let source = Said::new(Ok("  blue pen "));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut fake = form(&["Search products"]);
+    let done = run(&mut fake, &opts);
+    assert_eq!(fake.typed, ["blue pen"]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(outcomes(&done), ["used"]);
+    let call = &done.model_calls[0];
+    assert_eq!(call.answer.as_deref(), Some("blue pen"));
+    assert_eq!(call.request.label, "Search products");
+    assert_eq!(call.request.component, "", "the component id is not sent");
+    assert_eq!(call.data()["source"], "said");
+}
+
+#[test]
+fn a_model_is_never_asked_when_nothing_is_typed() {
+    // Read-only: the field is skipped before anything is asked.
+    let source = Said::new(Ok("blue pen"));
+    let calls = source.calls();
+    let mut opts = options();
+    use_model(&mut opts, source);
+    let mut fake = form(&["Search products"]);
+    let done = run(&mut fake, &opts);
+    assert!(fake.typed.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(done.model_calls.is_empty());
+}
+
+#[test]
+fn the_cap_on_calls_ends_the_asking_and_the_generator_types_the_rest() {
+    let labels = ["Field A", "Field B", "Field C", "Field D", "Field E", "Field F"];
+    let source = Said::new(Ok("from the model"));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    opts.model.as_mut().unwrap().max_calls = 3;
+    let mut fake = form(&labels);
+    let done = run(&mut fake, &opts);
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "at most the cap");
+    assert_eq!(fake.typed.len(), 6);
+    assert_eq!(fake.typed.iter().filter(|t| *t == "from the model").count(), 3);
+    assert!(fake
+        .typed
+        .iter()
+        .filter(|t| *t != "from the model")
+        .all(|t| t.starts_with("Test input")));
+    assert_eq!(outcomes(&done), ["used", "used", "used", "over-cap"]);
+}
+
+#[test]
+fn a_cap_of_zero_asks_nothing() {
+    let source = Said::new(Ok("from the model"));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    opts.model.as_mut().unwrap().max_calls = 0;
+    let mut fake = form(&["Field A"]);
+    run(&mut fake, &opts);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(fake.typed[0].starts_with("Test input"));
+}
+
+#[test]
+fn a_source_that_always_fails_does_not_stop_the_walk_and_is_switched_off_after_three_calls() {
+    let labels = ["Field A", "Field B", "Field C", "Field D", "Field E"];
+    let source = Said::new(Err("the service is down"));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut fake = form(&labels);
+    let done = run(&mut fake, &opts);
+    assert_eq!(done.graph.stopped, Stop::Complete);
+    assert_eq!(fake.typed.len(), 5, "every field was typed into");
+    assert!(fake.typed.iter().all(|t| t.starts_with("Test input")));
+    assert_eq!(calls.load(Ordering::SeqCst), FAILURES_BEFORE_OFF);
+    assert_eq!(outcomes(&done), ["failed", "failed", "failed"]);
+    let last = done.model_calls[2].note.as_deref().unwrap();
+    assert!(last.contains("switched off"), "{last}");
+}
+
+#[test]
+fn a_source_that_panics_is_a_failed_call_and_not_the_end_of_the_walk() {
+    let mut source = Said::new(Ok("x"));
+    source.panics = true;
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut fake = form(&["Field A"]);
+    let done = run(&mut fake, &opts);
+    assert_eq!(done.graph.stopped, Stop::Complete);
+    assert_eq!(outcomes(&done), ["failed"]);
+    assert!(fake.typed[0].starts_with("Test input"));
+}
+
+#[test]
+fn an_answer_that_is_empty_long_or_has_a_line_break_is_thrown_away() {
+    let long = "x".repeat(300);
+    for bad in ["", "   ", "line one\nline two", long.as_str(), "tab\there"] {
+        let mut opts = with_writes();
+        use_model(&mut opts, Said::new(Ok(bad)));
+        let mut fake = form(&["Search products"]);
+        let done = run(&mut fake, &opts);
+        assert_eq!(outcomes(&done), ["rejected"], "{bad:?}");
+        assert!(
+            fake.typed[0].starts_with("Test input") || fake.typed[0].len() < 20,
+            "{:?}",
+            fake.typed
+        );
+        assert_ne!(fake.typed[0], bad);
+        let kept = done.model_calls[0].answer.as_deref().unwrap_or("");
+        assert!(kept.chars().count() <= 200, "the log keeps a short copy");
+    }
+}
+
+#[test]
+fn an_answer_that_does_not_fit_the_kind_of_field_is_thrown_away_and_one_that_does_is_typed() {
+    let site = |kind: &str| {
+        Fake::new(vec![(
+            "home",
+            page("/", vec![c("Contact", "textbox").input_type(kind)]),
+        )])
+    };
+    for (kind, bad, good) in [
+        ("email", "not an email", "ann@example.test"),
+        ("number", "many", "42"),
+        ("tel", "call me", "+1 (555) 0100"),
+        ("url", "not a url", "https://example.test/a"),
+    ] {
+        let mut opts = with_writes();
+        use_model(&mut opts, Said::new(Ok(bad)));
+        let mut fake = site(kind);
+        let done = run(&mut fake, &opts);
+        assert_eq!(outcomes(&done), ["rejected"], "{kind}");
+        assert_ne!(fake.typed[0], bad, "{kind}");
+
+        let mut opts = with_writes();
+        use_model(&mut opts, Said::new(Ok(good)));
+        let mut fake = site(kind);
+        let done = run(&mut fake, &opts);
+        assert_eq!(outcomes(&done), ["used"], "{kind}");
+        assert_eq!(fake.typed, [good], "{kind}");
+    }
+}
+
+#[test]
+fn fields_that_hold_secrets_are_never_sent() {
+    let source = Said::new(Ok("from the model"));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut fake = Fake::new(vec![(
+        "home",
+        page(
+            "/",
+            vec![
+                c("Your secret", "textbox").input_type("password").at("a"),
+                c("Card number", "textbox").at("b"),
+                c("Security code (CVV)", "textbox").at("c"),
+            ],
+        ),
+    )]);
+    let done = run(&mut fake, &opts);
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "nothing about them was sent");
+    assert_eq!(fake.typed.len(), 3, "they are still typed into, with the generator");
+    assert!(done.model_calls.is_empty());
+}
+
+#[test]
+fn what_is_sent_is_cut_short_and_has_no_query_strings_and_no_component_id() {
+    let source = Said::new(Ok("ok"));
+    let asked = source.asked();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let label = format!("Search https://shop.test/find?token=SECRET123 {}", "y".repeat(400));
+    let mut fake = Fake::new(vec![("home", page("/", vec![c(&label, "textbox")]))]);
+    let done = run(&mut fake, &opts);
+    let asked = asked.lock().unwrap();
+    assert_eq!(asked.len(), 1);
+    assert!(!asked[0].label.contains("SECRET123"), "{}", asked[0].label);
+    assert!(asked[0].label.chars().count() <= 200);
+    assert_eq!(asked[0].component, "");
+    let logged = done.model_calls[0].data().to_string();
+    assert!(!logged.contains("SECRET123"), "{logged}");
+}
+
+#[test]
+fn the_same_kind_of_field_is_not_asked_about_twice_in_one_run() {
+    // Two pages, each with a box called "Search": the second gets the answer the first got.
+    let source = Said::new(Ok("blue pen"));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut fake = Fake::new(vec![
+        (
+            "home",
+            page(
+                "/",
+                vec![C::link("Other", "other", "/other"), c("Search", "textbox").at("zz")],
+            ),
+        ),
+        ("other", page("/other", vec![c("Search", "textbox")])),
+    ]);
+    run(&mut fake, &opts);
+    assert_eq!(fake.typed, ["blue pen", "blue pen"]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn cancel_ends_a_walk_whose_model_call_is_stuck_within_a_second_and_keeps_what_was_found() {
+    let source = Said::new(Ok("late")).slow(Duration::from_secs(60));
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut fake = form(&["Search products"]);
+    let flag = AtomicBool::new(false);
+    let started = Instant::now();
+    let done = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            std::thread::sleep(Duration::from_millis(300));
+            flag.store(true, Ordering::SeqCst);
+        });
+        explore(&mut fake, &opts, &flag, &mut |_| {})
+    });
+    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+    assert_eq!(done.graph.stopped, Stop::Cancelled);
+    assert_eq!(done.graph.states.len(), 1);
+    assert_eq!(outcomes(&done), ["stopped"]);
+    assert!(fake.typed.is_empty(), "nothing was typed after the cancel");
+}
+
+#[test]
+fn a_call_that_takes_too_long_is_given_up_and_the_generator_types() {
+    let source = Said::new(Ok("late")).slow(Duration::from_secs(30));
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    opts.model.as_mut().unwrap().timeout = Duration::from_millis(300);
+    let mut fake = form(&["Search products"]);
+    let started = Instant::now();
+    let done = run(&mut fake, &opts);
+    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    assert_eq!(done.graph.stopped, Stop::Complete);
+    assert_eq!(outcomes(&done), ["timed-out"]);
+    assert!(fake.typed[0].len() < 20 && fake.typed[0] != "late", "{:?}", fake.typed);
+}
+
+#[test]
+fn a_model_call_counts_against_the_wall_clock_budget() {
+    let source = Said::new(Ok("late")).slow(Duration::from_secs(30));
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    opts.budgets.timeout = Duration::from_millis(400);
+    let mut fake = form(&["Search products"]);
+    let started = Instant::now();
+    let done = run(&mut fake, &opts);
+    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    assert_eq!(done.graph.stopped, Stop::Timeout);
+    assert_eq!(outcomes(&done), ["stopped"]);
+}
+
+#[test]
+fn a_replay_of_a_run_that_used_a_model_asks_no_model() {
+    let labels = ["Search products", "Your email", "Company"];
+    let source = Said::new(Ok("blue pen"));
+    let calls = source.calls();
+    let mut opts = with_writes();
+    use_model(&mut opts, source);
+    let mut first = form(&labels);
+    let done = run(&mut first, &opts);
+    assert_eq!(outcomes(&done), ["used", "used", "used"]);
+    let made = calls.load(Ordering::SeqCst);
+    assert!(made >= 1);
+
+    // What the run wrote to events.jsonl, one line for each call.
+    let events: String = done
+        .model_calls
+        .iter()
+        .map(|call| {
+            format!(
+                "{}\n",
+                serde_json::json!({ "type": "model.call", "message": "", "data": call.data() })
+            )
+        })
+        .collect();
+    let recorded = Recorded::from_events(&events);
+    assert!(!recorded.is_empty());
+
+    // The second run is given the record and not the model. The model's counter does not move.
+    let mut again = with_writes();
+    again.model = Some(ModelSettings {
+        source: Arc::new(recorded),
+        max_calls: DEFAULT_MAX_MODEL_CALLS,
+        timeout: DEFAULT_MODEL_TIMEOUT,
+    });
+    let mut second = form(&labels);
+    let replayed = run(&mut second, &again);
+    assert_eq!(calls.load(Ordering::SeqCst), made, "the model was not called");
+    assert_eq!(second.typed, first.typed, "the same text was typed");
+    assert_eq!(
+        replayed.graph.to_bytes(),
+        done.graph.to_bytes(),
+        "and the graph is the same"
+    );
+    assert!(replayed.model_calls.iter().all(|call| call.source == "recorded"));
+}
+
+#[test]
+fn a_record_of_a_run_is_read_back_by_key_and_only_for_calls_that_were_used() {
+    let field = |label: &str| Field {
+        role: "textbox".to_string(),
+        label: label.to_string(),
+        ..Field::default()
+    };
+    let event = |outcome: &str, label: &str, answer: &str| {
+        serde_json::json!({
+            "type": "model.call",
+            "data": { "outcome": outcome, "key": field(label).key(), "answer": answer },
+        })
+        .to_string()
+    };
+    let text = [
+        r#"{"type":"progress","message":"x"}"#.to_string(),
+        event("rejected", "A", "bad"),
+        event("used", "B", "good"),
+        "not json".to_string(),
+    ]
+    .join("\n");
+    let recorded = Recorded::from_events(&text);
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded.value(&field("B")), Ok("good".to_string()));
+    assert!(recorded.value(&field("A")).is_err());
+}
+
+#[test]
+fn text_in_a_label_cannot_make_two_different_fields_share_a_key() {
+    // Joined with a bar, a label "A|B" with no type and a label "A" with the type "B" were the same field.
+    let one = Field {
+        role: "textbox".to_string(),
+        label: "A|B".to_string(),
+        ..Field::default()
+    };
+    let other = Field {
+        role: "textbox".to_string(),
+        label: "A".to_string(),
+        input_type: Some("B".to_string()),
+        ..Field::default()
+    };
+    assert_ne!(one.key(), other.key());
+    // Quotes and brackets in a label do not blur the parts either.
+    let tricky = Field {
+        label: r#"x","y"#.to_string(),
+        ..one.clone()
+    };
+    assert_ne!(
+        tricky.key(),
+        Field {
+            label: "x".to_string(),
+            input_type: Some("y".to_string()),
+            ..one
+        }
+        .key()
+    );
+    // And the same field has the same key each time.
+    assert_eq!(other.key(), other.clone().key());
+}
+
+#[test]
+fn two_walks_without_a_model_with_the_same_seed_write_the_same_bytes_whatever_they_type() {
+    let one = run(&mut form(&["Search", "Email", "Note"]), &with_writes())
+        .graph
+        .to_bytes();
+    let two = run(&mut form(&["Search", "Email", "Note"]), &with_writes())
+        .graph
+        .to_bytes();
+    assert_eq!(one, two);
 }

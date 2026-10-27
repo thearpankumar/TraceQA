@@ -33,6 +33,16 @@ pub struct ViewComponent {
     pub instances: Vec<ViewInstance>,
 }
 
+/// What the page says about a field, for choosing the text typed into it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Hints {
+    /// The `type` attribute of an input.
+    pub input_type: Option<String>,
+    pub placeholder: Option<String>,
+    pub autocomplete: Option<String>,
+    pub required: bool,
+}
+
 /// One element.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewInstance {
@@ -44,6 +54,7 @@ pub struct ViewInstance {
     pub href: Option<String>,
     /// `Some` when the element opens and closes something.
     pub expanded: Option<bool>,
+    pub hints: Hints,
 }
 
 impl ViewInstance {

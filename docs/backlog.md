@@ -321,6 +321,53 @@ is useful for two things only, and must stay outside the engine core.
 
 **Size.** M
 
+**Built (EXP-6, 28 Oct 2026).** `explore/values.rs` (the `ValueSource` trait, `Values`, the guard around a call, `ModelCall`, `Recorded`), the new crate
+`crates/traceqa-models` (`mock` only), and `--model NAME`, `--max-model-calls` (default 50) and `--model-timeout` (default 20 s) on `traceqa explore`.
+Without `--model` nothing changes except that a search box now gets one of six words by seed (`data.rs`) and not the fixed word `test`.
+How it works: the walk asks `Values` for the text of a field only when it is about to type (the safety rules have let the field through and
+`--allow-writes` is on). With a model, the source is asked first, on its own thread; the walk waits in steps of 100 ms, so Ctrl-C and the wall-clock budget end
+the wait whatever the source is doing. A call has its own time limit; the run has a cap on calls; three calls in a row without a usable answer switch the
+source off for the rest of the run; the same kind of field (role, label, type, placeholder, autocomplete) is asked once per run. An answer that is empty, over
+200 characters, has a control character or a line break, or does not fit the field's `type` (`email`, `number`, `tel`, `url`) is thrown away, and the
+generator types instead. Fields that hold secrets (type `password`, autocomplete `cc-*` or `*password*`, labels such as card number, CVV, SSN) are never sent.
+What is sent is the role, the label and the `type`, placeholder and autocomplete hints, cut to 200 characters with addresses redacted (as driver errors are) and
+without the component id. An answer is only text for the field it was asked for: it cannot choose an action, an address or a component, and the safety policy
+(EXP-5) decides every action as before. Every call is written to `events.jsonl` as a `model.call` event (`data`: source, key, request, outcome, answer, note,
+millis), with outcomes `used`, `rejected`, `failed`, `timed-out`, `stopped`, `over-cap`. `Recorded::from_events` reads those back as a source, so a replay uses the
+recorded text and makes no call.
+Tests: 18 unit tests in `explore/tests.rs` against an in-memory site and a counting source (the answer is typed, nothing is asked read-only, the cap, a cap of
+zero, a source that always fails, one that panics, long and odd answers, answers that do not fit the field type, secrets, redaction, one question per kind of field,
+Ctrl-C in a call that sleeps 60 s ends the walk in under 2 s, a call that is too slow, the wall-clock budget, a replay that asks no model, the same bytes), 3 in
+`traceqa-models`, `crates/traceqa-engine/tests/no_network_dependencies.rs` (runs `cargo tree -p traceqa-engine` and fails on an HTTP client, a TLS library, an
+async runtime or `traceqa-models`), and 9 real-browser tests in `tests/test_explore.py` on the fixture page `/form`, which reports what was typed to the server.
+
+**Not done, and limits (read before building the real connections).**
+- **No real model is connected yet.** `--model mock` sends nothing anywhere; it exists so that everything around a model is tested. The next step is to add real
+  sources in `traceqa-models`: one for any endpoint that speaks the common chat format (GLM from Z.ai works this way; the address must be configurable so that a
+  customer can point it at their own gateway), and one for Amazon Bedrock, which has its own format and sign-in. Keys come from the environment, never from
+  arguments, and never go into a file. A source that sends text out of this machine must need a second flag, like `--i-understand-this-interacts` does for a site that
+  is not local (a model on localhost does not need it). Whether the Jev judge of the sourcing project can be a source is not decided: its interface was not looked at.
+  The judge of the oracles (ORA-9) uses the same boundary and is its own item.
+- **A call that is given up on leaves its thread behind.** The walk stops waiting (Ctrl-C, the call's time limit or the wall clock), but a thread cannot be killed, so
+  the call goes on in the background until it ends by itself and its answer goes nowhere. For a command that exits when the run ends this costs nothing (checked:
+  Ctrl-C with a call that sleeps 60 s ends in under 3 s). If the engine is ever run as a long-lived service, many runs would collect one waiting thread per stuck
+  call. The fix then is a source that can be cancelled (an HTTP client with its own timeout) and/or a bounded pool for the calls. The comment on `ask` in
+  `values.rs` says the same.
+- **What is sent is only redacted for web addresses.** `redact_text` strips query strings from addresses (a `?token=...`) and nothing else. A label
+  that holds a name, an email address or a customer reference is sent as it is, up to 200 characters. Fields that hold secrets (passwords, card numbers, CVV, SSN)
+  are never sent, but that is a list of words and types, not a promise about every label. Before a real model is connected: decide what else to remove (email
+  addresses, long digit runs), say in the first message of a run with `--model` exactly what is sent and where, and keep the second flag for addresses that are not
+  local. The mock sends nothing, so none of this applies yet.
+- **Field limits are only partly known.** The page script copies `type`, `placeholder`, `autocomplete` and `name`, and the state has `required`, but not `maxlength` or
+  `pattern`; those need a change to `COPIED_ATTRS` in `page-script/page-script.js`, which changes every `components.json` and the fingerprint golden files, so it was left alone.
+  An answer is cut off by length (200) and checked against `type`, not against `maxlength` or `pattern`.
+- **`model.call` events are written when the walk ends**, from what the walk returned, and not one by one while it runs. After a normal end or the first Ctrl-C they are all
+  there; after a second Ctrl-C that kills the run only the progress lines (`model mock for "...": used`) are. They go to `events.jsonl` with type `model.call`, which the
+  schema allows (`type` is an open string); its list of known values in `spec/run-folder.schema.json` was not extended.
+- **Replay needs EXP-8.** `Recorded` and its test exist; the command that replays a run with it does not.
+- A `select` is still left alone (`no-options`): its options are not known to the walker. The model could choose among them once they are.
+- Not verified: a real model of any kind; Linux, Windows, Rust 1.88.
+
 ### EXP-7: Outputs and coverage
 
 **Why.** The graph and the coverage figure are the product. They have to be files with a schema, so that other

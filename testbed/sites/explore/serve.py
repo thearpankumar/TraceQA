@@ -11,6 +11,8 @@ in `server.requests` as (method, path), so a test can say what the browser reall
 | /products          | Three product links. |
 | /products/1..3     | A product with an "Add to cart" button (posts to /api/cart) and a link back. |
 | /about, /team, /terms, /archive, /shipping, /returns, /covered-target | Pages with a few links or none. |
+| /form              | Five text fields and nothing else (no links, no submit): Search products, Email (type=email), Phone (type=tel), City, Company. Typing into one reports it to /typed/LABEL/VALUE, so a test can see exactly what was typed. For the model that suggests text (EXP-6). |
+| /typed/LABEL/VALUE | 200 for any method: where /form reports what was typed. |
 | /chain/1..12       | A bare chain: each page has one "Next" link, and the last one links back to the first. For depth and screen limits. |
 | /hang-start        | Six links to pages that never answer. For the time limit of an action. |
 | /hang/1..6         | Never answers (waits 25 s). |
@@ -108,6 +110,24 @@ document.getElementById("delete").addEventListener("click", function () {
 });
 </script>"""
 
+FORM_BODY = """
+<p><label>Search products <input type="text" name="q"></label></p>
+<p><label>Your email <input type="email" name="email"></label></p>
+<p><label>Phone number <input type="tel" name="phone"></label></p>
+<p><label>City <input type="text" name="city"></label></p>
+<p><label>Company <input type="text" name="company"></label></p>
+"""
+
+# What was typed is reported as a request, so that a test can read it from the server's log.
+FORM_SCRIPT = """<script>
+document.querySelectorAll("input").forEach(function (input) {
+  input.addEventListener("input", function () {
+    var label = input.closest("label").firstChild.textContent.trim();
+    fetch("/typed/" + encodeURIComponent(label) + "/" + encodeURIComponent(input.value), { method: "POST", body: "x" });
+  });
+});
+</script>"""
+
 PRODUCT_SCRIPT = """<script>
 document.getElementById("add").addEventListener("click", function () {
   fetch("/api/cart", { method: "POST", body: "x" });
@@ -168,7 +188,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/hang/"):
             time.sleep(25)
             self._send(200, page("Hung", "<p>Late.</p>", bare=True))
-        elif path in ("/checkout", "/api/cart", "/api/account"):
+        elif path == "/form":
+            self._send(200, page("Form", FORM_BODY, bare=True, script=FORM_SCRIPT))
+        elif path.startswith("/typed/") or path in ("/checkout", "/api/cart", "/api/account"):
             self._send(200, b"done", "text/plain")
         elif path == "/favicon.ico":
             self._send(204, b"", "image/x-icon")

@@ -10,6 +10,9 @@ What is pinned:
   field changes only what is typed;
 - every budget ends the walk, says so, and is respected;
 - with writes allowed the walk types and posts, and still leaves the destructive names alone;
+- with a model (the `mock`, which sends nothing anywhere) the text it suggests is what is typed, every call is written
+  to events.jsonl, the cap on calls is respected, Ctrl-C ends a run whose model call is stuck within 3 seconds, and a
+  name that is not a model is refused;
 - a site that is not on this machine is refused with exit code 2, naming the flag, before any driver is started;
 - Ctrl-C leaves a run folder that validates, with status cancelled and exit code 130, and so does a second one.
 
@@ -27,6 +30,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import pytest
 
@@ -463,3 +467,198 @@ def test_a_second_ctrl_c_quits_at_once_and_still_leaves_a_valid_folder(
     assert result.left == [], f"processes were left running: {result.left}"
     manifest = run_folder_checker(only_run(out))
     assert manifest.status.value == "cancelled"
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# A model for the text of fields (EXP-6)
+# ------------------------------------------------------------------------------------------------------------------
+
+MODEL_RUN = ["--allow-writes", "--max-actions", "30", "--chrome-pages", "0", *FAST]
+
+
+def typed_on(server: Any) -> dict[str, str]:
+    """What the page was typed into, by label, last value: the page reports every change to /typed/LABEL/VALUE."""
+    typed: dict[str, str] = {}
+    for method, path in server.requests:
+        if method == "POST" and path.startswith("/typed/"):
+            _, _, label, value = path.split("/", 3)
+            typed[unquote(label)] = unquote(value)
+    return typed
+
+
+def model_events(folder: Path) -> list[dict[str, Any]]:
+    lines = (folder / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    return [e for e in map(json.loads, lines) if e["type"] == "model.call"]
+
+
+def form_walk(
+    server: Any, out: Path, spec_validator: Any, run_folder_checker: Any, *args: str
+) -> tuple[dict[str, Any], Path]:
+    graph = walk(
+        server,
+        out,
+        spec_validator,
+        run_folder_checker,
+        "--allow-origin",
+        server.base,
+        *MODEL_RUN,
+        *args,
+        path="/form",
+    )
+    return graph, only_run(out)
+
+
+def test_without_a_model_the_text_comes_from_the_built_in_words_and_nothing_is_asked(
+    serve: Callable[..., Any], tmp_path: Path, spec_validator: Any, run_folder_checker: Any
+) -> None:
+    server = serve(rotate=False)
+    graph, folder = form_walk(server, tmp_path, spec_validator, run_folder_checker, "--seed", "3")
+    assert graph["stopped"] == "complete"
+    typed = typed_on(server)
+    assert set(typed) == {"Search products", "Your email", "Phone number", "City", "Company"}
+    assert typed["Your email"] == "user@example.test" and typed["Phone number"] == "5550100"
+    assert typed["Search products"] in {
+        "wireless mouse",
+        "laptop",
+        "running shoes",
+        "coffee beans",
+        "notebook",
+        "water bottle",
+    }
+    assert typed["City"].startswith("Test input")
+    assert model_events(folder) == [], "no model, no model.call events"
+
+
+def test_a_model_suggests_the_text_and_every_call_is_written_to_the_events(
+    serve: Callable[..., Any], tmp_path: Path, spec_validator: Any, run_folder_checker: Any
+) -> None:
+    server = serve(rotate=False)
+    graph, folder = form_walk(server, tmp_path, spec_validator, run_folder_checker, "--model", "mock")
+    assert graph["stopped"] == "complete"
+    typed = typed_on(server)
+    assert typed == {
+        "Search products": "mock search products",
+        "Your email": "mock@example.test",
+        "Phone number": "5550142",
+        "City": "mock city",
+        "Company": "mock company",
+    }, typed
+    calls = model_events(folder)
+    assert [c["data"]["outcome"] for c in calls] == ["used"] * 5
+    assert {c["data"]["answer"] for c in calls} == set(typed.values()), "the log has what was typed"
+    assert all(c["data"]["source"] == "mock" and c["data"]["request"]["role"] == "textbox" for c in calls)
+    assert "component" not in json.dumps(calls[0]["data"]["request"]), "the component id is not sent"
+
+
+def test_the_cap_on_calls_is_respected_and_the_built_in_words_type_the_rest(
+    serve: Callable[..., Any], tmp_path: Path, spec_validator: Any, run_folder_checker: Any
+) -> None:
+    server = serve(rotate=False)
+    graph, folder = form_walk(
+        server, tmp_path, spec_validator, run_folder_checker, "--model", "mock", "--max-model-calls", "3"
+    )
+    assert graph["stopped"] == "complete"
+    typed = typed_on(server)
+    assert len(typed) == 5, "every field was typed into"
+    assert sum(value.startswith("mock") for value in typed.values()) == 3, typed
+    outcomes = [c["data"]["outcome"] for c in model_events(folder)]
+    assert outcomes == ["used", "used", "used", "over-cap"], outcomes
+
+
+def test_a_model_that_fails_every_time_does_not_stop_the_walk(
+    serve: Callable[..., Any], tmp_path: Path, spec_validator: Any, run_folder_checker: Any
+) -> None:
+    server = serve(rotate=False)
+    graph, folder = form_walk(server, tmp_path, spec_validator, run_folder_checker, "--model", "mock:fail")
+    assert graph["stopped"] == "complete"
+    typed = typed_on(server)
+    assert len(typed) == 5 and not any(v.startswith("mock") for v in typed.values()), typed
+    calls = model_events(folder)
+    assert [c["data"]["outcome"] for c in calls] == ["failed"] * 3, "switched off after three in a row"
+    assert "switched off" in calls[-1]["data"]["note"]
+
+
+def test_an_answer_with_a_line_break_is_thrown_away(
+    serve: Callable[..., Any], tmp_path: Path, spec_validator: Any, run_folder_checker: Any
+) -> None:
+    server = serve(rotate=False)
+    _, folder = form_walk(server, tmp_path, spec_validator, run_folder_checker, "--model", "mock:junk")
+    assert all(c["data"]["outcome"] == "rejected" for c in model_events(folder))
+    assert not any("\n" in v or v.startswith("first line") for v in typed_on(server).values())
+
+
+def test_a_model_is_not_asked_when_nothing_is_typed(serve: Callable[..., Any], tmp_path: Path) -> None:
+    server = serve(rotate=False)
+    out = tmp_path / "runs"
+    done = explore(server.base + "/form", out, "--model", "mock", "--chrome-pages", "0", *FAST)
+    assert done.returncode == 0, done.stderr[-1500:]
+    assert "--allow-writes" in done.stderr, "it says that the model has no effect"
+    assert model_events(only_run(out)) == []
+    assert typed_on(server) == {}
+
+
+def test_a_name_that_is_not_a_model_is_refused_with_exit_2_and_no_folder(
+    serve: Callable[..., Any], tmp_path: Path
+) -> None:
+    server = serve()
+    out = tmp_path / "runs"
+    done = explore(server.base + "/form", out, "--model", "gpt-9")
+    assert done.returncode == 2
+    assert "--model" in done.stderr and "mock" in done.stderr
+    assert server.requests == [] and not out.exists()
+
+
+def test_ctrl_c_ends_a_run_whose_model_call_is_stuck_within_three_seconds(
+    serve: Callable[..., Any], tmp_path: Path, spec_validator: Any, run_folder_checker: Any
+) -> None:
+    server = serve(rotate=False)
+    out = tmp_path / "runs"
+    result = interrupt.run_interrupted(
+        [
+            str(BINARY),
+            "explore",
+            server.base + "/form",
+            "--out",
+            str(out),
+            "--allow-writes",
+            "--allow-origin",
+            server.base,
+            "--chrome-pages",
+            "0",
+            "--model",
+            "mock:sleep=60000",
+            "--model-timeout",
+            "120",
+            *FAST,
+        ],
+        ready={"stderr": "opened"},
+        delay=3.0,
+        exit_timeout=60,
+    )
+    assert result.ready
+    assert result.returncode == 130, result.stderr[-1500:]
+    assert result.seconds is not None and result.seconds < 3, f"took {result.seconds} s to end"
+    assert result.left == [], f"processes were left running: {result.left}"
+    folder = only_run(out)
+    manifest = run_folder_checker(folder)
+    assert manifest.status.value == "cancelled"
+    graph = json.loads((folder / "graph.json").read_text(encoding="utf-8"))
+    spec_validator("GraphFile").validate(graph)
+    assert graph["stopped"] == "cancelled"
+    assert [c["data"]["outcome"] for c in model_events(folder)] == ["stopped"]
+    assert typed_on(server) == {}, "nothing was typed after the cancel"
+
+
+def test_two_walks_with_writes_and_no_model_and_the_same_seed_give_the_same_bytes(
+    serve: Callable[..., Any], tmp_path: Path
+) -> None:
+    texts = []
+    for n in range(2):
+        server = serve(rotate=False)
+        out = tmp_path / f"run{n}"
+        done = explore(
+            server.base + "/form", out, "--allow-writes", "--allow-origin", server.base, "--seed", "7", *FAST
+        )
+        assert done.returncode == 0, done.stderr[-1500:]
+        texts.append((only_run(out) / "graph.json").read_text(encoding="utf-8").replace(server.base, "http://HOST"))
+    assert texts[0] == texts[1]

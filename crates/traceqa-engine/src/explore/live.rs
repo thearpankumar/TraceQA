@@ -13,7 +13,7 @@ use traceqa_common::types::{
     SessionOpenResult, StorageState, Viewport, WaitUntil,
 };
 
-use super::model::{Act, Acted, Browser, Effect, StepError, View, ViewComponent, ViewInstance};
+use super::model::{Act, Acted, Browser, Effect, Hints, StepError, View, ViewComponent, ViewInstance};
 use super::settle::{settled, Reader, MAX_READS, PAUSE_MS};
 use crate::driver::{DriverError, Drivers, ErrorKind, DEFAULT_TIMEOUT_MS};
 use crate::extract::read_live;
@@ -365,6 +365,12 @@ fn view_of(url: String, frame_ids: Vec<String>, components: &[Component]) -> Vie
                             enabled: instance.state.enabled,
                             href: instance.attrs.get("href").cloned(),
                             expanded: instance.state.expanded,
+                            hints: Hints {
+                                input_type: instance.attrs.get("type").cloned(),
+                                placeholder: instance.attrs.get("placeholder").cloned(),
+                                autocomplete: instance.attrs.get("autocomplete").cloned(),
+                                required: instance.state.required.unwrap_or(false),
+                            },
                         })
                     })
                     .collect(),

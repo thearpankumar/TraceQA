@@ -11,7 +11,10 @@ use std::time::Duration;
 use clap::{Args, ValueEnum};
 use traceqa_common::types::{BrowserTarget, Event, RunStatus, StorageState, Viewport};
 use traceqa_engine::driver_commands;
-use traceqa_engine::explore::{Budgets, ExploreRun, Options, Request, Stop, Strategy, DEFAULT_CHROME_PAGES};
+use traceqa_engine::explore::{
+    Budgets, ExploreRun, ModelSettings, Options, Request, Stop, Strategy, DEFAULT_CHROME_PAGES,
+    DEFAULT_MAX_MODEL_CALLS, DEFAULT_MODEL_TIMEOUT,
+};
 use traceqa_engine::policy::{check_start, Rules};
 use traceqa_engine::state::{Similarity, DEFAULT_SIMILARITY};
 
@@ -89,6 +92,17 @@ pub struct ExploreArgs {
     /// delete, pay, send, sign out and the like. Repeat for several.
     #[arg(long, value_name = "WORD")]
     deny_name: Vec<String>,
+    /// Ask a model for the text typed into fields, before the built-in list of words is used. Off unless given. It
+    /// only has an effect with --allow-writes, because nothing is typed without it. `mock` is the only name for now;
+    /// it sends nothing anywhere (`mock:sleep=MS`, `mock:fail` and `mock:junk` make it slow, failing or odd).
+    #[arg(long, value_name = "NAME")]
+    model: Option<String>,
+    /// The most calls to the model in one run. After that the built-in words are typed.
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_MAX_MODEL_CALLS, value_parser = clap::value_parser!(u32).range(0..=10_000))]
+    max_model_calls: u32,
+    /// The most one call to the model may take, in seconds.
+    #[arg(long, value_name = "SECONDS", default_value_t = DEFAULT_MODEL_TIMEOUT.as_secs(), value_parser = clap::value_parser!(u64).range(1..=300))]
+    model_timeout: u64,
     /// Required to explore a site that is not on this machine. The explorer clicks on the site it explores.
     #[arg(long)]
     i_understand_this_interacts: bool,
@@ -167,6 +181,21 @@ fn build_request(args: &ExploreArgs) -> Result<Request, String> {
     };
     let rules = Rules::with_origins(&args.url, &args.allow_origin, args.allow_writes, &args.deny_name)?;
     let storage_state = args.storage_state.as_deref().map(read_storage_state).transpose()?;
+    let model = args
+        .model
+        .as_deref()
+        .map(|spec| {
+            traceqa_models::source_from_spec(spec).map(|source| ModelSettings {
+                source,
+                max_calls: args.max_model_calls,
+                timeout: Duration::from_secs(args.model_timeout),
+            })
+        })
+        .transpose()
+        .map_err(|why| format!("--model: {why}"))?;
+    if model.is_some() && !args.allow_writes {
+        eprintln!("traceqa: --model has no effect without --allow-writes: nothing is typed, so nothing is asked.");
+    }
 
     // With the default drivers the browser names are known, so a typo fails here, before a folder exists.
     let custom_drivers = !args.drivers.drivers.is_empty()
@@ -207,6 +236,7 @@ fn build_request(args: &ExploreArgs) -> Result<Request, String> {
             },
             rules,
             chrome_pages: args.chrome_pages,
+            model,
         },
         target,
         viewport: args.viewport.clone(),
