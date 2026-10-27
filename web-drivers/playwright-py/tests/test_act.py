@@ -11,10 +11,9 @@ from traceqa_protocol.testing import DriverClient, RpcFailure
 HELLO = {"protocolVersion": contracts.DRIVER_PROTOCOL_VERSION, "engineVersion": "test"}
 VIEWPORT = {"width": 1280, "height": 800}
 BROWSERS = ["chromium", "firefox", "webkit"]
-# Short, so a test that is meant to fail does not wait ten seconds.
-SHORT = 1500
-# For the one test that makes many actions in a row.
-SLOW_RUNNER = 5000
+# Not the driver's ten seconds, so a test that is meant to fail does not wait that long, and not short enough for a slow
+# CI runner to trip over: on Windows a click needed more than 1.5 s twice, in two different tests and browsers.
+SHORT = 5000
 
 
 def origin(site: Any) -> str:
@@ -218,9 +217,7 @@ def test_an_element_in_an_iframe_is_reached_through_its_frame_id(page: Page) -> 
 
 def test_an_action_never_sends_more_than_a_page_load(page: Page) -> None:
     for control in ("alert", "grow", "dead", "fetch500", "fetchok", "download", "popup", "go"):
-        # Not the short limit the other tests use: eight actions in a row on a slow runner (WebKit on Windows CI) can
-        # take longer than 1.5 s for one of them, and what this test is about is what reached the server.
-        page.act("click", f"#{control}", timeout=SLOW_RUNNER)
+        page.click(control)
         page.driver.call("page.goto", {"sessionId": page.session_id, "url": page.site.base, "waitUntil": "settled"})
     assert {method for method, _ in page.site.requests} == {"GET"}
 
