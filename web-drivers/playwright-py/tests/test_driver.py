@@ -144,7 +144,7 @@ def test_refuses_what_it_cannot_do(driver: DriverClient) -> None:
         ("session.open", {"target": {"browser": "netscape"}, "viewport": VIEWPORT}, "unsupported"),
         ("session.open", {"target": {"browser": "cdp"}, "viewport": VIEWPORT}, "invalid_params"),
         ("page.goto", {"url": "http://127.0.0.1/"}, "invalid_params"),
-        ("page.act", {"sessionId": "s1", "action": "click", "target": {"selector": "a"}}, "unsupported"),
+        ("page.act", {"sessionId": "s1", "action": "click", "target": {"selector": "a"}}, "session_not_found"),
         ("page.fly", {}, "unsupported"),
     ]
     for method, params, kind in cases:

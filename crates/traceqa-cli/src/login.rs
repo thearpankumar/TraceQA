@@ -160,6 +160,7 @@ traceqa login: interrupted; closing the browser. Press Ctrl-C again to quit at o
             },
             locale: None,
             storage_state: None,
+            policy: None,
         })
         .map_err(|e| failed(&e))?;
 

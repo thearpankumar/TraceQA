@@ -29,6 +29,8 @@ pub enum ErrorKind {
     BlockedUrl,
     /// The server is already running as many calls as it allows.
     Busy,
+    /// No element matched the selector of an action in time.
+    ElementNotFound,
     Internal,
     /// The driver could not be reached: it did not start, or its pipe broke. The engine's own
     /// kind; drivers do not send it.
@@ -50,6 +52,7 @@ impl ErrorKind {
             Self::InvalidRequest => "invalid_request",
             Self::BlockedUrl => "blocked_url",
             Self::Busy => "busy",
+            Self::ElementNotFound => "element_not_found",
             Self::Internal => "internal",
             Self::Transport => "transport",
             Self::Other(kind) => kind,
@@ -75,6 +78,7 @@ impl From<&str> for ErrorKind {
             "invalid_request" => Self::InvalidRequest,
             "blocked_url" => Self::BlockedUrl,
             "busy" => Self::Busy,
+            "element_not_found" => Self::ElementNotFound,
             "internal" => Self::Internal,
             "transport" => Self::Transport,
             other => Self::Other(other.to_string()),
@@ -135,7 +139,7 @@ pub enum ParseError {
 mod tests {
     use super::*;
 
-    const KNOWN: [(&str, ErrorKind); 12] = [
+    const KNOWN: [(&str, ErrorKind); 13] = [
         ("timeout", ErrorKind::Timeout),
         ("navigation_failed", ErrorKind::NavigationFailed),
         ("unsupported", ErrorKind::Unsupported),
@@ -146,6 +150,7 @@ mod tests {
         ("invalid_request", ErrorKind::InvalidRequest),
         ("blocked_url", ErrorKind::BlockedUrl),
         ("busy", ErrorKind::Busy),
+        ("element_not_found", ErrorKind::ElementNotFound),
         ("internal", ErrorKind::Internal),
         ("transport", ErrorKind::Transport),
     ];

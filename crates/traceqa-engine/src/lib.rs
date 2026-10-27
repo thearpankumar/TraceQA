@@ -22,13 +22,18 @@
 //! `test-support` feature, which no release build enables.
 
 pub mod driver;
+pub mod explore;
 mod extract;
 mod fingerprint;
 mod group;
 pub mod home;
 mod locator;
+pub mod policy;
 pub mod run;
 pub mod serve;
+pub mod state;
+#[cfg(test)]
+mod state_real_tests;
 pub mod url_policy;
 mod url_safety;
 mod util;

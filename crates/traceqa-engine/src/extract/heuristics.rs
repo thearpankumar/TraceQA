@@ -234,6 +234,8 @@ mod tests {
             scroll: collected.scroll,
             warnings: Vec::new(),
             frames: 1,
+            url: "http://shop.test/".into(),
+            frame_ids: vec!["main".into()],
             requests_failed: None,
         }
     }

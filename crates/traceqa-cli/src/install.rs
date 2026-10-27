@@ -453,6 +453,7 @@ fn probe_browser(driver: &mut Driver, browser: &str) -> Result<(), DriverError> 
         },
         locale: None,
         storage_state: None,
+        policy: None,
     })?;
     driver.close_session(&session.session_id)
 }

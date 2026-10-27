@@ -393,7 +393,7 @@ impl Abort {
     }
 
     /// A run under this `Abort` starts; its folder counts as open until the registration is released.
-    fn register(&self) -> Registration<'_> {
+    pub(crate) fn register(&self) -> Registration<'_> {
         self.counts.lock_ok().open += 1;
         Registration {
             abort: self,
@@ -431,13 +431,13 @@ impl Drop for InFlight<'_> {
 
 /// One run's claim on an [`Abort`]: released when its folder is closed, by the abort watcher or
 /// by the run finishing, whichever comes first.
-struct Registration<'a> {
+pub(crate) struct Registration<'a> {
     abort: &'a Abort,
     released: AtomicBool,
 }
 
 impl Registration<'_> {
-    fn release(&self) {
+    pub(crate) fn release(&self) {
         if !self.released.swap(true, Ordering::SeqCst) {
             let mut counts = self.abort.counts.lock_ok();
             counts.open -= 1;
@@ -455,10 +455,10 @@ impl Drop for Registration<'_> {
 }
 
 /// How often the watcher looks for an abort request.
-const ABORT_POLL: Duration = Duration::from_millis(20);
+pub(crate) const ABORT_POLL: Duration = Duration::from_millis(20);
 
 /// How long the watcher waits for the run's locks before it writes without them.
-const ABORT_LOCK_WAIT: Duration = Duration::from_secs(1);
+pub(crate) const ABORT_LOCK_WAIT: Duration = Duration::from_secs(1);
 
 /// What the abort watcher needs to see of the run.
 struct Watched<'a, 'b> {
@@ -474,7 +474,7 @@ struct Watched<'a, 'b> {
 
 /// Takes the lock if it is free before `deadline`, polling. A thread that is stuck inside a
 /// driver call may hold a lock for long, and the watcher must never wait for it.
-fn lock_before<T>(mutex: &Mutex<T>, deadline: Instant) -> Option<MutexGuard<'_, T>> {
+pub(crate) fn lock_before<T>(mutex: &Mutex<T>, deadline: Instant) -> Option<MutexGuard<'_, T>> {
     loop {
         match mutex.try_lock() {
             Ok(guard) => return Some(guard),
@@ -971,7 +971,7 @@ impl Drop for Held<'_> {
     }
 }
 
-fn save(writer: &RunWriter, manifest: &RunManifest) {
+pub(crate) fn save(writer: &RunWriter, manifest: &RunManifest) {
     if let Err(error) = writer.write_manifest(manifest) {
         eprintln!("traceqa: could not write run.json: {error}");
     }

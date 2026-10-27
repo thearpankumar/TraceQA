@@ -26,7 +26,7 @@ use traceqa_common::types::{
 use traceqa_recorder::now_rfc3339;
 
 use self::crops::{save_component_crops, screenshot};
-use self::frames::{read_frames, Reading};
+use self::frames::{read_frames, read_frames_with, Reading};
 use self::heuristics::{
     covered_warning, landing_warnings, mark_changed_names, names_of, requests_failed_warning, stored_session_warnings,
     Removals, NAME_WATCH,
@@ -104,6 +104,8 @@ pub(crate) fn extract_target(
         viewport: job.viewport.clone(),
         locale: None,
         storage_state: job.storage_state.cloned(),
+        // Reading a page never needs a safety policy: it clicks nothing.
+        policy: None,
     })?;
     clock.open = opening.elapsed();
 
@@ -141,6 +143,36 @@ pub(crate) fn extract_target(
         }
     }
     result.map(|file| (file, session.browser, clock.timings()))
+}
+
+/// One reading of the page a session is on.
+pub(crate) struct LiveReading {
+    /// The address of the main page as the browser reports it. Only for reading: never written down.
+    pub url: String,
+    /// The ids of the frames that were read, the main one included.
+    pub frame_ids: Vec<String>,
+    pub components: Vec<Component>,
+}
+
+/// Reads the page the session is on, once: no loading, no scrolling and no waiting to see which names change. The
+/// explorer reads after every action, and a long walk cannot afford the full survey that `extract` makes.
+pub(crate) fn read_live(
+    driver: &mut Driver,
+    session: &SessionOpenResult,
+    cancel: &AtomicBool,
+    timeout_ms: Option<u64>,
+) -> Result<LiveReading, EngineError> {
+    let Reading {
+        elements,
+        url,
+        frame_ids,
+        ..
+    } = read_frames_with(driver, session, cancel, false, timeout_ms)?;
+    Ok(LiveReading {
+        url,
+        frame_ids,
+        components: group(elements),
+    })
 }
 
 fn check_cancelled(job: &Job) -> Result<(), EngineError> {

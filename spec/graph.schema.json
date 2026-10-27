@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "graph.schema.json",
+  "title": "TraceQA exploration graph",
+  "description": "graph.json, written by `traceqa explore` into its run folder (feature explore) next to run.json and events.jsonl. The screens a walk found, the actions it made between them, what it left alone, and why it stopped. Given the same site, seed and budgets the file is byte-identical: keys are sorted, lists are in the order things happened, and nothing in it is a time. Addresses have secret parameters replaced, as in components.json.",
+  "x-traceqa": { "contract": "graph", "version": 1 },
+  "$defs": {
+    "GraphFile": {
+      "type": "object",
+      "required": ["schemaVersion", "startUrl", "seed", "strategy", "stateSimilarityPerMille", "chromePages", "chrome", "budgets", "stopped", "actions", "states", "edges", "skipped", "unreachable"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 0 },
+        "startUrl": { "description": "The address the walk started from, as asked for.", "type": "string" },
+        "seed": { "description": "Decides the text typed into fields. The same seed on the same site gives the same walk.", "type": "integer", "minimum": 0 },
+        "strategy": { "description": "The order screens waiting to be explored are taken: bfs takes everything one action away before going deeper, dfs goes as deep as it can first.", "enum": ["bfs", "dfs"] },
+        "stateSimilarityPerMille": { "description": "How alike two readings of a page must be to count as the same screen, in thousandths: the share of their component ids that are the same (Jaccard). 900 is 90%.", "type": "integer", "minimum": 0, "maximum": 1000 },
+        "chromePages": { "description": "How many pages were read before the walk to find the ids that are on every page, the first one included.", "type": "integer", "minimum": 0 },
+        "chrome": { "description": "The component ids that are on (nearly) every page, sorted. They are left out of the ids that screens are compared by, and are still listed in each screen's components when they were all it had.", "type": "array", "items": { "type": "string" } },
+        "budgets": { "$ref": "#/$defs/GraphBudgets" },
+        "stopped": { "$ref": "#/$defs/GraphStop" },
+        "actions": { "description": "How many actions were made. Equals the number of edges whose status is not missing.", "type": "integer", "minimum": 0 },
+        "states": { "description": "The screens, in the order they were first seen. A screen's id is s followed by its position.", "type": "array", "items": { "$ref": "#/$defs/GraphState" } },
+        "edges": { "description": "The actions, in the order they were made. An edge's id is e followed by its position.", "type": "array", "items": { "$ref": "#/$defs/GraphEdge" } },
+        "skipped": { "description": "Components that were found and not touched, once per screen and component.", "type": "array", "items": { "$ref": "#/$defs/GraphSkipped" } },
+        "unreachable": { "description": "Screens that could not be opened again after the walk left them, so what was left on them was not tried.", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "GraphBudgets": {
+      "description": "The limits the walk was given.",
+      "type": "object",
+      "required": ["maxStates", "maxActions", "maxDepth", "actionTimeoutMs", "timeoutMs", "maxRequestsPerOrigin"],
+      "properties": {
+        "maxStates": { "type": "integer", "minimum": 0 },
+        "maxActions": { "type": "integer", "minimum": 0 },
+        "maxDepth": { "description": "Screens deeper than this (in actions from the start page) are found and not explored.", "type": "integer", "minimum": 0 },
+        "actionTimeoutMs": { "description": "The most one action may take.", "type": "integer", "minimum": 0 },
+        "timeoutMs": { "description": "The most the whole walk may take.", "type": "integer", "minimum": 0 },
+        "maxRequestsPerOrigin": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "GraphStop": {
+      "description": "Why the walk ended. complete: every action that could be tried was tried. max-states, max-actions, timeout and max-requests: that limit was reached. max-depth: nothing else was left but screens deeper than the limit. action-timeout: several actions in a row used up all their time. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.",
+      "enum": ["complete", "max-states", "max-actions", "max-depth", "action-timeout", "timeout", "max-requests", "cancelled", "error"]
+    },
+    "GraphState": {
+      "description": "One screen.",
+      "type": "object",
+      "required": ["id", "url", "components", "frames", "depth"],
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "description": "The address without fragment and volatile parameters, with secret parameters replaced.", "type": "string" },
+        "modal": { "description": "The dialog that was open, as role and name. Absent when none.", "type": "string" },
+        "components": { "description": "The ids the screen is compared by, sorted: the visible components of its first reading without the page-wide ones.", "type": "array", "items": { "type": "string" } },
+        "frames": { "type": "array", "items": { "type": "string" } },
+        "depth": { "description": "The fewest actions from the start page that were found to lead here.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "GraphEdge": {
+      "description": "One action, and what it led to.",
+      "type": "object",
+      "required": ["id", "from", "component", "label", "action", "status", "navigated", "popups", "dialogs", "downloads"],
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "description": "The screen the action was made on.", "type": "string" },
+        "component": { "type": "string" },
+        "label": { "description": "The role and accessible name of the component, for people reading the file.", "type": "string" },
+        "action": { "description": "press is a click that was blocked and was tried again with a key.", "enum": ["click", "type", "press"] },
+        "to": { "description": "The screen the action led to. Absent when the action did not complete, or the page it led to could not be read.", "type": "string" },
+        "status": { "description": "ok: it worked. missing: the component was not on the page any more, and nothing was done. timeout: it took longer than allowed. failed: the browser could not do it, or the page that followed had nothing on it.", "enum": ["ok", "missing", "timeout", "failed"] },
+        "navigated": { "type": "boolean" },
+        "popups": { "type": "integer", "minimum": 0 },
+        "dialogs": { "type": "integer", "minimum": 0 },
+        "downloads": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "GraphSkipped": {
+      "description": "A component that was found and left alone.",
+      "type": "object",
+      "required": ["state", "component", "label", "reason"],
+      "properties": {
+        "state": { "type": "string" },
+        "component": { "type": "string" },
+        "label": { "type": "string" },
+        "reason": { "description": "destructive: its name or address says it does something with a lasting effect. blocked: it leads to another origin or somewhere that is not a page. read-only: read-only mode only touches links, tabs and things that open and close. no-options: a list to pick from, whose options the walker does not know.", "type": "string" }
+      }
+    }
+  }
+}

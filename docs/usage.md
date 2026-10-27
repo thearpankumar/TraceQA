@@ -152,6 +152,69 @@ Each page is an ordinary run. `runs/g_<id>/site.json` lists the pages, each comp
 page) and `skipped` links with reasons. A header whose landmark name changes per page gets different ids and is not
 shared.
 
+## `traceqa explore`
+
+```sh
+traceqa explore http://127.0.0.1:4173/ --max-actions 100
+```
+
+Walks a site by acting on it: it opens the page, picks a control, acts, reads the page again, works out which screen it
+landed on and writes down "screen A, this control, screen B". It repeats until a limit runs out. It is not an agent: the
+same site, seed and limits give the same `graph.json`, byte for byte. Controls are taken in a fixed order (by their path
+in the page, then their id), and a breadth-first walk (the default) tries everything one action away before going deeper.
+
+**It is read-only by default**, in two layers. The browser refuses every request that is not GET or HEAD and never connects
+a WebSocket, whatever the controls are called, and it will not navigate the page to an origin you did not name. On top of
+that the walker only touches links, tabs and controls that open and close (`aria-expanded`), and leaves alone any control
+whose name or address says delete, remove, pay, buy, order, send, submit, sign out, unsubscribe and the like (English,
+Spanish, French, German, Hindi and Arabic; the lists have not been reviewed by native speakers). A control that is left
+alone counts as found and not touched, and `graph.json` lists it with the reason (`destructive`, `blocked`, `read-only`).
+
+A site that is **not on this machine** is refused with exit code 2 unless you pass `--i-understand-this-interacts`.
+That covers `--allow-origin` too. The walker clicks on the site it explores: run it on sites you own.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--max-states N` | `50` | Most screens to find. |
+| `--max-actions N` | `300` | Most actions to make. |
+| `--max-depth N` | `6` | Most actions from the start page. Deeper screens are found and not explored. |
+| `--action-timeout SECONDS` | `10` | The most one action may take. Five in a row that use all of it end the walk. |
+| `--timeout SECONDS` | `600` | The most the whole walk may take. |
+| `--max-requests-per-origin N` | `2000` | Stop when the browser has sent this many requests to one origin. Not enforced with a driver that cannot count. |
+| `--strategy bfs\|dfs` | `bfs` | Which screen to explore next. |
+| `--seed N` | `0` | Decides the text typed into fields. |
+| `--state-similarity SHARE` | `0.9` | How alike two readings must be to be the same screen (share of the same component ids). |
+| `--chrome-pages N` | `6` | Pages read first, besides the start page, to find what is on every page (header, footer). `0` reads only the start page. |
+| `--allow-writes` | off | Also type into fields and press buttons. Needs `--allow-origin` for the site. |
+| `--allow-origin ORIGIN` | the start origin | Another origin the walk may go to. Repeatable. |
+| `--deny-name WORD` | none | Another word or phrase that marks a control as not to be touched, in every mode. Repeatable. |
+| `--i-understand-this-interacts` | off | Required for a site that is not on this machine. |
+| `--browser`, `--viewport`, `--storage-state`, `--out`, `--headed`, `--driver` | | As for `extract`, with one browser per run. |
+| `--json` | off | Print `graph.json` only. |
+
+The run folder holds `run.json`, `events.jsonl` and `graph.json`. The graph names every stop: `complete`, `max-states`,
+`max-actions`, `max-depth`, `action-timeout`, `timeout`, `max-requests`, `cancelled` or `error`. Exit code 0 when the walk
+ended by itself or by a limit, 1 when the browser failed, 2 for a wrong command, 130 after Ctrl-C (the folder is closed
+as `cancelled`; a second Ctrl-C quits at once).
+
+Things to know about what it finds:
+
+- After each action the walk opens the screen again in a **new browser session** to try the next control, so nothing
+  one visit left behind leaks into the next. A screen that cannot be opened again by its address (a dialog, a step inside
+  a page) is listed in `unreachable` and what is left on it is not tried.
+- The page is read after every load and action, and again half a second later, until two readings agree to 90% (at most six
+  readings). A page that is still appearing (a hero that is built by a script, sections that fade in) shows a different
+  number of controls from one load to the next; without waiting, one page looks like several screens.
+- A screen that is opened again and does not look like it is tried once more before it is given up.
+- A click that is blocked (a control another element covers) is tried once more with the keyboard (`press` in the graph).
+- The header and footer links that are on every page are tried once, on the first screen that has them.
+- Screens are told apart by their address, an open dialog, and the component ids. A **small page** whose controls change
+  from visit to visit (a rotating banner, a countdown, a cart total in a button's name) can be seen as several screens:
+  one changed id on a page of ten is a different screen at 90%. A control whose name changes has a new id on every
+  visit, so the walk reports it `missing` when it comes back for it.
+- Selects are left alone (`no-options`): the walk does not know their options.
+- Every action reads the whole page again, which is slow on a long page. Use `--max-actions` and `--timeout`.
+
 ## `traceqa runs`
 
 ```sh
