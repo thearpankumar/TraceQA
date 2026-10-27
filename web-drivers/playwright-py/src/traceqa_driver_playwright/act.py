@@ -30,6 +30,10 @@ LOAD_WAIT_MS = 5_000
 # How long to wait for the element to be scrolled into view, before the action does its own waiting.
 SCROLL_WAIT_MS = 2_000
 POPUP_WAIT_MS = 2_000
+# How long to wait for the browser's `download` event once a response that is a download has arrived. On a slow machine
+# (WebKit on a CI runner) the event can come after the page has settled.
+DOWNLOAD_WAIT_S = 3.0
+DOWNLOAD_POLL_MS = 50
 
 MAX_FAILED_REQUESTS = 50
 MAX_ITEMS = 50
@@ -119,6 +123,8 @@ class Recorder:
     popups: list[Page] = field(default_factory=list)
     dialogs: list[models.ActDialog] = field(default_factory=list)
     downloads: list[models.ActDownload] = field(default_factory=list)
+    # Responses to navigations (in any tab) that are downloads. Each is followed by a `download` event, which can be late.
+    attachments: int = 0
     console_errors: list[models.ActConsoleError] = field(default_factory=list)
     failed: list[models.ActFailedRequest] = field(default_factory=list)
     failed_seen: set[Request] = field(default_factory=set)
@@ -137,6 +143,7 @@ class Watch:
         page.on("requestfailed", self._request_failed)
         page.on("response", self._response)
         context.on("page", self._popup)
+        context.on("response", self._count_attachment)
 
     def _dialog(self, dialog: Dialog) -> None:
         # A dialog is always dismissed, as Playwright does when nobody listens.
@@ -225,10 +232,29 @@ class Watch:
         if response.status >= 400:
             self._note_failed(request, status=response.status, failure=None)
 
+    def _count_attachment(self, response: Response) -> None:
+        recorder = self.recorder
+        if recorder is None:
+            return
+        with contextlib.suppress(PlaywrightError):
+            attachment = response.headers.get("content-disposition", "").lower().startswith("attachment")
+            if attachment and response.request.is_navigation_request():
+                recorder.attachments += 1
+
     def _popup(self, page: Page) -> None:
         recorder = self.recorder
         if recorder is not None and page != self.page:
             recorder.popups.append(page)
+            # A new tab that turns into a download: some browsers report the download on the tab, not the opener.
+            page.on("download", self._download)
+
+
+def _await_downloads(page: Page, recorder: Recorder) -> None:
+    """Gives the `download` event of every response that was a download the time to arrive."""
+    deadline = time.monotonic() + DOWNLOAD_WAIT_S
+    while len(recorder.downloads) < recorder.attachments and time.monotonic() < deadline:
+        with contextlib.suppress(PlaywrightError):
+            page.wait_for_timeout(DOWNLOAD_POLL_MS)
 
 
 def _locator(frame: Frame, selector: str) -> Locator:
@@ -420,6 +446,7 @@ def act(page: Page, watch: Watch, guard: Guard, frame: Frame, params: models.Pag
                 page.wait_for_load_state("load", timeout=LOAD_WAIT_MS)
         guard.drain_web_sockets()
         settle = _settle(page)
+        _await_downloads(page, recorder)
         taken_back = _left_the_allowed_origins(page, watch, guard, before_url)
         if taken_back:
             # What came back is the page that was there, loaded again: nothing is different, and the counters of the
@@ -446,6 +473,7 @@ def act(page: Page, watch: Watch, guard: Guard, frame: Frame, params: models.Pag
         return models.PageActResult(
             ok=True,
             url=url,
+            request_counts=guard.counts(),
             navigated=models.ActNavigation(status=recorder.navigated_status) if recorder.navigated else None,
             popups=popups,
             dialogs=recorder.dialogs,

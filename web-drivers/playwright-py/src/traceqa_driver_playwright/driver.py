@@ -704,6 +704,7 @@ class PlaywrightDriver(BaseDriver[Session]):
             final_url=page.url,
             status=response.status if response else None,
             title=title,
+            request_counts=session.guard.counts() if session.guard else None,
             load_complete=None if load_complete else False,
             closed_shadow_roots=count_closed_shadow_roots(page) if session.chromium else None,
             redirect_chain=redirect_chain(response),

@@ -227,19 +227,9 @@ impl Screens {
 
         let mut best: Option<(usize, usize, usize)> = None; // position, ids in both, ids in either
         for &position in self.by_place.get(&place).map_or(&[][..], Vec::as_slice) {
-            let known = &self.screens[position].ids;
-            // The most the two can share is the smaller set, out of at least the larger: when even that is not
-            // enough there is nothing to count.
-            if !self
-                .similarity
-                .holds(known.len().min(ids.len()), known.len().max(ids.len()))
-            {
+            let Some((both, either)) = self.alike(&self.screens[position].ids, &ids) else {
                 continue;
-            }
-            let (both, either) = overlap(known, &ids);
-            if !self.similarity.holds(both, either) {
-                continue;
-            }
+            };
             // Strictly better only, so the earliest of equals stays: both / either > best_both / best_either.
             let better = best.is_none_or(|(_, b, e)| both * e > b * either);
             if better {
@@ -266,6 +256,37 @@ impl Screens {
         });
         self.by_place.entry(place).or_default().push(position);
         Ok(Seen { id, is_new: true })
+    }
+
+    /// Whether `look` is the screen `id`, by the same rule `observe` uses: the same cleaned address and dialog, and
+    /// at least the share of the same ids. It does not ask whether another screen is closer. Use it to find out
+    /// whether a page that was opened again is the screen that was wanted: two screens at one address that are not
+    /// alike can both be within the share of one look, and `observe` names only the closer.
+    pub fn matches(&self, id: ScreenId, look: &Look) -> bool {
+        let Some(screen) = self.get(id) else {
+            return false;
+        };
+        if look.ids.is_empty() || look.modal != screen.modal {
+            return false;
+        }
+        let Ok(url) = clean_url(&look.url) else {
+            return false;
+        };
+        url == screen.url && self.alike(&screen.ids, &self.compared_ids(&look.ids)).is_some()
+    }
+
+    /// How many ids two sets share and hold between them, when that is at least the share. The cheap check first: the
+    /// most the two can share is the smaller set, out of at least the larger, and when even that is not enough there
+    /// is nothing to count.
+    fn alike(&self, known: &BTreeSet<String>, ids: &BTreeSet<String>) -> Option<(usize, usize)> {
+        if !self
+            .similarity
+            .holds(known.len().min(ids.len()), known.len().max(ids.len()))
+        {
+            return None;
+        }
+        let (both, either) = overlap(known, ids);
+        self.similarity.holds(both, either).then_some((both, either))
     }
 
     /// The ids a look is judged by: those that are not page-wide, or all of them when that would leave none.
@@ -376,6 +397,66 @@ mod tests {
 
     fn screens() -> Screens {
         Screens::new(DEFAULT_SIMILARITY, BTreeSet::new())
+    }
+
+    // ---- is this look that screen? -----------------------------------------------------------
+
+    #[test]
+    fn a_look_matches_the_screen_it_made_and_one_a_little_different_from_it() {
+        let mut known = screens();
+        let seen = known.observe(&look(HOME, 0..20)).unwrap();
+        assert!(known.matches(seen.id, &look(HOME, 0..20)));
+        // 19 of 21 is 90.5%: the same screen.
+        assert!(known.matches(seen.id, &look(HOME, 1..21)));
+        // 18 of 22 is 81.8%.
+        assert!(!known.matches(seen.id, &look(HOME, 2..22)));
+    }
+
+    #[test]
+    fn a_look_at_another_address_or_with_another_dialog_is_not_the_screen() {
+        let mut known = screens();
+        let seen = known.observe(&look(HOME, 0..20)).unwrap();
+        assert!(!known.matches(seen.id, &look("http://127.0.0.1:4173/cart", 0..20)));
+        let mut with_dialog = look(HOME, 0..20);
+        with_dialog.modal = Some("dialog \"Help\"".into());
+        assert!(!known.matches(seen.id, &with_dialog));
+        // And a look with nothing on it is not a screen at all.
+        assert!(!known.matches(seen.id, &look(HOME, 0..0)));
+    }
+
+    #[test]
+    fn a_look_is_the_screen_it_is_alike_even_when_another_is_closer() {
+        // Two screens at one address that are not alike (18 of 24 is 75%). A look between them is within 90% of the
+        // first and closer to the second: `observe` says the second, and it is still the first by the rule.
+        let mut known = screens();
+        let first = known.observe(&look(HOME, 0..20)).unwrap().id;
+        let second = known.observe(&look(HOME, 0..24)).unwrap().id;
+        assert_ne!(first, second);
+        let between = look(HOME, 0..22);
+        assert_eq!(known.clone().observe(&between).unwrap().id, second);
+        assert!(known.matches(first, &between));
+        assert!(known.matches(second, &between));
+    }
+
+    #[test]
+    fn page_wide_ids_do_not_count_when_a_look_is_matched() {
+        let chrome: BTreeSet<String> = ids(100..110);
+        let mut known = Screens::new(DEFAULT_SIMILARITY, chrome.clone());
+        let mut base = look(HOME, 0..20);
+        base.ids.extend(chrome.clone());
+        let seen = known.observe(&base).unwrap();
+        // The header is gone; the page's own 20 are all there.
+        assert!(known.matches(seen.id, &look(HOME, 0..20)));
+    }
+
+    #[test]
+    fn a_screen_that_does_not_exist_matches_nothing() {
+        let known = screens();
+        let other = {
+            let mut other = screens();
+            other.observe(&look(HOME, 0..20)).unwrap().id
+        };
+        assert!(!known.matches(other, &look(HOME, 0..20)));
     }
 
     // ---- the share ---------------------------------------------------------------------------

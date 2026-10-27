@@ -215,7 +215,8 @@ pub struct Candidate<'a> {
 /// The rules of one exploration.
 #[derive(Debug, Clone)]
 pub struct Rules {
-    origin: String,
+    /// The origin the exploration starts at, and then the others it may go to, without repeats.
+    origins: Vec<String>,
     allow_writes: bool,
     /// Words added by the person (`--deny-name`), already normalised.
     extra: Vec<Vec<String>>,
@@ -226,7 +227,7 @@ impl Rules {
     /// are words or phrases to add to the lists above.
     pub fn new(start_url: &str, allow_writes: bool, extra_deny: &[String]) -> Result<Self, String> {
         Ok(Self {
-            origin: origin_of(start_url).ok_or_else(|| format!("{start_url:?} is not an http or https address"))?,
+            origins: vec![origin_of(start_url).ok_or_else(|| format!("{start_url:?} is not an http or https address"))?],
             allow_writes,
             extra: extra_deny
                 .iter()
@@ -236,10 +237,41 @@ impl Rules {
         })
     }
 
+    /// As [`new`](Self::new), and the exploration may also go to `allow_origins` (each an http or https address; only
+    /// its origin counts). Allowing writes is a statement about where, so it needs the start origin to be named
+    /// among `allow_origins`: a person who allows writes has to say which site may be written to.
+    pub fn with_origins(
+        start_url: &str,
+        allow_origins: &[String],
+        allow_writes: bool,
+        extra_deny: &[String],
+    ) -> Result<Self, String> {
+        let mut rules = Self::new(start_url, allow_writes, extra_deny)?;
+        let mut named = Vec::new();
+        for address in allow_origins {
+            let origin = origin_of(address).ok_or_else(|| format!("{address:?} is not an http or https address"))?;
+            if !named.contains(&origin) {
+                named.push(origin);
+            }
+        }
+        if allow_writes && !named.contains(&rules.origins[0]) {
+            return Err(format!(
+                "--allow-writes needs --allow-origin {} to say that this site may be written to",
+                rules.origins[0]
+            ));
+        }
+        for origin in named {
+            if !rules.origins.contains(&origin) {
+                rules.origins.push(origin);
+            }
+        }
+        Ok(rules)
+    }
+
     /// The policy to give the driver when it opens the session of this exploration.
     pub fn driver_policy(&self) -> ActPolicy {
         ActPolicy {
-            allow_origins: vec![self.origin.clone()],
+            allow_origins: self.origins.clone(),
             allow_writes: self.allow_writes.then_some(true),
         }
     }
@@ -257,7 +289,7 @@ impl Rules {
             if let Some(word) = deny_address(&target) {
                 return Decision::Skip(Skip::DestructiveLink(word));
             }
-            if origin_of(target.as_str()).as_deref() != Some(self.origin.as_str()) {
+            if !origin_of(target.as_str()).is_some_and(|origin| self.origins.contains(&origin)) {
                 return Decision::Skip(Skip::OtherOrigin);
             }
         }
@@ -303,6 +335,27 @@ pub fn is_local_origin(address: &str) -> bool {
         Some(Host::Domain(name)) => name == "localhost" || name.ends_with(".localhost") || name.ends_with(".test"),
         None => false,
     }
+}
+
+/// Whether an exploration may start at `start_url` and go to `allow_origins`: every one of them must be local, unless
+/// the person has said they understand that the explorer interacts with a site. The message names the flag.
+pub fn check_start(start_url: &str, allow_origins: &[String], i_understand: bool) -> Result<(), String> {
+    if origin_of(start_url).is_none() {
+        return Err(format!("{start_url:?} is not an http or https address"));
+    }
+    if i_understand {
+        return Ok(());
+    }
+    for address in std::iter::once(start_url).chain(allow_origins.iter().map(String::as_str)) {
+        if !is_local_origin(address) {
+            return Err(format!(
+                "{address} is not on this machine. The explorer clicks and types on the site it explores, so it only \
+                 starts on localhost, 127.0.0.0/8, ::1, *.localhost and *.test unless you pass \
+                 --i-understand-this-interacts"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The policy the driver was asked to keep is the one it says it keeps. A driver that does not know about policies
@@ -782,6 +835,83 @@ mod tests {
         let writes = Rules::new("https://127.0.0.1/", true, &[]).unwrap().driver_policy();
         assert_eq!(writes.allow_origins, ["https://127.0.0.1"]);
         assert_eq!(writes.allow_writes, Some(true));
+    }
+
+    #[test]
+    fn more_origins_can_be_allowed_and_the_driver_is_told_about_all_of_them() {
+        let rules = Rules::with_origins(
+            "http://127.0.0.1:4173/",
+            &[
+                "http://127.0.0.1:4174".to_string(),
+                "http://127.0.0.1:4173/anything".to_string(),
+            ],
+            false,
+            &[],
+        )
+        .unwrap();
+        let mut origins = rules.driver_policy().allow_origins;
+        origins.sort();
+        assert_eq!(origins, ["http://127.0.0.1:4173", "http://127.0.0.1:4174"]);
+        // A link to the second origin is allowed; one to an origin nobody named is not.
+        let page = "http://127.0.0.1:4173/";
+        let to = |href: &'static str| Candidate {
+            role: "link",
+            name: "Go",
+            href: Some(href),
+            expanded: None,
+            page_url: page,
+        };
+        assert_eq!(rules.decide(&to("http://127.0.0.1:4174/frame")), Decision::Allow);
+        assert_eq!(
+            rules.decide(&to("http://127.0.0.1:4175/")),
+            Decision::Skip(Skip::OtherOrigin)
+        );
+    }
+
+    #[test]
+    fn writes_need_the_origin_that_may_be_written_to_to_be_named() {
+        let start = "http://127.0.0.1:4173/";
+        let none: [String; 0] = [];
+        assert!(Rules::with_origins(start, &none, true, &[])
+            .unwrap_err()
+            .contains("--allow-origin"));
+        // Naming only some other origin is not naming the start.
+        assert!(Rules::with_origins(start, &["http://127.0.0.1:4174".to_string()], true, &[]).is_err());
+        let ok = Rules::with_origins(start, &["http://127.0.0.1:4173".to_string()], true, &[]).unwrap();
+        assert_eq!(ok.driver_policy().allow_writes, Some(true));
+        // Without writes no origin has to be named.
+        assert_eq!(
+            Rules::with_origins(start, &none, false, &[])
+                .unwrap()
+                .driver_policy()
+                .allow_writes,
+            None
+        );
+    }
+
+    #[test]
+    fn an_origin_that_is_not_an_http_address_is_refused() {
+        for bad in ["ftp://x.test", "nonsense", "", "file:///etc"] {
+            assert!(
+                Rules::with_origins("http://127.0.0.1:4173/", &[bad.to_string()], false, &[]).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_site_that_is_not_local_is_refused_unless_the_person_says_they_understand() {
+        let none: [String; 0] = [];
+        let refused = check_start("https://example.com/", &none, false).unwrap_err();
+        assert!(refused.contains("--i-understand-this-interacts"), "{refused}");
+        assert!(check_start("https://example.com/", &none, true).is_ok());
+        assert!(check_start("http://127.0.0.1:4173/", &none, false).is_ok());
+        assert!(check_start("http://shop.test/", &none, false).is_ok());
+        // Every origin the walk may go to counts, not only the first.
+        let away = ["https://example.com".to_string()];
+        assert!(check_start("http://127.0.0.1:4173/", &away, false).is_err());
+        assert!(check_start("http://127.0.0.1:4173/", &away, true).is_ok());
+        assert!(check_start("not an address", &none, true).is_err());
     }
 
     #[test]

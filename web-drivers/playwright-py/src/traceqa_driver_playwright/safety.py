@@ -71,6 +71,13 @@ class Guard:
         # Addresses of top-level navigations that were stopped before the page they were for existed (the first request
         # of a new tab), in the order they happened. See `take_unowned`.
         self._unowned: list[str] = []
+        # Requests let through, by the origin they went to (see `counts`).
+        self._requests: dict[str, int] = {}
+
+    def counts(self) -> dict[str, int]:
+        """How many requests the session's browser has sent to each origin so far. A request the guard stopped never
+        left the browser and is not in it, and neither is one for an address that has no origin (`data:`, `blob:`)."""
+        return dict(self._requests)
 
     def allows_page(self, address: str) -> bool:
         """Whether the top-level page may be at this address."""
@@ -105,6 +112,9 @@ class Guard:
                     self._unowned.append(request.url)
                 route.abort("blockedbyclient")
             else:
+                origin = origin_of(request.url)
+                if origin is not None:
+                    self._requests[origin] = self._requests.get(origin, 0) + 1
                 route.continue_()
         except Exception:
             # Whatever went wrong, the request does not go out. A route handler that raised would leave it hanging.

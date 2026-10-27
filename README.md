@@ -162,6 +162,7 @@ fixes it, or breaks something else, `traceqa diff` reports exactly which compone
 - `traceqa diff --against main --fail-on removed,disabled` fails the build on the changes you choose.
 - GitHub annotations and SARIF output, `verify` manifests of what must exist, and per-component pixel compare.
 - `traceqa map` follows a site's links and lists which components live on which pages.
+- `traceqa explore` walks a site by acting on it, read-only by default, and writes the screens and the actions between them to `graph.json`.
 
 </td>
 </tr>

@@ -48,6 +48,9 @@ const MARGIN: Duration = Duration::from_secs(15);
 pub struct DriverError {
     kind: ErrorKind,
     message: String,
+    /// The driver sent this error itself, so it is running and answering. False for the engine's own: it gave up
+    /// waiting, or the pipe broke.
+    answered: bool,
 }
 
 impl DriverError {
@@ -55,6 +58,15 @@ impl DriverError {
         Self {
             kind,
             message: message.into(),
+            answered: false,
+        }
+    }
+
+    /// An error the driver sent in answer to a request.
+    pub(crate) fn answered(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            answered: true,
+            ..Self::new(kind, message)
         }
     }
 
@@ -87,6 +99,14 @@ impl DriverError {
     /// the pipe to it broke. Its state is unknown, so it must be replaced, not reused.
     pub(crate) fn loses_driver(&self) -> bool {
         matches!(self.kind, ErrorKind::Timeout | ErrorKind::Transport) || self.is_cancelled()
+    }
+
+    /// As [`loses_driver`](Self::loses_driver) for a call to `method`. An action that ran out of time in the
+    /// browser is an ordinary result of acting (a control another element covers never becomes clickable), and the
+    /// driver that says so is fine: replacing it would take the session, and the page in it, away.
+    pub(crate) fn loses_driver_calling(&self, method: &str) -> bool {
+        let reported_by_a_driver_that_is_running = self.answered && self.kind == ErrorKind::Timeout;
+        self.loses_driver() && !(method == method::PAGE_ACT && reported_by_a_driver_that_is_running)
     }
 
     /// The engine stopped waiting because the run was cancelled. The driver was left in the
@@ -369,7 +389,7 @@ impl Transport for ProcessTransport {
         cancel: &AtomicBool,
     ) -> Result<Value, DriverError> {
         let result = self.exchange(method, params, timeout, cancel);
-        self.unresponsive |= result.as_ref().is_err_and(DriverError::loses_driver);
+        self.unresponsive |= result.as_ref().is_err_and(|error| error.loses_driver_calling(method));
         result
     }
 }
@@ -435,7 +455,7 @@ fn driver_error(error: RpcError) -> DriverError {
     let data = error
         .data
         .and_then(|data| serde_json::from_value::<RpcErrorData>(data).ok());
-    DriverError::new(
+    DriverError::answered(
         data.map_or(ErrorKind::Internal, |d| ErrorKind::from(d.kind)),
         error.message,
     )
@@ -649,7 +669,7 @@ impl Driver {
         cancel: &AtomicBool,
     ) -> Result<R, DriverError> {
         let result = request(self.transport.as_mut(), method, params, timeout, cancel);
-        self.lost |= result.as_ref().is_err_and(DriverError::loses_driver);
+        self.lost |= result.as_ref().is_err_and(|error| error.loses_driver_calling(method));
         result
     }
 
@@ -1441,6 +1461,59 @@ mod tests {
         assert!(driver.until(&never).act(&click(None)).unwrap().ok);
         let (_, timeout) = seen.lock().unwrap()[0].clone();
         assert_eq!(timeout, Duration::from_millis(DEFAULT_ACT_TIMEOUT_MS) * 2 + MARGIN);
+    }
+
+    /// A driver that answers `page.act` with this error and everything else with `Hello`'s answers.
+    struct Failing(DriverError);
+    impl Transport for Failing {
+        fn call(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, DriverError> {
+            if method == "driver.hello" {
+                return Hello.call(method, params, timeout);
+            }
+            Err(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn an_action_that_timed_out_in_the_browser_leaves_the_driver_usable() {
+        // The driver answered: its browser is fine and its session is still there for the next call.
+        let timeout = DriverError::answered(ErrorKind::Timeout, "click did not finish");
+        let mut driver = Driver::connect(Box::new(Failing(timeout))).unwrap();
+        let error = driver.act(&click(None)).unwrap_err();
+        assert_eq!(*error.kind(), ErrorKind::Timeout);
+        assert!(!driver.is_lost(), "the session would be lost with the driver");
+    }
+
+    #[test]
+    fn a_driver_that_does_not_answer_an_action_in_time_is_lost() {
+        let silent = DriverError::new(ErrorKind::Timeout, "driver did not answer page.act within 25 s");
+        let mut driver = Driver::connect(Box::new(Failing(silent))).unwrap();
+        driver.act(&click(None)).unwrap_err();
+        assert!(driver.is_lost());
+    }
+
+    #[test]
+    fn a_timeout_the_driver_reports_for_anything_but_an_action_still_loses_it() {
+        // As before: a page that did not load may mean a browser in an unknown state, and extraction retries on a
+        // fresh driver.
+        let timeout = DriverError::answered(ErrorKind::Timeout, "page did not load");
+        let mut driver = Driver::connect(Box::new(Failing(timeout))).unwrap();
+        let goto = PageGotoParams {
+            session_id: "s1".into(),
+            url: "http://x.test/".into(),
+            wait_until: None,
+            timeout_ms: None,
+        };
+        driver.goto(&goto).unwrap_err();
+        assert!(driver.is_lost());
+    }
+
+    #[test]
+    fn a_transport_failure_during_an_action_loses_the_driver() {
+        let broken = DriverError::answered(ErrorKind::Transport, "pipe broke");
+        let mut driver = Driver::connect(Box::new(Failing(broken))).unwrap();
+        driver.act(&click(None)).unwrap_err();
+        assert!(driver.is_lost());
     }
 
     #[test]

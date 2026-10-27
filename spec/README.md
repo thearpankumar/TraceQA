@@ -104,7 +104,19 @@ Limits on what a driver sends:
   absent and an empty list. Errors: `element_not_found` (nothing matches within the time), `timeout` (the element was
   found but the action did not finish, for example a disabled button), `invalid_params` (a selector that matches several
   elements, an unknown frame, a missing `value`, a session opened without a policy), `session_not_found`, `unsupported`.
+  A `timeout` that the driver itself reports for `page.act` (a covered control never becomes clickable) is an ordinary
+  result: the engine keeps the driver and its sessions. Every other `timeout`, and an engine that gave up waiting for the
+  driver, still marks the driver lost and replaces it.
   The WebDriver driver lists no actions yet.
+
+- **Request counts:** in a session opened with a `policy`, `page.goto` and `page.act` replies carry `requestCounts`: how
+  many requests the session's browser has sent to each origin since the session was opened, up to and including that
+  call. A request the policy stopped never left the browser and is not counted, and neither is one for an address with
+  no origin (`data:`, `blob:`). The explorer adds up the counts of its sessions to enforce `--max-requests-per-origin`.
+  What the page requests by itself after the last call (a timer, a lazy load) shows up in the next call's counts, so a
+  walk can go over its limit by what one step costs. A session without a policy reports none, and so does any driver
+  that cannot count (the WebDriver driver); the explorer then does not enforce the limit and says so in its progress.
+  An empty map and an absent one mean the same to a Rust reader.
 
 - **Safety policy:** `page.act` only works on a session opened with `session.open`'s `policy` (`ActPolicy`: `allowOrigins`,
   at least one `http` or `https` origin, and `allowWrites`, false when absent). The driver enforces it on the browser's own
@@ -194,6 +206,26 @@ runs/<runId>/
     page.png                screenshot of the page    (only with pictures)
     crops/<componentId>.png one crop per component    (only with pictures)
 ```
+
+`traceqa explore` writes a run folder of its own (`feature` is `explore`): `run.json` with no targets, `events.jsonl`, and
+`graph.json` (`GraphFile`, `graph.schema.json`). There is one graph for the walk and not one reading per browser, so
+there is no browser folder. `graph.json` is written whole or not at all (written aside and renamed), and is there
+whenever the walk got as far as starting: after a cancel too, with `stopped` set to `cancelled`. After a second
+Ctrl-C that cannot wait for the browser the folder is closed (`run.json` says `cancelled`), and `graph.json` may be
+missing.
+
+```
+runs/<runId>/
+  run.json                  RunManifest               (feature explore, targets [])
+  events.jsonl              one Event per line        (progress lines are type "progress")
+  graph.json                GraphFile
+```
+
+Given the same site, seed and limits, `graph.json` is byte-identical from run to run: keys are sorted, lists keep the
+order things happened in, and it holds no time. Screens are told apart by `traceqa-engine`'s `state` module (the
+address without fragment and volatile parameters, the open dialog, and at least 90% of the same component ids once the
+ids that are on every page are left out). A dialog has no component id of its own, so a screen with one open names it
+by role and name (`dialog "Help"`), taken from the path of the components inside it.
 
 A run group is an index over ordinary runs, not a nested layout. `traceqa extract --repeat N`
 writes its N runs as normal sibling folders and one group folder next to them:

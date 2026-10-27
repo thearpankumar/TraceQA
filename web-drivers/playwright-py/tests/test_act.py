@@ -13,6 +13,8 @@ VIEWPORT = {"width": 1280, "height": 800}
 BROWSERS = ["chromium", "firefox", "webkit"]
 # Short, so a test that is meant to fail does not wait ten seconds.
 SHORT = 1500
+# For the one test that makes many actions in a row.
+SLOW_RUNNER = 5000
 
 
 def origin(site: Any) -> str:
@@ -216,7 +218,9 @@ def test_an_element_in_an_iframe_is_reached_through_its_frame_id(page: Page) -> 
 
 def test_an_action_never_sends_more_than_a_page_load(page: Page) -> None:
     for control in ("alert", "grow", "dead", "fetch500", "fetchok", "download", "popup", "go"):
-        page.click(control)
+        # Not the short limit the other tests use: eight actions in a row on a slow runner (WebKit on Windows CI) can
+        # take longer than 1.5 s for one of them, and what this test is about is what reached the server.
+        page.act("click", f"#{control}", timeout=SLOW_RUNNER)
         page.driver.call("page.goto", {"sessionId": page.session_id, "url": page.site.base, "waitUntil": "settled"})
     assert {method for method, _ in page.site.requests} == {"GET"}
 
@@ -462,3 +466,41 @@ def test_a_policy_nobody_can_read_is_refused_before_a_browser_starts(
     with pytest.raises(RpcFailure) as failure:
         driver.call("session.open", {"target": {"browser": "chromium"}, "viewport": VIEWPORT, "policy": policy})
     assert failure.value.kind == "invalid_params"
+
+
+def goto(page: Page) -> models.PageGotoResult:
+    raw = page.driver.call("page.goto", {"sessionId": page.session_id, "url": page.site.base, "waitUntil": "settled"})
+    return models.PageGotoResult.model_validate(raw)
+
+
+def test_the_requests_a_session_has_made_are_counted_by_origin_and_match_what_the_server_saw(page: Page) -> None:
+    loaded = goto(page)
+    assert loaded.request_counts is not None
+    assert loaded.request_counts[origin(page.site)] == len(page.site.requests)
+    seen = len(page.site.requests)
+    result = page.click("go")  # a link: one more page
+    assert result.request_counts is not None
+    assert result.request_counts[origin(page.site)] == len(page.site.requests) > seen
+
+
+def test_a_request_the_policy_stopped_is_not_counted(page: Page) -> None:
+    goto(page)
+    result = page.click("continue")  # a form post, blocked in read-only mode
+    # The page is taken back after a blocked post, and that reload is real traffic. The post is not.
+    assert only_reads(page.site)
+    assert result.request_counts is not None
+    assert result.request_counts[origin(page.site)] == len(page.site.requests)
+
+
+def test_the_counts_do_not_start_again_when_a_page_is_opened_again(page: Page) -> None:
+    first = goto(page).request_counts
+    second = goto(page).request_counts
+    assert first is not None and second is not None
+    assert second[origin(page.site)] > first[origin(page.site)]
+
+
+def test_a_session_without_a_policy_reports_no_counts(driver: DriverClient, act_site: Any) -> None:
+    driver.call("driver.hello", HELLO)
+    opened = driver.call("session.open", {"target": {"browser": "chromium"}, "viewport": VIEWPORT})
+    raw = driver.call("page.goto", {"sessionId": opened["sessionId"], "url": act_site.base, "waitUntil": "settled"})
+    assert models.PageGotoResult.model_validate(raw).request_counts is None

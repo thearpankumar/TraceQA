@@ -22,6 +22,7 @@
 //! `test-support` feature, which no release build enables.
 
 pub mod driver;
+pub mod explore;
 mod extract;
 mod fingerprint;
 mod group;

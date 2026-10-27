@@ -5,6 +5,8 @@ use traceqa_common::types::{
     CollectorResult, FrameInfo, PageEvalParams, Rect, RequestsFailed, ScrollInfo, SessionOpenResult, Warning,
 };
 
+use std::sync::atomic::AtomicBool;
+
 use super::{warning, Job};
 use crate::driver::{Driver, DEFAULT_TIMEOUT_MS};
 use crate::group::Located;
@@ -18,6 +20,10 @@ pub(super) struct Reading {
     pub(super) scroll: ScrollInfo,
     pub(super) warnings: Vec<Warning>,
     pub(super) frames: usize,
+    /// The address of the main page as the browser reports it. Only for reading: never written down.
+    pub(super) url: String,
+    /// The ids of the frames the driver reached, the main one included.
+    pub(super) frame_ids: Vec<String>,
     /// Requests that failed since the page began loading, when the driver reports them. Cumulative,
     /// so the last reading covers the whole load.
     pub(super) requests_failed: Option<RequestsFailed>,
@@ -25,13 +31,24 @@ pub(super) struct Reading {
 
 /// Runs the collector in the main page and every frame the driver can reach.
 pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job: &Job) -> Result<Reading, EngineError> {
-    let evaluated = driver.until(job.cancel).eval(&PageEvalParams {
+    read_frames_with(driver, session, job.cancel, job.include_hidden, job.timeout_ms)
+}
+
+/// As [`read_frames`], for a caller that has no [`Job`] (the explorer, which reads a page it is already on).
+pub(super) fn read_frames_with(
+    driver: &mut Driver,
+    session: &SessionOpenResult,
+    cancel: &AtomicBool,
+    include_hidden: bool,
+    timeout_ms: Option<u64>,
+) -> Result<Reading, EngineError> {
+    let evaluated = driver.until(cancel).eval(&PageEvalParams {
         session_id: session.session_id.clone(),
         script: COLLECTOR.to_string(),
-        arg: Some(json!({ "includeHidden": job.include_hidden })),
+        arg: Some(json!({ "includeHidden": include_hidden })),
         all_frames: Some(session.capabilities.eval_all_frames),
         await_promise: None,
-        timeout_ms: Some(job.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
+        timeout_ms: Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
     })?;
 
     let frames = evaluated.results.len();
@@ -39,9 +56,15 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
     let mut elements = Vec::new();
     let mut warnings = Vec::new();
     let mut main: Option<(String, ScrollInfo)> = None;
+    let mut url = String::new();
+    let mut frame_ids = Vec::new();
     for result in evaluated.results {
         let frame = result.frame;
         let is_main = frame.id == "main";
+        frame_ids.push(frame.id.clone());
+        if is_main {
+            url.clone_from(&frame.url);
+        }
         let collected = match result.value {
             Some(value) => serde_json::from_value::<CollectorResult>(value).map_err(|e| e.to_string()),
             None => Err(result.error.unwrap_or_else(|| "the driver gave no reason".to_string())),
@@ -89,6 +112,8 @@ pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job:
         scroll,
         warnings,
         frames,
+        url,
+        frame_ids,
         requests_failed,
     })
 }

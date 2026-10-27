@@ -115,6 +115,51 @@ From EXP-1 (screens), which built the rule and nothing that supplies its inputs:
 
 **Size.** L
 
+**Status (branch `backlog/exp-1-10`).** Built: `traceqa explore` (`crates/traceqa-cli/src/explore.rs`) and the walk in `crates/traceqa-engine/src/explore/`
+(`walk.rs` the worklist, order, budgets and safety; `live.rs` the real browser; `settle.rs` waiting for a page to stop appearing; `runner.rs` the run folder and
+the abort watcher; `graph.rs` the file; `data.rs` the typed values; `model.rs` the `Browser` trait the walk is written against), `spec/graph.schema.json`
+(`GraphFile`), the fixture `testbed/sites/explore` and `tests/test_explore.py`. The run folder holds `run.json` (feature `explore`, no targets),
+`events.jsonl` (progress lines) and `graph.json`. All six budgets exist and are written into `graph.json` with the reason the walk stopped; Ctrl-C leaves
+a valid folder (`cancelled`, exit 130) and so does a second one.
+Of the carried-forward lines: (1) to (4) are done (a non-local address, or an `--allow-origin` that is not local, exits 2 with no driver started and no folder;
+`policy::Rules::with_origins` and `policy::check_start` are new for it; `live.rs` closes the session when the driver does not say the policy back, which no test
+has tried with a driver that fails to; `decide` runs before every action and again on the element that is acted on). (5) `--state-similarity` is taken. (6) The ids that are on every page come from a short read
+before the walk (up to `--chrome-pages` links the rules allow, default 6, opened and never clicked), not from `traceqa map`; those controls are tried once, on
+the first screen that has them. (7) A `Look` is built from every reading; a dialog has no component id, so a screen with one open is named by the dialog's role
+and name, taken from the path of the controls inside it; an `Err` from `observe` is a failed read (status `failed`), not a screen. (8) Measured on four real
+sites, see below.
+Choices made where the item was silent: `action-timeout` as a stop reason means five actions in a row that used up all their time; a click that fails or is
+blocked is tried once with a key (`press`, Enter or Space) and, if that fails too, the click's own failure is the one reported; a screen that is opened
+again is tried twice before it is given up, and counts as the screen when it is alike by the rule, not when it is the closest of all; typing happens only
+with `--allow-writes`; selects are left alone (`no-options`) because their options are not known; the page is read after every load and action until two
+readings agree to 90% (at most 6 readings); every action starts from a new browser session.
+Changes to earlier items that this needed: the driver counts requests per origin (`requestCounts` in `page.goto` and `page.act`); a `timeout` that the driver
+itself reports for `page.act` no longer makes the engine replace the driver (it took the session with it); `extract` got `read_live`, a single reading of the page
+a session is on; `state::Screens::matches`. And for PR #41 (EXP-4): the driver waits up to 3 s for the `download` event once a download response has arrived and
+listens for downloads on new tabs, and one test that makes eight actions in a row has 5 s per action. Those two fixes are a best reading of the CI logs (WebKit on
+Linux and Windows); they could not be reproduced here.
+Tests: 63 unit tests in the explore module, 20 real-browser tests in Chromium, Firefox and WebKit (a read-only walk of the fixture; the same bytes twice; each
+budget; writes; the refusals; Ctrl-C twice), mutation testing with nothing missed in `policy.rs`, `graph.rs`, `data.rs`, `settle.rs` and `state.rs`, and two
+survivors in `walk.rs` (`depth < max_depth` when a page-wide link is marked done: a page-wide link is on a shallow screen first, so no test short of a contrived
+site tells them apart).
+Tried read-only on four of the five sites in the notes (the fifth, `avqentra.in`, refused secure connections while this was done, for `extract` too). Two
+sites: 8 screens in 10 to 13 actions and the same bytes on a second run. The two single-page portfolio sites: 14 actions each, the same bytes on one and nearly
+the same on the other. The trial found and fixed four things: the walk acted in a session that a failed page read had closed; a screen was given up after one
+reload that looked different; a page was read before it had finished appearing (the same fresh load showed 23, 26 or 32 controls); and the question asked of a
+reload ("is it this screen by the rule") was "is this the closest screen".
+Not done, and limits: `traceqa explore` cannot run in Safari (the WebDriver driver lists no actions) and does not enforce `--max-requests-per-origin` with a
+driver that cannot count; Escape is not used as a fallback; clickable elements with no role (`generic`) are not acted on; `coverage.json` and the named
+`explore.*` events are EXP-7; after a second Ctrl-C that cannot wait for the browser the folder is closed but `graph.json` may be missing. Measured: a new session per action means nothing is
+cached, so one action cost about 25 to 37 requests on `t3aiworks.com` and took about 18 s on the two 3D portfolio sites (the page read and the settle are most
+of it). Not verified: Linux, Windows, Rust 1.88, and the CI fix above.
+For other items (not fixed here): EXP-1, on a single-page site whose sections fade in on scroll the same address shows as several screens (30 to 57 controls,
+53% to 88% alike), so no share would merge them; a small page whose controls change on every load is split (`t3aiworks.com` home 0.875), and a control whose
+name changes has a new id on every visit, so it is `missing` when the walk comes back for it (the settle of `extract` that marks such names is not in the live read);
+EXP-3, a screen that is only reached by a click or a scroll (a dialog, an open disclosure, a scrolled page) is listed in `unreachable` after the walk leaves it,
+and a walk of a site that is mostly such screens ends early and says `complete`; EXP-9, every action reads the whole page twice and waits for it to settle;
+EXP-10, the buggy shop has no cart page and its only open-and-close control is the mobile menu, and read-only mode skips its buttons, so the 80% target needs a
+look; EXP-6, a select needs its options, and the typed values are a fixed generator.
+
 ### EXP-3: Reset between branches
 
 **Why.** To explore the second branch from a state, the browser must be back in that state. Undoing clicks is

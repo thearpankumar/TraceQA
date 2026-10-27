@@ -950,6 +950,11 @@ class PageActResult(BaseModel):
         populate_by_name=True,
     )
     ok: bool
+    request_counts: dict[str, int] | None = Field(
+        default=None,
+        validation_alias="requestCounts", serialization_alias="requestCounts",
+        description="As in PageGotoResult: how many requests the session's browser has sent to each origin so far. The same counts, so the engine can add up what a run cost whichever call came last.",
+    )
     url: str | None = Field(
         default=None,
         description="The address of the page after the action and after settling.",
@@ -1151,6 +1156,158 @@ class FindingsFile(BaseModel):
         validation_alias="needsReview", serialization_alias="needsReview",
         description="Present when axe-core results were included: how many results axe could not decide and left for a person to review (its incomplete results). Not counted in counts.",
         ge=0,
+    )
+
+
+class Strategy(Enum):
+    """
+    The order screens waiting to be explored are taken: bfs takes everything one action away before going deeper, dfs goes as deep as it can first.
+    """
+
+    bfs = "bfs"
+    dfs = "dfs"
+
+
+class GraphBudgets(BaseModel):
+    """
+    The limits the walk was given.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    max_states: int = Field(..., validation_alias="maxStates", serialization_alias="maxStates", ge=0)
+    max_actions: int = Field(..., validation_alias="maxActions", serialization_alias="maxActions", ge=0)
+    max_depth: int = Field(
+        ...,
+        validation_alias="maxDepth", serialization_alias="maxDepth",
+        description="Screens deeper than this (in actions from the start page) are found and not explored.",
+        ge=0,
+    )
+    action_timeout_ms: int = Field(
+        ..., validation_alias="actionTimeoutMs", serialization_alias="actionTimeoutMs", description="The most one action may take.", ge=0
+    )
+    timeout_ms: int = Field(
+        ..., validation_alias="timeoutMs", serialization_alias="timeoutMs", description="The most the whole walk may take.", ge=0
+    )
+    max_requests_per_origin: int = Field(..., validation_alias="maxRequestsPerOrigin", serialization_alias="maxRequestsPerOrigin", ge=0)
+
+
+class GraphStop(Enum):
+    """
+    Why the walk ended. complete: every action that could be tried was tried. max-states, max-actions, timeout and max-requests: that limit was reached. max-depth: nothing else was left but screens deeper than the limit. action-timeout: several actions in a row used up all their time. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.
+    """
+
+    complete = "complete"
+    max_states = "max-states"
+    max_actions = "max-actions"
+    max_depth = "max-depth"
+    action_timeout = "action-timeout"
+    timeout = "timeout"
+    max_requests = "max-requests"
+    cancelled = "cancelled"
+    error = "error"
+
+
+class GraphState(BaseModel):
+    """
+    One screen.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    url: str = Field(
+        ...,
+        description="The address without fragment and volatile parameters, with secret parameters replaced.",
+    )
+    modal: str | None = Field(
+        default=None,
+        description="The dialog that was open, as role and name. Absent when none.",
+    )
+    components: list[str] = Field(
+        ...,
+        description="The ids the screen is compared by, sorted: the visible components of its first reading without the page-wide ones.",
+    )
+    frames: list[str]
+    depth: int = Field(
+        ...,
+        description="The fewest actions from the start page that were found to lead here.",
+        ge=0,
+    )
+
+
+class Action(Enum):
+    """
+    press is a click that was blocked and was tried again with a key.
+    """
+
+    click = "click"
+    type = "type"
+    press = "press"
+
+
+class Status(Enum):
+    """
+    ok: it worked. missing: the component was not on the page any more, and nothing was done. timeout: it took longer than allowed. failed: the browser could not do it, or the page that followed had nothing on it.
+    """
+
+    ok = "ok"
+    missing = "missing"
+    timeout = "timeout"
+    failed = "failed"
+
+
+class GraphEdge(BaseModel):
+    """
+    One action, and what it led to.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    from_: str = Field(
+        ..., validation_alias="from", serialization_alias="from", description="The screen the action was made on."
+    )
+    component: str
+    label: str = Field(
+        ...,
+        description="The role and accessible name of the component, for people reading the file.",
+    )
+    action: Action = Field(
+        ...,
+        description="press is a click that was blocked and was tried again with a key.",
+    )
+    to: str | None = Field(
+        default=None,
+        description="The screen the action led to. Absent when the action did not complete, or the page it led to could not be read.",
+    )
+    status: Status = Field(
+        ...,
+        description="ok: it worked. missing: the component was not on the page any more, and nothing was done. timeout: it took longer than allowed. failed: the browser could not do it, or the page that followed had nothing on it.",
+    )
+    navigated: bool
+    popups: int = Field(..., ge=0)
+    dialogs: int = Field(..., ge=0)
+    downloads: int = Field(..., ge=0)
+
+
+class GraphSkipped(BaseModel):
+    """
+    A component that was found and left alone.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    state: str
+    component: str
+    label: str
+    reason: str = Field(
+        ...,
+        description="destructive: its name or address says it does something with a lasting effect. blocked: it leads to another origin or somewhere that is not a page. read-only: read-only mode only touches links, tabs and things that open and close. no-options: a list to pick from, whose options the walker does not know.",
     )
 
 
@@ -1623,7 +1780,7 @@ class VisualThresholds(BaseModel):
     )
 
 
-class Status(StrEnum):
+class Status1(StrEnum):
     """
     same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.
     """
@@ -1645,7 +1802,7 @@ class VisualResult(BaseModel):
     id: str = Field(..., description="The component id.")
     role: str
     name: str
-    status: Status = Field(
+    status: Status1 = Field(
         ...,
         description="same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.",
     )
@@ -1864,6 +2021,11 @@ class PageGotoResult(BaseModel):
         default=None, description="HTTP status of the main document, when known.", ge=0
     )
     title: str
+    request_counts: dict[str, int] | None = Field(
+        default=None,
+        validation_alias="requestCounts", serialization_alias="requestCounts",
+        description="How many requests the session's browser has sent to each origin since the session was opened, up to and including this call. Only in a session opened with a policy. A request the policy stopped never left the browser and is not counted. Requests the page makes by itself after the call (a timer, a lazy load) are counted by the next call that reports counts.",
+    )
     load_complete: bool | None = Field(
         default=None,
         validation_alias="loadComplete", serialization_alias="loadComplete",
@@ -1890,6 +2052,67 @@ class PageEvalResult(BaseModel):
         ..., description="One entry per frame, main frame first."
     )
     requests_failed: RequestsFailed | None = Field(default=None, validation_alias="requestsFailed", serialization_alias="requestsFailed")
+
+
+class GraphFile(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(..., validation_alias="schemaVersion", serialization_alias="schemaVersion", ge=0)
+    start_url: str = Field(
+        ...,
+        validation_alias="startUrl", serialization_alias="startUrl",
+        description="The address the walk started from, as asked for.",
+    )
+    seed: int = Field(
+        ...,
+        description="Decides the text typed into fields. The same seed on the same site gives the same walk.",
+        ge=0,
+    )
+    strategy: Strategy = Field(
+        ...,
+        description="The order screens waiting to be explored are taken: bfs takes everything one action away before going deeper, dfs goes as deep as it can first.",
+    )
+    state_similarity_per_mille: int = Field(
+        ...,
+        validation_alias="stateSimilarityPerMille", serialization_alias="stateSimilarityPerMille",
+        description="How alike two readings of a page must be to count as the same screen, in thousandths: the share of their component ids that are the same (Jaccard). 900 is 90%.",
+        ge=0,
+        le=1000,
+    )
+    chrome_pages: int = Field(
+        ...,
+        validation_alias="chromePages", serialization_alias="chromePages",
+        description="How many pages were read before the walk to find the ids that are on every page, the first one included.",
+        ge=0,
+    )
+    chrome: list[str] = Field(
+        ...,
+        description="The component ids that are on (nearly) every page, sorted. They are left out of the ids that screens are compared by, and are still listed in each screen's components when they were all it had.",
+    )
+    budgets: GraphBudgets
+    stopped: GraphStop
+    actions: int = Field(
+        ...,
+        description="How many actions were made. Equals the number of edges whose status is not missing.",
+        ge=0,
+    )
+    states: list[GraphState] = Field(
+        ...,
+        description="The screens, in the order they were first seen. A screen's id is s followed by its position.",
+    )
+    edges: list[GraphEdge] = Field(
+        ...,
+        description="The actions, in the order they were made. An edge's id is e followed by its position.",
+    )
+    skipped: list[GraphSkipped] = Field(
+        ...,
+        description="Components that were found and not touched, once per screen and component.",
+    )
+    unreachable: list[str] = Field(
+        ...,
+        description="Screens that could not be opened again after the walk left them, so what was left on them was not tried.",
+    )
 
 
 class HealItem(BaseModel):
