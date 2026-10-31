@@ -112,44 +112,33 @@ impl ExploreRun {
                     cancel,
                     DEFAULT_LOAD_TIMEOUT_MS,
                 );
-                let explored = explore(&mut browser, &request.options, cancel, &mut |line| {
-                    progress.emit("progress", None, redact_text(line), json!({}));
+                let explored = explore(&mut browser, &request.options, cancel, &mut |event| {
+                    progress.emit(event.kind(), None, redact_text(&event.message()), event.data());
                 });
                 browser.close();
-                for call in &explored.model_calls {
-                    progress.emit("model.call", None, redact_text(&call.summary()), call.data());
-                }
                 explored
             });
             done.store(true, Ordering::SeqCst);
             result
         });
 
-        let (status, explored, internal_error) = match result {
+        let (status, explored) = match result {
             Ok(explored) => {
                 let status = match explored.graph.stopped {
                     Stop::Cancelled => RunStatus::Cancelled,
                     Stop::Error => RunStatus::Failed,
                     _ => RunStatus::Completed,
                 };
-                (status, Some(explored), None)
+                write_results(&folder, &explored, &progress);
+                (status, Some(explored))
             }
-            Err(message) => (RunStatus::Failed, None, Some(message)),
+            Err(message) => {
+                let text: String = redact_text(&message).chars().take(200).collect();
+                eprintln!("traceqa: internal error: {text}");
+                progress.emit("error", None, format!("internal error: {text}"), json!({}));
+                (RunStatus::Failed, None)
+            }
         };
-        if let Some(explored) = &explored {
-            if let Err(error) = write_graph(&folder, &explored.graph.to_bytes()) {
-                eprintln!("traceqa: could not write graph.json: {error}");
-            }
-            if let Some(message) = &explored.error {
-                eprintln!("traceqa: {}", redact_text(message));
-                progress.emit("error", None, redact_text(message), json!({}));
-            }
-        }
-        if let Some(message) = &internal_error {
-            let text: String = redact_text(message).chars().take(200).collect();
-            eprintln!("traceqa: internal error: {text}");
-            progress.emit("error", None, format!("internal error: {text}"), json!({}));
-        }
         manifest.status = status;
         manifest.finished_at = Some(now_rfc3339());
         progress.emit(
@@ -168,11 +157,27 @@ impl ExploreRun {
     }
 }
 
-/// Writes `graph.json` so that a reader never sees half of it.
-fn write_graph(folder: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let temporary = folder.join("graph.json.tmp");
+/// Writes `graph.json` and `coverage.json`, and tells of the error that ended the walk, if one did.
+fn write_results(folder: &Path, explored: &Explored, progress: &Progress<'_, '_>) {
+    for (name, bytes) in [
+        ("graph.json", explored.graph.to_bytes()),
+        ("coverage.json", explored.coverage.to_bytes()),
+    ] {
+        if let Err(error) = write_file(folder, name, &bytes) {
+            eprintln!("traceqa: could not write {name}: {error}");
+        }
+    }
+    if let Some(message) = &explored.error {
+        eprintln!("traceqa: {}", redact_text(message));
+        progress.emit("error", None, redact_text(message), json!({}));
+    }
+}
+
+/// Writes a file of the run folder so that a reader never sees half of it.
+fn write_file(folder: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let temporary = folder.join(format!("{name}.tmp"));
     std::fs::write(&temporary, bytes)?;
-    std::fs::rename(&temporary, folder.join("graph.json"))
+    std::fs::rename(&temporary, folder.join(name))
 }
 
 /// Waits for an abort request while the exploration goes on. On a request it writes the final `run.json` itself,

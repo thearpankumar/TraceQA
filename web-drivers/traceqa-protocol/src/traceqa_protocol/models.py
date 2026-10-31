@@ -487,6 +487,84 @@ class RunStatus(StrEnum):
     cancelled = "cancelled"
 
 
+class CoverageCounts(BaseModel):
+    """
+    How many components of a screen, or of the whole walk, fall in each group. discovered = touched + skipped + untouched.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    discovered: int = Field(..., ge=0)
+    touched: int = Field(
+        ...,
+        description="An action was made on the component on this screen (an edge of graph.json whose status is not `missing`, a timeout and a failure included).",
+        ge=0,
+    )
+    skipped: int = Field(..., description="Left alone, with a reason.", ge=0)
+    untouched: int = Field(
+        ...,
+        description="Nothing was done: the walk ended first, the screen could not be opened again, the screen was deeper than --max-depth, or the component was gone when its turn came.",
+        ge=0,
+    )
+
+
+class CoverageTotals(CoverageCounts):
+    """
+    The counts over every screen, and the share that was touched.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    touched_per_mille: int = Field(
+        ...,
+        validation_alias="touchedPerMille", serialization_alias="touchedPerMille",
+        description="touched / discovered in thousandths, rounded down: 1000 is all of it. 0 when nothing was discovered. A read-only walk may not press most buttons, so it cannot reach 1000 on a page that has them.",
+        ge=0,
+        le=1000,
+    )
+    touched_of_allowed_per_mille: int = Field(
+        ...,
+        validation_alias="touchedOfAllowedPerMille", serialization_alias="touchedOfAllowedPerMille",
+        description="touched / (discovered - skipped) in thousandths, rounded down: how much of what the walk was allowed to touch it touched. The figure to judge a walk by when it was left alone on purpose. 0 when nothing was allowed.",
+        ge=0,
+        le=1000,
+    )
+
+
+class CoverageSkip(BaseModel):
+    """
+    A component of a screen that was left alone.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    component: str
+    reason: str = Field(
+        ...,
+        description="destructive: its name or address says it does something with a lasting effect. blocked: it leads to another origin or somewhere that is not a page. read-only: read-only mode only touches links, tabs and things that open and close. no-options: a list to pick from, whose options the walker does not know. disabled: the component could not be used.",
+    )
+
+
+class CoverageSkipped(BaseModel):
+    """
+    A component that was left alone, in the list of the whole walk.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    state: str
+    component: str
+    label: str = Field(
+        ...,
+        description="The role and accessible name of the component, for people reading the file.",
+    )
+    reason: str = Field(..., description="The same words as in CoverageSkip.")
+
+
 class DiffSide(BaseModel):
     """
     One of the two compared pages.
@@ -1525,7 +1603,7 @@ class Event(BaseModel):
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     type: str = Field(
         ...,
-        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error.",
+        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error. `traceqa explore` also writes progress (a plain line), explore.state.new, explore.action.start, explore.action.end, explore.policy.block, explore.replay and model.call; their `data` is described in the notes of backlog items EXP-6 and EXP-7 and in the module comment of `crates/traceqa-engine/src/explore/events.rs`.",
     )
     target: str | None = Field(
         default=None,
@@ -1901,6 +1979,23 @@ class StorageOrigin(BaseModel):
     local_storage: list[StorageItem] = Field(..., validation_alias="localStorage", serialization_alias="localStorage")
 
 
+class CoverageState(BaseModel):
+    """
+    One screen.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(..., description="The screen's id in graph.json.")
+    url: str = Field(..., description="As in graph.json.")
+    counts: CoverageCounts
+    discovered: list[str] = Field(..., description="Component ids, sorted.")
+    touched: list[str]
+    skipped: list[CoverageSkip]
+    untouched: list[str]
+
+
 class DiffEntry(BaseModel):
     """
     One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.
@@ -2094,7 +2189,7 @@ class GraphFile(BaseModel):
     stopped: GraphStop
     actions: int = Field(
         ...,
-        description="How many actions were made. Equals the number of edges whose status is not missing.",
+        description="How many actions were made, against --max-actions. At least the number of edges whose status is not missing: it is more when a screen that has no address of its own (a dialog, an open drawer) was reopened by replaying the actions that led to it, because those actions count and make no edge. Each one is an explore.replay event.",
         ge=0,
     )
     states: list[GraphState] = Field(
@@ -2521,6 +2616,38 @@ class StorageState(BaseModel):
     cookies: list[StorageCookie]
     origins: list[StorageOrigin] = Field(
         ..., description="Values in each site's localStorage."
+    )
+
+
+class CoverageFile(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(..., validation_alias="schemaVersion", serialization_alias="schemaVersion", ge=0)
+    start_url: str = Field(
+        ...,
+        validation_alias="startUrl", serialization_alias="startUrl",
+        description="The address the walk started from, as in graph.json.",
+    )
+    stopped: GraphStop = Field(
+        ...,
+        description="Why the walk ended, as in graph.json. A walk that did not end with `complete` leaves untouched components.",
+    )
+    totals: CoverageTotals
+    states: list[CoverageState] = Field(
+        ..., description="One entry for each screen of graph.json, in the same order."
+    )
+    shared: list[str] = Field(
+        ...,
+        description="The component ids that are on (nearly) every page, sorted, as `chrome` in graph.json. Each is counted on the first screen that shows it.",
+    )
+    unreachable: list[str] = Field(
+        ...,
+        description="Screens that could not be opened again after the walk left them, so what was left on them was not tried. Their untouched components are the ones it could not get to.",
+    )
+    skipped: list[CoverageSkipped] = Field(
+        ...,
+        description="Every component that was left alone, with the reason, sorted by screen and component. The same ones as the `skipped` lists of the screens.",
     )
 
 

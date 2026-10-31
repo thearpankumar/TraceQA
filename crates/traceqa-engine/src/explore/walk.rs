@@ -6,10 +6,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use url::Url;
 
+use super::coverage::{Coverage, Discovered};
+use super::events::WalkEvent;
 use super::graph::{Edge, Graph, Settings, Skipped, State, Status, Stop};
 use super::model::{Act, Acted, Browser, StepError, View, ViewComponent, ViewInstance};
 use super::values::{Field, ModelCall, Stopped, Values};
@@ -21,17 +23,28 @@ use crate::url_safety::redact;
 /// The result of a walk. A walk that failed in the middle still has the graph of what it found.
 pub struct Explored {
     pub graph: Graph,
+    /// How much of what was found was touched, worked out from the same data as `graph`.
+    pub coverage: Coverage,
     /// Why the browser failed, when `graph.stopped` is [`Stop::Error`].
     pub error: Option<String>,
     /// Every call made to a model, in order. Written to `events.jsonl` as `model.call` events.
     pub model_calls: Vec<ModelCall>,
 }
 
-/// A line for the person watching.
-pub type Progress<'a> = &'a mut dyn FnMut(&str);
+/// What the person or the tool watching is told, as it happens.
+pub type Progress<'a> = &'a mut dyn FnMut(&WalkEvent);
 
 /// The time a keyboard retry of a blocked click is given, at most.
 const PRESS_TIMEOUT_MS: u64 = 2_000;
+
+/// Reading the pages that show what is on every page (the header, the footer) may use this part of the walk's time
+/// (`--timeout`), and stops there. On a slow site six pages could use most of it before the walk began.
+const CHROME_TIME_DIVISOR: u32 = 5;
+
+/// Replaying actions to reopen screens may use this part of the walk's time. A screen that cannot be reopened costs
+/// a full attempt each time, and on a slow site that is tens of seconds. When it is used up, a screen that its address
+/// does not bring back is given up without another try.
+const REPLAY_TIME_DIVISOR: u32 = 4;
 
 /// What the walker does with a role.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,6 +79,8 @@ struct Info {
     open_at: String,
     /// `role "name"` of every candidate, for the file.
     labels: BTreeMap<String, String>,
+    /// Every component the walker has an action for that the first reading showed, for `coverage.json`.
+    found: Vec<Discovered>,
 }
 
 /// How a step ended, when it did not give a page.
@@ -108,6 +123,10 @@ struct Walker<'a> {
     chrome: BTreeSet<String>,
     /// Page-wide components already queued or skipped, so each is dealt with on the first screen that has it.
     chrome_seen: BTreeSet<String>,
+    /// The time spent so far replaying actions to reopen screens.
+    replay_time: Duration,
+    /// Page-wide components already counted as discovered, so that each is counted on the first screen that shows it.
+    chrome_counted: BTreeSet<String>,
     chrome_pages: u32,
     values: Values,
 }
@@ -133,6 +152,8 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
         at: None,
         chrome: BTreeSet::new(),
         chrome_seen: BTreeSet::new(),
+        replay_time: Duration::ZERO,
+        chrome_counted: BTreeSet::new(),
         chrome_pages: 0,
         values: Values::new(options.seed, options.model.clone()),
     };
@@ -149,8 +170,13 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
         Err(Halt::Error(message)) => (Stop::Error, Some(message)),
     };
     let model_calls = walker.values.take_calls();
+    let found: Vec<Vec<Discovered>> = walker.infos.iter().map(|info| info.found.clone()).collect();
+    let shared: Vec<String> = walker.chrome.iter().cloned().collect();
+    let graph = walker.into_graph(stopped);
+    let coverage = Coverage::build(&graph, &found, &shared);
     Explored {
-        graph: walker.into_graph(stopped),
+        graph,
+        coverage,
         error,
         model_calls,
     }
@@ -158,7 +184,7 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
 
 impl Walker<'_> {
     fn say(&mut self, line: &str) {
-        (self.progress)(line);
+        (self.progress)(&WalkEvent::Line(line));
     }
 
     fn run(&mut self) -> Result<(), Halt> {
@@ -171,6 +197,10 @@ impl Walker<'_> {
         let mut moved = false;
         for address in self.chrome_candidates(&first) {
             self.check_limits()?;
+            if self.started.elapsed() >= self.options.budgets.timeout / CHROME_TIME_DIVISOR {
+                self.say("the pages that show what is on every page are using too much of the time: no more are read");
+                break;
+            }
             moved = true;
             match self.browser.load(&address) {
                 Ok(view) => pages.push(visible_ids(&view)),
@@ -251,7 +281,7 @@ impl Walker<'_> {
             if component.role != "link" {
                 continue;
             }
-            let Some(instance) = component.instances.iter().find(|i| i.is_actionable()) else {
+            let Some(instance) = first_actionable(component) else {
                 continue;
             };
             let Some(href) = instance.href.as_deref() else {
@@ -289,16 +319,31 @@ impl Walker<'_> {
         debug_assert_eq!(index, self.infos.len());
         let mut labels = BTreeMap::new();
         let mut queue = Vec::new();
+        let mut found = Vec::new();
         for component in ordered(view) {
             let Some(kind) = kind_of(&component.role) else {
                 continue;
             };
-            let Some(instance) = component.instances.iter().find(|i| i.is_actionable()) else {
+            let page_wide = self.chrome.contains(&component.id);
+            // Discovered: something the walker has an action for, and a person could see. A component that is on every
+            // page is counted on the first screen that shows it.
+            if component.instances.iter().any(|i| i.visible)
+                && !(page_wide && self.chrome_counted.contains(&component.id))
+            {
+                if page_wide {
+                    self.chrome_counted.insert(component.id.clone());
+                }
+                found.push(Discovered {
+                    component: component.id.clone(),
+                    label: label_of(component),
+                    actionable: first_actionable(component).is_some(),
+                });
+            }
+            let Some(instance) = first_actionable(component) else {
                 continue;
             };
             // The header and the footer are the same on every screen: they are dealt with on the first screen that
             // shows them, and not again on each of the others.
-            let page_wide = self.chrome.contains(&component.id);
             if page_wide && self.chrome_seen.contains(&component.id) {
                 continue;
             }
@@ -321,6 +366,18 @@ impl Walker<'_> {
             depth,
             open_at: view.url.clone(),
             labels,
+            found,
+        });
+        let url = self
+            .screens
+            .all()
+            .get(index)
+            .map(|s| redact(&s.url))
+            .unwrap_or_default();
+        (self.progress)(&WalkEvent::StateNew {
+            state: &format!("s{index}"),
+            depth,
+            url: &url,
         });
         if depth >= self.options.budgets.max_depth {
             self.depth_cut |= !queue.is_empty();
@@ -341,6 +398,12 @@ impl Walker<'_> {
 
     fn note_skip(&mut self, screen: usize, component: &ViewComponent, label: &str, reason: String) {
         if self.skipped_seen.insert((screen, component.id.clone())) {
+            (self.progress)(&WalkEvent::ComponentSkipped {
+                state: &format!("s{screen}"),
+                component: &component.id,
+                label,
+                reason: &reason,
+            });
             self.skipped.push(Skipped {
                 state: format!("s{screen}"),
                 component: component.id.clone(),
@@ -357,7 +420,8 @@ impl Walker<'_> {
     /// that is not the screen is tried once more. A screen that its address does not bring back (a dialog, an open
     /// drawer) fails both times; it is then remembered, and from then on it is reopened by replaying the shortest
     /// chain of actions that led to it, which costs actions from the budget. A replay that does not end on the screen
-    /// is tried once more and then the screen is given up. Nothing is tried a third time.
+    /// is tried once more and then the screen is given up. Nothing is tried a third time, and replays together may use
+    /// only a part of the walk's time ([`REPLAY_TIME_DIVISOR`]).
     fn stand_on(&mut self, screen: usize) -> Result<Option<View>, Halt> {
         if let Some((at, view)) = &self.at {
             if *at == screen {
@@ -389,8 +453,20 @@ impl Walker<'_> {
             return Ok(self.give_up(screen, "no recorded way to reach it"));
         };
         for _attempt in 0..2 {
-            if let Some(view) = self.replay(screen, &path)? {
-                self.say(&format!("s{screen} reopened by replaying {} actions", path.len()));
+            if self.replay_time >= self.options.budgets.timeout / REPLAY_TIME_DIVISOR {
+                return Ok(self.give_up(screen, "the time set aside for replays is used up"));
+            }
+            // Every attempt is told, the ones that fail too: its actions count against the budget and make no edge.
+            let before = self.actions;
+            let started = Instant::now();
+            let result = self.replay(screen, &path);
+            self.replay_time += started.elapsed();
+            (self.progress)(&WalkEvent::Replay {
+                state: &format!("s{screen}"),
+                actions: (self.actions - before) as usize,
+                reopened: matches!(result, Ok(Some(_))),
+            });
+            if let Some(view) = result? {
                 self.at = Some((screen, view.clone()));
                 return Ok(Some(view));
             }
@@ -459,12 +535,7 @@ impl Walker<'_> {
         let timeout_ms = self.options.budgets.action_timeout.as_millis() as u64;
         for (component, to) in path {
             self.check_limits()?;
-            let found = view
-                .components
-                .iter()
-                .find(|c| &c.id == component)
-                .and_then(|c| c.instances.iter().find(|i| i.is_actionable()).map(|i| (c, i)));
-            let Some((comp, instance)) = found else {
+            let Some((comp, instance)) = actionable(&view, component) else {
                 return Ok(None);
             };
             let Some(kind) = kind_of(&comp.role) else {
@@ -532,12 +603,7 @@ impl Walker<'_> {
             return Ok(());
         };
         let label = self.infos[screen].labels.get(component).cloned().unwrap_or_default();
-        let found = view
-            .components
-            .iter()
-            .find(|c| c.id == component)
-            .and_then(|c| c.instances.iter().find(|i| i.is_actionable()).map(|i| (c, i)));
-        let Some((comp, instance)) = found else {
+        let Some((comp, instance)) = actionable(&view, component) else {
             self.record(screen, component, &label, "click", &Outcome::none(Status::Missing));
             return Ok(());
         };
@@ -559,60 +625,61 @@ impl Walker<'_> {
             _ => Act::Click,
         };
         let key = key_for(&comp.role);
+        (self.progress)(&WalkEvent::ActionStart {
+            edge: &format!("e{}", self.edges.len()),
+            state: &format!("s{screen}"),
+            component,
+            label: &label,
+            action: act.name(),
+        });
         let (name, result) = self.act_with_key_fallback(instance, &act, kind, key, timeout_ms)?;
         self.at = None;
 
         let acted = match result {
             Ok(acted) => acted,
-            Err(StepError::Cancelled) => return Err(Halt::Stop(Stop::Cancelled)),
-            Err(StepError::Fatal(message)) => return Err(Halt::Error(message)),
-            Err(StepError::NotFound(why)) => {
-                self.record(
-                    screen,
-                    component,
-                    &label,
-                    name,
-                    &Outcome::because(Status::Missing, &why),
-                );
-                return Ok(());
-            }
-            Err(StepError::Timeout(why)) => {
-                self.actions += 1;
-                self.timeouts_in_a_row += 1;
-                self.record(
-                    screen,
-                    component,
-                    &label,
-                    name,
-                    &Outcome::because(Status::Timeout, &why),
-                );
-                if self.timeouts_in_a_row >= MAX_TIMEOUTS_IN_A_ROW {
-                    return Err(Halt::Stop(Stop::ActionTimeout));
-                }
-                return Ok(());
-            }
-            Err(StepError::Failed(why)) => {
-                self.actions += 1;
-                self.timeouts_in_a_row = 0;
-                self.record(
-                    screen,
-                    component,
-                    &label,
-                    name,
-                    &Outcome::because(Status::Failed, &why.to_string()),
-                );
-                return Ok(());
-            }
+            Err(error) => return self.failed(screen, component, &label, name, error),
         };
         self.timeouts_in_a_row = 0;
         self.arrived(screen, component, &label, name, acted)
+    }
+
+    /// An action that did not give a page: the end of the walk, or an edge that says what went wrong.
+    fn failed(
+        &mut self,
+        screen: usize,
+        component: &str,
+        label: &str,
+        name: &'static str,
+        error: StepError,
+    ) -> Result<(), Halt> {
+        let (status, why) = match error {
+            StepError::Cancelled => return Err(Halt::Stop(Stop::Cancelled)),
+            StepError::Fatal(message) => return Err(Halt::Error(message)),
+            // The element went away: nothing was done, so it costs no action.
+            StepError::NotFound(why) => {
+                self.record(screen, component, label, name, &Outcome::because(Status::Missing, &why));
+                return Ok(());
+            }
+            StepError::Timeout(why) => (Status::Timeout, why),
+            StepError::Failed(why) => (Status::Failed, why),
+        };
+        self.actions += 1;
+        self.record(screen, component, label, name, &Outcome::because(status, &why));
+        if status == Status::Timeout {
+            self.timeouts_in_a_row += 1;
+            if self.timeouts_in_a_row >= MAX_TIMEOUTS_IN_A_ROW {
+                return Err(Halt::Stop(Stop::ActionTimeout));
+            }
+        } else {
+            self.timeouts_in_a_row = 0;
+        }
+        Ok(())
     }
 
     /// The text to type into a field. A model is asked only here, so only for a field that is really about to be typed
     /// into: the rules have let it through and writes are on.
     fn typed_value(&mut self, component: &str, comp: &ViewComponent, instance: &ViewInstance) -> Result<String, Halt> {
         let field = Field {
-            component: component.to_string(),
             role: comp.role.clone(),
             label: comp.name.clone(),
             input_type: instance.hints.input_type.clone(),
@@ -622,10 +689,9 @@ impl Walker<'_> {
         };
         let before = self.values.calls().len();
         let time_left = self.options.budgets.timeout.saturating_sub(self.started.elapsed());
-        let value = self.values.value_for(&field, self.cancel, time_left);
-        let lines: Vec<String> = self.values.calls()[before..].iter().map(ModelCall::summary).collect();
-        for line in lines {
-            self.say(&line);
+        let value = self.values.value_for(component, &field, self.cancel, time_left);
+        for call in &self.values.calls()[before..] {
+            (self.progress)(&WalkEvent::ModelCall(call));
         }
         value.map_err(|stopped| match stopped {
             Stopped::Cancelled => Halt::Stop(Stop::Cancelled),
@@ -668,12 +734,17 @@ impl Walker<'_> {
         if seen.is_new {
             let depth = self.infos[from].depth + 1;
             self.add_screen(to, depth, &view);
-            let url = self.screens.get(seen.id).map(|s| redact(&s.url)).unwrap_or_default();
-            self.say(&format!("s{to} is new (depth {depth}): {url}"));
             self.at = Some((to, view));
         } else if !effect.changed {
             // Nothing happened, so the page is still as it was first read.
             self.at = Some((from, view));
+        }
+        for refused in &effect.refused {
+            (self.progress)(&WalkEvent::RequestRefused {
+                edge: &format!("e{}", self.edges.len()),
+                method: &refused.method,
+                url: &refused.url,
+            });
         }
         self.record(
             from,
@@ -695,14 +766,6 @@ impl Walker<'_> {
 
     fn record(&mut self, from: usize, component: &str, label: &str, action: &'static str, outcome: &Outcome) {
         let id = format!("e{}", self.edges.len());
-        let end = outcome.to.map_or_else(
-            || match &outcome.note {
-                Some(note) => format!("{} ({note})", outcome.status.as_str()),
-                None => outcome.status.as_str().to_string(),
-            },
-            |to| format!("s{to}"),
-        );
-        self.say(&format!("{id}: {action} {label} on s{from} -> {end}"));
         self.edges.push(Edge {
             id,
             from: format!("s{from}"),
@@ -716,6 +779,12 @@ impl Walker<'_> {
             dialogs: outcome.dialogs,
             downloads: outcome.downloads,
         });
+        if let Some(edge) = self.edges.last() {
+            (self.progress)(&WalkEvent::ActionEnd {
+                edge,
+                note: outcome.note.as_deref(),
+            });
+        }
     }
 
     fn into_graph(self, stopped: Stop) -> Graph {
@@ -796,6 +865,17 @@ impl Outcome {
 }
 
 /// The ids of the components that have a visible instance.
+/// The element of a component that a person could act on now: the first visible and enabled one.
+fn first_actionable(component: &ViewComponent) -> Option<&ViewInstance> {
+    component.instances.iter().find(|i| i.is_actionable())
+}
+
+/// The component with this id on the page, and the element to act on, when there is one.
+fn actionable<'v>(view: &'v View, id: &str) -> Option<(&'v ViewComponent, &'v ViewInstance)> {
+    let component = view.components.iter().find(|c| c.id == id)?;
+    Some((component, first_actionable(component)?))
+}
+
 fn visible_ids(view: &View) -> BTreeSet<String> {
     view.components
         .iter()

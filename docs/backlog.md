@@ -118,7 +118,7 @@ From EXP-1 (screens), which built the rule and nothing that supplies its inputs:
 **Status (branch `backlog/exp-1-10`).** Built: `traceqa explore` (`crates/traceqa-cli/src/explore.rs`) and the walk in `crates/traceqa-engine/src/explore/`
 (`walk.rs` the worklist, order, budgets and safety; `live.rs` the real browser; `settle.rs` waiting for a page to stop appearing; `runner.rs` the run folder and
 the abort watcher; `graph.rs` the file; `data.rs` the typed values; `model.rs` the `Browser` trait the walk is written against), `spec/graph.schema.json`
-(`GraphFile`), the fixture `testbed/sites/explore` and `tests/test_explore.py`. The run folder holds `run.json` (feature `explore`, no targets),
+(`GraphFile`), the demo shop `testbed/sites/buggy-shop` (`/shop/`; EXP-2 first used a small site of its own, `testbed/sites/explore`, which was merged into the shop on 28 Oct 2026) and `tests/test_explore.py`. The run folder holds `run.json` (feature `explore`, no targets),
 `events.jsonl` (progress lines) and `graph.json`. All six budgets exist and are written into `graph.json` with the reason the walk stopped; Ctrl-C leaves
 a valid folder (`cancelled`, exit 130) and so does a second one.
 Of the carried-forward lines: (1) to (4) are done (a non-local address, or an `--allow-origin` that is not local, exits 2 with no driver started and no folder;
@@ -396,6 +396,96 @@ tools and the CI gate can read them.
 - `events.jsonl` has one `explore.action.end` per edge in `graph.json`.
 
 **Carried forward.** From EXP-5: `coverage.json` lists a skipped component with the reason `policy::Skip::reason()` gives (`destructive`, `blocked` or `read-only`), and a request the driver stopped (`failedRequests` entry with the failure `blocked_by_policy`) is written to `events.jsonl`.
+
+**Size.** M
+
+**Built (EXP-7, 28 Oct 2026).** `explore/coverage.rs` (the report, worked out at the end from the same data as the graph), `explore/events.rs` (`WalkEvent`: what the walk
+tells its listener), `spec/coverage.schema.json` (`CoverageFile`, registered in `spec/README.md`, and the Python protocol files regenerated), and `coverage.json`
+written next to `graph.json` (aside and renamed, after a cancel or an error too). The walk's callback now gets typed events and not plain lines, so `events.jsonl` has
+`explore.state.new` (also for the start page), `explore.action.start`, `explore.action.end`, `explore.policy.block` (for each component the rules left alone, and for each
+request the browser refused: `Effect.refused`, from `failedRequests` with the failure `blocked_by_policy`), `explore.replay` (for each attempt, a failed one too, with the actions it
+cost: the replays add up to `actions` minus the edges, a rule every walk of the test suite checks) and `model.call`, **as the walk goes**
+(this also fixes the EXP-6 limit that `model.call` was only written at the end). The terminal prints the sentences of the state, end, replay and model events, the same
+lines as before, and one coverage line at the end. `graph.json` is unchanged except for the description of `actions` (it counts replayed actions, which EXP-3 made true).
+Decisions where the item was open:
+- **The edge keeps its flat fields** (`navigated`, `popups`, `dialogs`, `downloads`) and gets no nested `result`: they are the essentials of what an action did, and moving
+  them would break the file for nothing. There are no oracle findings yet (ORA); when there are, they are an added field.
+- **"Discovered" is defined** (see the schema): a component with an action for its role and at least one visible instance in the screen's first reading. Hidden ones are not
+  discovered. A component on every page is counted on the first screen that shows it, so totals are sums with nothing counted twice. Each discovered component is exactly one of
+  touched (an edge whose status is not `missing`, a timeout or a failure included), skipped (with a reason, `disabled` added to the rules' and the walker's), or untouched.
+- **Two shares, not one.** `touchedPerMille` is touched / discovered, as the item says. `touchedOfAllowedPerMille` is touched / (discovered - skipped), added because a read-only
+  walk may not press buttons, so on a page that has them the first share cannot reach 100% by design. `graph.json` and the events are unaffected.
+- `explore.action.start` has no end only for the last action of a walk that did not finish (Ctrl-C or the clock, a lost browser, or `max-states`, where the action that would have
+  found one screen too many is not kept). An edge whose component was gone (`missing`) has an end and no start, because no action was made.
+- **The `traceqa codegen` hand-off is not built.** Code generation needs a locator for each component, and the explorer does not save the components of each screen. EXP-8 (replay)
+  needs the same data, so the two should share one design: save a `components.json` per screen, then let `codegen` take a path through the graph.
+- The `.gitignore` had `coverage.*` (a Go template line for the output of coverage tools), which hid `coverage.rs` and `coverage.schema.json` from git. Two exceptions were added
+  for those two paths. `runs/` is still ignored as a whole.
+**Measured on the demo shop** (the new `/shop/` section of `testbed/sites/buggy-shop`; read-only, Chromium, up to 150 actions, 28 Oct 2026): complete after 67
+actions (40 edges and 27 replay actions, two of the attempts failed), 15 screens, only GET requests (152). Coverage: 58 components discovered, 40 touched, 12 skipped (the read-only buttons and fields, and
+"Delete account", "Clear cart" and "Pay now" as destructive), 6 untouched, all on the one screen that could not be reopened (the once-only offer dialog, as designed).
+**`touched / discovered` is 68.9%, not the 80% the item asks for;** `touched / allowed` is 87.0%. The item's 80% on the old buggy shop could not be tried: its home page is one
+screen with no cart, and it was left alone because other tests read it. The 80% in the item is met only in the sense of the second figure, and only on this shop, which was built
+with that in mind; no shop was tuned to reach a number.
+**Not done, and limits.**
+- 40% of the actions on the demo (27 of 67) were replays: a page with tabs and dialogs is many screens at one address (EXP-1 splits it by dialog and by tab, so Home, Home with Help
+  open, Home on the Details tab, and both together are four screens), and each one is reached again by replay. A page that has many such states would spend a large share of
+  `--max-actions` on getting back. EXP-9 (not re-reading the whole page) and a smarter way back (Escape to close a dialog) are where that gets cheaper.
+- `explore.action.start` and `explore.policy.block` are not printed on the terminal (they are in `events.jsonl`); a second Ctrl-C that kills the run can still leave `graph.json` and
+  `coverage.json` missing, as before, but the events written up to then are there.
+- **A real site gives different answers on two runs of the same code.** `https://www.t3aiworks.com`, read-only, Chromium, `--max-actions 30`, 28 Oct 2026, two runs with the replay
+  and matching code unchanged between them: the first reopened 6 of 6 screens by replay and finished its 30 actions with 0 unreachable; the second failed all 7 replay attempts (3
+  screens unreachable) and ended on the 540 s `timeout` at 25 edges, because each action takes about 12 s on that site, the first screen took 54 s to appear (six header pages are
+  read first), and each failed replay attempt cost 14 to 54 s. What differs is whether the page, after a click on an in-page link ("About Us", "Talent Solutions"), looks 90% like the
+  screen it was recorded as: the site is one long page whose sections fade in on scroll, so which components are visible depends on timing (the EXP-1 limit already noted). The files
+  were right both times (`coverage.json` and `graph.json` validate, one `explore.action.end` per edge, the replays add up to the actions that are not edges); what degraded is how
+  much of the site the walk reached. Next steps if this matters: check a replayed screen by its address and its dialog and not by the component share, or give replay a time cap of its
+  own so that a failing screen cannot use the clock, or tell the caller which screens were given up in the terminal summary (it does: "Could not be opened again").
+- **`https://ui.shadcn.com` (public docs site, Next.js, read-only, Chromium, 30 actions, 28 Oct 2026) showed two problems, both fixed the same day (see "Fixed after the real-site runs").**
+  The first screen appeared after 290 s and an action took about 30 s, so the walk ended on the 540 s `timeout` with 18 actions and 4 screens; and 11 header links were each clicked and
+  reported as no change, with the address still `/`.
+- Not verified: Linux, Windows, a real model.
+
+**Fixed after the real-site runs (28 Oct 2026).**
+- **A link in a single-page app was credited with the wrong screen.** Reproduced first on a local app (`/slowspa` of the first explore fixture, now `/shop/app` of the shop: links are anchors, a click is taken over, the
+  route arrives 2.5 s later and then `pushState` changes the address). The walk read the page at once after the click, so it was still the old page; every click was credited with the
+  screen the click before it led to, and one route was never found. The instant version of the same app (`/spa`) was always handled correctly. Fix (`Live::act`): after a click on a link
+  that should end on another address (`expects_new_address`: an http(s) page that is not the one the page is on; a place in the same page, a mail link or a script is not), and when the
+  address has not changed, the walk reads the page again until the address does, for at most 8 s (`settle::ROUTE_WAIT_MS`, never more than the action's own time), and then settles the
+  page. Whatever moved the page, an address that differs now counts as a change (`effect.changed`), which `arrived` uses to know whether the browser is still where it was. A link that
+  never changes the address costs the 8 s once. `navigated` still means a page load, so a route change of a single-page app has `navigated: false` and a new screen.
+- **Time.** `settle::SETTLE_BUDGET_MS` (12 s): the wait for a page to stop changing is cut off when it has used that, after two readings at least, where a page that never stops (an
+  animation) took six readings of seconds each. The pages read before the walk to find what is on every page (the header, the footer) may use a fifth of `--timeout`
+  (`CHROME_TIME_DIVISOR`), and replays together a quarter (`REPLAY_TIME_DIVISOR`); when a share is used up a screen that its address does not bring back is given up with the reason "the
+  time set aside for replays is used up". Both are shares of `--timeout`, so a walk given more time gets more.
+- Tests: `settle.rs` (4: the budget, waiting for an address, giving up at the limit, cancel), `live.rs` (3: which links are expected to change the address), `explore/tests.rs` (2: the
+  limits on the header pages and on replays), and real browsers (`tests/test_explore.py`: both apps, every click credited with the right page). Not yet re-run on the real sites that showed
+  the problems; see the results below if they were. The real-browser tests were later merged into the file `tests/test_explore.py` that runs on the shop (see the next note).
+
+**One test site, and the cleanup (28 Oct 2026).**
+- **The explorer's tests use one site, the demo shop (`/shop/` of `testbed/sites/buggy-shop`).** Until now there were two: the shop and a small site of the first explorer tests
+  (`testbed/sites/explore`). Everything that site had is now in the shop: a banner that changes on every load (`server.rotate`, off by default), twelve disabled buttons, a "More"
+  disclosure, a link an overlay covers, a link to another site and a mail link, a link to a missing page, a "Continue" form button and a note box, a 12-page chain
+  (`/shop/chain/1..12.html`, for the depth and screen limits), pages that never answer (`/shop/hang/N`, `server.hang_seconds`), leaf pages, and five fields on the search page. The
+  chain and the hanging pages are not linked from the shop, so an ordinary walk does not meet them; a test starts a walk on them. The old site and its single-page-app copy were
+  deleted, and `tests/test_explore.py` and `tests/test_explore_shop.py` became one file, `tests/test_explore.py`, that runs on the shop. Moved, not weakened: each old assertion is
+  in the new file with the addresses and labels of the shop. Changed on purpose: the model tests start on the search page with `--max-depth 1`, so that the walk types into the five
+  fields there and no others; walks of the whole shop get `--timeout 1800`, so that a slow machine ends them by their own limits and not by the clock.
+- **Dead code and long functions.** The `pub` items of the explorer that only tests used, and had no other user, were removed or made private to the module (`Values`, `Stopped`,
+  `FAILURES_BEFORE_OFF`, `COVERAGE_VERSION`; `Recorded::len`, `is_empty` and `from_file`). `Recorded` itself stays, exported and with no caller, on purpose: the EXP-6 test of "a
+  replay asks no model" needs it and the command that replays a run (EXP-8) is its first user. `Field` no longer has the component's id (the walk passes it apart, so what a model
+  is sent cannot hold it). Split: the model call (`Values::value_for` and four small functions), a step that did not give a page (`Walker::failed`), the wait after a click
+  (`Live::after_click`), the results of a run (`write_results`), and the options of the command (`similarity_of`, `budgets_of`, `model_of`). One helper for "the element of this
+  component that a person could act on" replaces four copies. Checked by a snapshot of the graph, coverage and every event of eight in-memory walks (dialogs, writes, a model,
+  budgets, both strategies) taken before and after: byte for byte the same. The snapshot test was temporary and is not in the tree.
+
+**Tests (EXP-7 and the demo shop).** In the engine: 5 unit tests of the coverage report and 12 of events and coverage in `explore/tests.rs`, and every walk of that file (more than a
+hundred) now checks the rules that hold for any walk: one `explore.action.end` for each edge, one `explore.state.new` for each screen, the replays add up to the actions that are not
+edges, and the coverage parts make up the whole with totals that are the sums. In Python: `tests/test_shop_demo.py` (17, the shop and its server, no browser) and
+`tests/test_explore.py` (the real-browser tests, which were split over two files until they were merged), and
+every real walk in `tests/test_explore.py` now also validates `coverage.json` and checks the events. The first run of the demo test found a real gap, fixed in the same change:
+a replay that fails spent actions and was not told, so the events did not add up to the graph. Whole suite on 28 Oct 2026: Rust 793 passed; Python 1554 passed, 11 skipped
+(Windows installers, PowerShell, CI-only, no `chromedriver`), 0 failed, 1 h 7 min.
 
 **Size.** M
 

@@ -187,12 +187,15 @@ That covers `--allow-origin` too. The walker clicks on the site it explores: run
 | `--chrome-pages N` | `6` | Pages read first, besides the start page, to find what is on every page (header, footer). `0` reads only the start page. |
 | `--allow-writes` | off | Also type into fields and press buttons. Needs `--allow-origin` for the site. |
 | `--allow-origin ORIGIN` | the start origin | Another origin the walk may go to. Repeatable. |
+| `--model NAME` | off | Ask a model for the text typed into fields, before the built-in words are used. Only has an effect with `--allow-writes`. `mock` is the only name for now: it sends nothing anywhere. See "Text for fields" below. |
+| `--max-model-calls N` | `50` | The most calls to the model in one run. After that the built-in words are typed. |
+| `--model-timeout SECONDS` | `20` | The most one call to the model may take. |
 | `--deny-name WORD` | none | Another word or phrase that marks a control as not to be touched, in every mode. Repeatable. |
 | `--i-understand-this-interacts` | off | Required for a site that is not on this machine. |
 | `--browser`, `--viewport`, `--storage-state`, `--out`, `--headed`, `--driver` | | As for `extract`, with one browser per run. |
 | `--json` | off | Print `graph.json` only. |
 
-The run folder holds `run.json`, `events.jsonl` and `graph.json`. The graph names every stop: `complete`, `max-states`,
+The run folder holds `run.json`, `events.jsonl`, `graph.json` and `coverage.json`. The graph names every stop: `complete`, `max-states`,
 `max-actions`, `max-depth`, `action-timeout`, `timeout`, `max-requests`, `cancelled` or `error`. Exit code 0 when the walk
 ended by itself or by a limit, 1 when the browser failed, 2 for a wrong command, 130 after Ctrl-C (the folder is closed
 as `cancelled`; a second Ctrl-C quits at once).
@@ -200,12 +203,24 @@ as `cancelled`; a second Ctrl-C quits at once).
 Things to know about what it finds:
 
 - After each action the walk opens the screen again in a **new browser session** to try the next control, so nothing
-  one visit left behind leaks into the next. A screen that cannot be opened again by its address (a dialog, a step inside
-  a page) is listed in `unreachable` and what is left on it is not tried.
+  one visit left behind leaks into the next. A screen that its address does not bring back (a dialog, a step inside a
+  page) is reopened by **replaying** the shortest chain of recorded actions from the start page, checking after every
+  step that the page is what was recorded; those actions count against `--max-actions` and make no edge in the graph
+  (`graph.json`'s `actions` is then more than its number of edges). A chain that typed text is never replayed. A screen
+  that cannot be reopened either way is listed in `unreachable` and what is left on it is not tried.
 - The page is read after every load and action, and again half a second later, until two readings agree to 90% (at most six
-  readings). A page that is still appearing (a hero that is built by a script, sections that fade in) shows a different
+  readings, and at most about twelve seconds on a page that is slow to read). A page that is still appearing (a hero that is built by a script, sections that fade in) shows a different
   number of controls from one load to the next; without waiting, one page looks like several screens.
 - A screen that is opened again and does not look like it is tried once more before it is given up.
+- A link to another page of the site is expected to change the address. A **single-page app** does not change it at
+  once: it fetches the next page first, then changes the address and draws it. So after such a click the walk waits, up to
+  eight seconds, for the address to change before it reads the result; read at once, the page would still be the old one,
+  and the click would be credited with the screen the click before it led to. A link that never changes the address
+  costs those eight seconds once.
+- Two parts of a walk are held to a share of `--timeout`, because on a slow site they can use all of it: reading the
+  pages that show the header and footer (a fifth), and replaying actions to reopen screens (a quarter). When the share is
+  used up the walk goes on without reading more such pages, and a screen that its address does not bring back is given
+  up with that reason.
 - A click that is blocked (a control another element covers) is tried once more with the keyboard (`press` in the graph).
 - The header and footer links that are on every page are tried once, on the first screen that has them.
 - Screens are told apart by their address, an open dialog, and the component ids. A **small page** whose controls change
@@ -746,3 +761,30 @@ uv run testbed/bench/run.py --browsers chromium --repeats 1 --json scores.json
 
 The bench extracts the demo shop and scores it against `testbed/sites/buggy-shop/manifest.yaml`: found, extra, wrong, id
 stability and time. It exits non-zero when a score falls short.
+
+### What it writes: `graph.json`, `coverage.json` and the events
+
+- **`graph.json`** is the map: the screens, the actions between them, what was left alone and why the walk stopped.
+- **`coverage.json`** is the report card: for each screen, which of the components the walker has an action for were
+  *touched*, *skipped* (with the reason: `destructive`, `blocked`, `read-only`, `no-options` or `disabled`) or *untouched*
+  (the walk ended first, or the screen could not be reopened), and the same counts over all screens. The share touched
+  is given in thousandths twice: of everything discovered (`touchedPerMille`), and of what the walk was allowed to touch
+  (`touchedOfAllowedPerMille`), which is the fairer one for a read-only walk, because it may not press most buttons. A
+  component that is on every page is counted once, on the first screen that shows it. The end of a run prints it as one
+  line: `Coverage: 40 of 58 components touched (68.9%), 12 left alone, 6 not reached. Of the 46 it was allowed to touch: 87.0%`.
+  Both files are byte-identical for the same site, seed and limits. A CI gate reads the share from `coverage.json`.
+- **`events.jsonl`** has, besides the run's own events, one line for each step: `explore.state.new` (a screen is found),
+  `explore.action.start` and `explore.action.end` (one end for each edge of `graph.json`), `explore.policy.block` (a
+  component the rules left alone, or a request the browser refused), `explore.replay` (each attempt to reopen a screen by replay, a failed one too, with the actions it cost) and
+  `model.call`. They are written as the walk goes, so a run that is killed still has them up to that point.
+
+### Text for fields
+
+With `--allow-writes` the walk types into text fields. By default the text comes from built-in words that depend on the
+seed and the field (an address for an email field, a number for a phone field, one of a few shop words for a search
+box), so the same seed types the same. `--model NAME` asks a model first. Whatever a model does, the walk stays in
+charge: a call has a time limit, Ctrl-C ends it within a second, a run has a cap on calls, three calls in a row without a
+usable answer switch it off for the run, an answer that is empty, long, has a line break or does not fit the field's
+`type` is thrown away, fields that look like secrets (passwords, card numbers) are never sent, and an answer is only
+text for its field: it cannot choose an action. Every call is in `events.jsonl`. No real model is connected yet; see the
+notes on EXP-6 in `docs/backlog.md`.

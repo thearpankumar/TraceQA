@@ -95,6 +95,16 @@ pub struct Effect {
     pub popups: u32,
     pub dialogs: u32,
     pub downloads: u32,
+    /// Requests the browser refused because of the safety policy. Not written to the graph: they are events.
+    pub refused: Vec<Refused>,
+}
+
+/// A request the browser aborted because the session's policy forbids it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refused {
+    pub method: String,
+    /// Without query or fragment.
+    pub url: String,
 }
 
 /// An action that was performed, and the page after it.

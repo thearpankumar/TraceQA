@@ -207,8 +207,8 @@ runs/<runId>/
     crops/<componentId>.png one crop per component    (only with pictures)
 ```
 
-`traceqa explore` writes a run folder of its own (`feature` is `explore`): `run.json` with no targets, `events.jsonl`, and
-`graph.json` (`GraphFile`, `graph.schema.json`). There is one graph for the walk and not one reading per browser, so
+`traceqa explore` writes a run folder of its own (`feature` is `explore`): `run.json` with no targets, `events.jsonl`,
+`graph.json` (`GraphFile`, `graph.schema.json`) and `coverage.json` (`CoverageFile`, `coverage.schema.json`). There is one graph for the walk and not one reading per browser, so
 there is no browser folder. `graph.json` is written whole or not at all (written aside and renamed), and is there
 whenever the walk got as far as starting: after a cancel too, with `stopped` set to `cancelled`. After a second
 Ctrl-C that cannot wait for the browser the folder is closed (`run.json` says `cancelled`), and `graph.json` may be
@@ -219,7 +219,17 @@ runs/<runId>/
   run.json                  RunManifest               (feature explore, targets [])
   events.jsonl              one Event per line        (progress lines are type "progress")
   graph.json                GraphFile
+  coverage.json             CoverageFile
 ```
+
+`coverage.json` says how much of what the walk found it touched: for each screen the components that were discovered,
+touched, skipped (with the reason) and untouched, the same counts over all screens, and the share touched in thousandths.
+It is made from the same data as `graph.json`, is written whole or not at all, and is byte-identical for the same site,
+seed and limits. The definitions (what counts as discovered, why a component on every page is counted once) are in the
+schema. `events.jsonl` has one `explore.action.end` for each edge of `graph.json`, `explore.state.new` for each screen,
+`explore.policy.block` for each component the rules left alone and each request the browser refused,
+`explore.replay` for each attempt to reopen a screen by replay (failed ones too, with the actions they cost, so that the
+replays add up to the actions that are not edges), and `model.call` for each call to a model.
 
 Given the same site, seed and limits, `graph.json` is byte-identical from run to run: keys are sorted, lists keep the
 order things happened in, and it holds no time. Screens are told apart by `traceqa-engine`'s `state` module (the

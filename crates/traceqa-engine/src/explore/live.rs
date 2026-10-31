@@ -13,11 +13,13 @@ use traceqa_common::types::{
     SessionOpenResult, StorageState, Viewport, WaitUntil,
 };
 
-use super::model::{Act, Acted, Browser, Effect, Hints, StepError, View, ViewComponent, ViewInstance};
-use super::settle::{settled, Reader, MAX_READS, PAUSE_MS};
+use super::model::{Act, Acted, Browser, Effect, Hints, Refused, StepError, View, ViewComponent, ViewInstance};
+use super::settle::{settled, wait_for_route, Reader, MAX_READS, PAUSE_MS, ROUTE_WAIT_MS};
 use crate::driver::{DriverError, Drivers, ErrorKind, DEFAULT_TIMEOUT_MS};
 use crate::extract::read_live;
 use crate::policy::enforced;
+use crate::state::clean_url;
+use crate::url_safety::redact;
 use crate::EngineError;
 
 pub struct Live<'a> {
@@ -34,6 +36,8 @@ pub struct Live<'a> {
     earlier: BTreeMap<String, u64>,
     /// Requests made so far in the session that is open, by origin.
     current: BTreeMap<String, u64>,
+    /// The address the page was at when it was last read, which is where an action is made from.
+    url: Option<String>,
     /// The driver has reported counts at least once. A driver that cannot count sends none, and the budget on
     /// requests is then not enforced.
     counts_known: bool,
@@ -60,6 +64,7 @@ impl<'a> Live<'a> {
             session: None,
             earlier: BTreeMap::new(),
             current: BTreeMap::new(),
+            url: None,
             counts_known: false,
         }
     }
@@ -167,11 +172,44 @@ impl<'a> Live<'a> {
                 return Err(step_error(&error));
             }
         };
+        self.url = Some(reading.url.clone());
         Ok(view_of(reading.url, reading.frame_ids, &reading.components))
     }
     /// The page once it has stopped appearing (see `settle`).
     fn read(&mut self, timeout_ms: u64) -> Result<View, StepError> {
         settled(&mut LiveReader { live: self, timeout_ms }, MAX_READS)
+    }
+
+    /// The page after an action made from the address `from`, and whether the address is not `from` any more.
+    ///
+    /// A link to another page of a single-page app does not change the address when it is clicked: the app fetches
+    /// the next page first. Read at once, the page is still the old one, and the walk would take the old page for the
+    /// result of this click and the next click's result for this one's. So when the link should end on another address
+    /// and the address has not changed, the page is read again until it does, for a while.
+    fn after_click(
+        &mut self,
+        view: View,
+        from: &str,
+        instance: &ViewInstance,
+        effect: &Effect,
+        timeout_ms: u64,
+    ) -> Result<(View, bool), StepError> {
+        let waits = effect.popups == 0
+            && effect.downloads == 0
+            && effect.dialogs == 0
+            && expects_new_address(from, instance.href.as_deref())
+            && same_address(&view.url, from);
+        let mut view = view;
+        if waits {
+            let limit = std::time::Duration::from_millis(ROUTE_WAIT_MS.min(timeout_ms));
+            let still_here = |url: &str| same_address(url, from);
+            if wait_for_route(&mut LiveReader { live: self, timeout_ms }, &still_here, limit)?.is_some() {
+                view = self.read(timeout_ms)?;
+            }
+        }
+        // Whatever moved the page, the address says so.
+        let moved = !same_address(&view.url, from);
+        Ok((view, moved))
     }
 }
 
@@ -245,6 +283,8 @@ impl Browser for Live<'_> {
             .as_ref()
             .map(|session| session.session_id.clone())
             .ok_or_else(|| StepError::Fatal("no session is open".into()))?;
+        // Where the action is made from.
+        let before = self.url.clone();
         let (action, value) = match act {
             Act::Click => (ActionKind::Click, None),
             Act::Type(text) => (ActionKind::Type, Some(text.clone())),
@@ -279,9 +319,26 @@ impl Browser for Live<'_> {
             popups: count(result.popups.len()),
             dialogs: count(result.dialogs.len()),
             downloads: count(result.downloads.len()),
+            refused: result
+                .failed_requests
+                .iter()
+                .filter(|request| request.failure.as_deref() == Some("blocked_by_policy"))
+                .map(|request| Refused {
+                    method: request.method.clone(),
+                    url: redact(&request.url),
+                })
+                .collect(),
         };
         // Reading the page is part of the action, so it is given the action's time and no more.
         let view = self.read(timeout_ms)?;
+        let (view, changed) = match before.as_deref() {
+            Some(from) => self.after_click(view, from, instance, &effect, timeout_ms)?,
+            None => (view, false),
+        };
+        let effect = Effect {
+            changed: effect.changed || changed,
+            ..effect
+        };
         Ok(Acted { effect, view })
     }
 
@@ -336,6 +393,29 @@ fn dialog_in(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Whether two addresses are the same page for the walk: without fragment and volatile parameters.
+fn same_address(a: &str, b: &str) -> bool {
+    match (clean_url(a), clean_url(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// Whether clicking a link with this `href` on the page at `from` should end on another address: it leads to a page
+/// of the web (not a mail link, a script or a place in the same page) that is not the one the page is on.
+fn expects_new_address(from: &str, href: Option<&str>) -> bool {
+    let Some(href) = href else {
+        return false;
+    };
+    let Ok(base) = url::Url::parse(from) else {
+        return false;
+    };
+    let Ok(target) = base.join(href) else {
+        return false;
+    };
+    matches!(target.scheme(), "http" | "https") && !same_address(target.as_str(), from)
+}
+
 /// The walker's view of a reading.
 fn view_of(url: String, frame_ids: Vec<String>, components: &[Component]) -> View {
     let modal = components
@@ -384,7 +464,35 @@ pub const DEFAULT_LOAD_TIMEOUT_MS: u64 = DEFAULT_TIMEOUT_MS;
 
 #[cfg(test)]
 mod tests {
-    use super::dialog_in;
+    use super::{dialog_in, expects_new_address, same_address};
+
+    #[test]
+    fn a_link_to_another_page_of_the_site_is_expected_to_change_the_address() {
+        let from = "http://shop.test/docs";
+        assert!(expects_new_address(from, Some("/charts")));
+        assert!(expects_new_address(from, Some("charts")));
+        assert!(expects_new_address(from, Some("https://shop.test/a?x=1")));
+        assert!(expects_new_address(from, Some("https://other.test/")));
+    }
+
+    #[test]
+    fn a_link_that_stays_on_the_page_or_leaves_the_web_is_not() {
+        let from = "http://shop.test/docs";
+        assert!(!expects_new_address(from, None));
+        assert!(!expects_new_address(from, Some("#section")), "a place in the same page");
+        assert!(!expects_new_address(from, Some("/docs")));
+        assert!(!expects_new_address(from, Some("/docs#top")));
+        assert!(!expects_new_address(from, Some("mailto:a@b.test")));
+        assert!(!expects_new_address(from, Some("javascript:void(0)")));
+        assert!(!expects_new_address("not an address", Some("/x")));
+    }
+
+    #[test]
+    fn two_addresses_are_the_same_page_when_only_the_fragment_differs() {
+        assert!(same_address("http://shop.test/a#x", "http://shop.test/a#y"));
+        assert!(!same_address("http://shop.test/a", "http://shop.test/b"));
+        assert!(same_address("not an address", "not an address"));
+    }
 
     #[test]
     fn a_control_inside_a_dialog_names_the_dialog() {

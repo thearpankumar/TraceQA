@@ -14,7 +14,7 @@ const SEARCH_WORDS: [&str; 6] = [
 ];
 
 /// What to type into the text field `component` (its id) with this accessible `name`.
-pub fn value_for(seed: u64, component: &str, name: &str) -> String {
+pub(super) fn value_for(seed: u64, component: &str, name: &str) -> String {
     let lower = name.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|word| lower.contains(word));
     if has(&["email", "e-mail", "mail"]) {

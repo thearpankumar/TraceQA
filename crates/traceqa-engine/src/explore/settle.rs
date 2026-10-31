@@ -5,6 +5,8 @@
 //! once, the same page shows 23 controls one time and 32 the next, and the walk takes them for two screens. So the
 //! page is read, left for a moment and read again, until two readings in a row look the same.
 
+use std::time::{Duration, Instant};
+
 use super::model::{StepError, View};
 
 /// The most readings made of one page: with the pause between them, about three seconds.
@@ -12,6 +14,16 @@ pub const MAX_READS: usize = 6;
 
 /// The pause between two readings.
 pub const PAUSE_MS: u64 = 500;
+
+/// The most time spent waiting for one page to stop changing, counted from its first reading. A page that never
+/// stops (an animation, a ticker) would otherwise take [`MAX_READS`] readings, and on a heavy page a reading takes
+/// seconds. Once it is used up the page is taken as it is. Two readings are always made, so there is something to
+/// compare.
+pub const SETTLE_BUDGET_MS: u64 = 12_000;
+
+/// The most time to wait for a link that should have changed the address to do it. A single-page app fetches the next
+/// page before it changes the address, so the page read just after the click is still the old one.
+pub const ROUTE_WAIT_MS: u64 = 8_000;
 
 /// Two readings look the same when at least this share of the ids of the visible components are in both, in
 /// thousandths. It is the same share the screens are told apart by, so a change small enough not to make a new screen
@@ -25,19 +37,44 @@ pub trait Reader {
     fn pause(&mut self) -> Result<(), StepError>;
 }
 
-/// The page as it is when it stops changing, or as it is after `MAX_READS` readings if it never does.
+/// The page as it is when it stops changing, or as it is after `MAX_READS` readings or [`SETTLE_BUDGET_MS`] if it
+/// never does.
 pub fn settled(reader: &mut dyn Reader, max_reads: usize) -> Result<View, StepError> {
+    settled_within(reader, max_reads, Duration::from_millis(SETTLE_BUDGET_MS))
+}
+
+fn settled_within(reader: &mut dyn Reader, max_reads: usize, budget: Duration) -> Result<View, StepError> {
+    let started = Instant::now();
     let mut last = reader.read()?;
     for _ in 1..max_reads.max(1) {
         reader.pause()?;
         let now = reader.read()?;
         let same = looks_the_same(&last, &now);
         last = now;
-        if same {
+        if same || started.elapsed() >= budget {
             break;
         }
     }
     Ok(last)
+}
+
+/// Reads the page until its address is no longer the one `still_here` says it is, and gives that reading. `None` if
+/// that did not happen within `limit`. One reading at a time, not settled: the caller settles the page once it has
+/// moved.
+pub fn wait_for_route(
+    reader: &mut dyn Reader,
+    still_here: &dyn Fn(&str) -> bool,
+    limit: Duration,
+) -> Result<Option<View>, StepError> {
+    let started = Instant::now();
+    while started.elapsed() < limit {
+        reader.pause()?;
+        let view = reader.read()?;
+        if !still_here(&view.url) {
+            return Ok(Some(view));
+        }
+    }
+    Ok(None)
 }
 
 fn visible_ids(view: &View) -> std::collections::BTreeSet<&str> {
@@ -193,5 +230,90 @@ mod tests {
         }
         assert!(!looks_the_same(&hidden, &view(0..20)));
         assert!(looks_the_same(&hidden, &view(0..10)));
+    }
+
+    /// A `Script` where a pause takes time, as a page that is slow to show a change does.
+    struct Slow {
+        script: Script,
+        pause: Duration,
+        read: Duration,
+    }
+
+    impl Reader for Slow {
+        fn read(&mut self) -> Result<View, StepError> {
+            std::thread::sleep(self.read);
+            self.script.read()
+        }
+        fn pause(&mut self) -> Result<(), StepError> {
+            std::thread::sleep(self.pause);
+            self.script.pause()
+        }
+    }
+
+    fn at(url: &str) -> View {
+        View {
+            url: url.to_string(),
+            ..view(0..5)
+        }
+    }
+
+    #[test]
+    fn a_page_that_never_stops_and_is_slow_to_read_is_given_up_on_when_its_time_is_used_up() {
+        // Every reading is different from the last, and a reading takes 120 ms: with a budget of 200 ms the second
+        // reading is the last, where the readings it is allowed would make six.
+        let views: Vec<View> = (0..10).map(|n| view(n * 20..n * 20 + 20)).collect();
+        let mut page = Slow {
+            script: Script::new(views),
+            pause: Duration::ZERO,
+            read: Duration::from_millis(120),
+        };
+        let got = settled_within(&mut page, MAX_READS, Duration::from_millis(200)).unwrap();
+        assert_eq!(page.script.reads, 2, "two readings, to compare, and no more");
+        assert_eq!(got.components[0].id, "c_20");
+        // With time to spare it reads as many as it is allowed.
+        let mut page = Script::new((0..10).map(|n| view(n * 20..n * 20 + 20)).collect());
+        settled_within(&mut page, MAX_READS, Duration::from_secs(60)).unwrap();
+        assert_eq!(page.reads, MAX_READS);
+    }
+
+    #[test]
+    fn a_link_that_changes_the_address_late_is_waited_for_and_the_reading_after_it_is_given() {
+        let mut page = Script::new(vec![
+            at("http://x.test/a"),
+            at("http://x.test/a"),
+            at("http://x.test/b"),
+        ]);
+        let here = |url: &str| url == "http://x.test/a";
+        let got = wait_for_route(&mut page, &here, Duration::from_secs(5)).unwrap();
+        assert_eq!(got.unwrap().url, "http://x.test/b");
+        assert_eq!((page.reads, page.pauses), (3, 3));
+    }
+
+    #[test]
+    fn a_link_that_never_changes_the_address_is_given_up_on_at_the_limit() {
+        let mut page = Slow {
+            script: Script::new(vec![at("http://x.test/a")]),
+            pause: Duration::from_millis(60),
+            read: Duration::ZERO,
+        };
+        let here = |url: &str| url == "http://x.test/a";
+        let started = Instant::now();
+        assert!(wait_for_route(&mut page, &here, Duration::from_millis(200))
+            .unwrap()
+            .is_none());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(page.script.reads >= 2, "it did look more than once");
+    }
+
+    #[test]
+    fn waiting_for_an_address_ends_at_once_on_a_cancel() {
+        let mut page = Script::new(vec![at("http://x.test/a")]);
+        page.fail_pause_at = Some(2);
+        let here = |url: &str| url == "http://x.test/a";
+        assert_eq!(
+            wait_for_route(&mut page, &here, Duration::from_secs(60)).unwrap_err(),
+            StepError::Cancelled
+        );
+        assert_eq!(page.reads, 1);
     }
 }

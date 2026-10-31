@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::values::FAILURES_BEFORE_OFF;
 use super::*;
 use crate::policy::Rules;
 use crate::state::{Similarity, DEFAULT_SIMILARITY};
@@ -138,6 +139,10 @@ struct Fake {
     delay: Duration,
     cancel: Option<(usize, &'static AtomicBool)>,
     reverse: bool,
+    /// How long a load takes, as on a slow site.
+    load_delay: Duration,
+    /// The browser refuses this request when the component is acted on: (component id, method, address).
+    refuse: Option<(&'static str, &'static str, &'static str)>,
 }
 
 impl Fake {
@@ -157,6 +162,8 @@ impl Fake {
             delay: Duration::ZERO,
             cancel: None,
             reverse: false,
+            load_delay: Duration::ZERO,
+            refuse: None,
         }
     }
 
@@ -195,6 +202,7 @@ impl Fake {
 
 impl Browser for Fake {
     fn load(&mut self, url: &str) -> Result<View, StepError> {
+        std::thread::sleep(self.load_delay);
         self.loaded.push(url.to_string());
         self.requests += self.per_request;
         // A page behind a dialog cannot be loaded by its address.
@@ -260,6 +268,15 @@ impl Browser for Fake {
             effect: Effect {
                 navigated: before != after,
                 changed: comp.to.is_some(),
+                refused: self
+                    .refuse
+                    .filter(|(component, _, _)| *component == id)
+                    .map(|(_, method, url)| Refused {
+                        method: method.to_string(),
+                        url: url.to_string(),
+                    })
+                    .into_iter()
+                    .collect(),
                 ..Effect::default()
             },
             view: self.view(),
@@ -285,14 +302,145 @@ fn options() -> Options {
     }
 }
 
-fn run(fake: &mut Fake, options: &Options) -> Explored {
+/// What a walk told its listener.
+struct Told {
+    kind: &'static str,
+    message: String,
+    data: serde_json::Value,
+}
+
+fn run_told(fake: &mut Fake, options: &Options) -> (Explored, Vec<Told>) {
     static NEVER: AtomicBool = AtomicBool::new(false);
-    let done = explore(fake, options, &NEVER, &mut |_| {});
-    // Whatever the walk was about, its parts agree: one action for each edge that was made, and the actions of the
-    // replays that reopened a screen, which make no edge.
-    let made = done.graph.edges.iter().filter(|e| e.status != Status::Missing).count();
-    assert!(done.graph.actions as usize >= made, "{:?}", done.graph.edges);
-    done
+    let mut told = Vec::new();
+    let done = explore(fake, options, &NEVER, &mut |event| {
+        told.push(Told {
+            kind: event.kind(),
+            message: event.message(),
+            data: event.data(),
+        });
+    });
+    check_walk(&done, &told);
+    (done, told)
+}
+
+fn run(fake: &mut Fake, options: &Options) -> Explored {
+    run_told(fake, options).0
+}
+
+/// What must hold for any walk, whatever the site: its parts agree with each other. Every walk of this file is checked.
+fn check_walk(done: &Explored, told: &[Told]) {
+    let graph = &done.graph;
+    // One action for each edge that was made, and the actions of the replays that reopened a screen, which make no edge.
+    let made = graph.edges.iter().filter(|e| e.status != Status::Missing).count();
+    assert!(graph.actions as usize >= made, "{:?}", graph.edges);
+
+    let of = |kind: &str| -> Vec<&Told> { told.iter().filter(|t| t.kind == kind).collect() };
+    // Events: exactly one end for each edge, in order, and a start only for an edge that has an end.
+    let ends: Vec<&str> = of("explore.action.end")
+        .iter()
+        .map(|t| t.data["edge"].as_str().unwrap())
+        .collect();
+    let edges: Vec<&str> = graph.edges.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ends, edges, "one explore.action.end for each edge");
+    // A start has its end, except for the last action of a walk that did not finish: the browser was lost in it, or
+    // it would have found one screen too many.
+    let starts = of("explore.action.start");
+    let dangling: Vec<usize> = starts
+        .iter()
+        .enumerate()
+        .filter(|(_, start)| !edges.contains(&start.data["edge"].as_str().unwrap()))
+        .map(|(n, _)| n)
+        .collect();
+    assert!(dangling.len() <= 1, "{dangling:?}");
+    if let Some(&n) = dangling.first() {
+        assert_eq!(n, starts.len() - 1, "only the last start can be without an edge");
+        assert_ne!(graph.stopped, Stop::Complete);
+    }
+    for edge in graph.edges.iter().filter(|e| e.status == Status::Missing) {
+        assert!(
+            !starts.iter().any(|t| t.data["edge"] == edge.id.as_str()),
+            "{} had no action to start",
+            edge.id
+        );
+    }
+    // The actions that made no edge are the actions of replays, and every attempt of a replay is told.
+    let replayed: u64 = of("explore.replay")
+        .iter()
+        .map(|t| t.data["actions"].as_u64().unwrap())
+        .sum();
+    assert_eq!(
+        replayed,
+        u64::from(graph.actions) - made as u64,
+        "the replays account for the actions that are not edges"
+    );
+    // A screen is announced once, in the order it was found.
+    let new: Vec<&str> = of("explore.state.new")
+        .iter()
+        .map(|t| t.data["state"].as_str().unwrap())
+        .collect();
+    let states: Vec<&str> = graph.states.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(new, states);
+    // What the rules left alone is told once each.
+    let blocks = of("explore.policy.block")
+        .iter()
+        .filter(|t| t.data["kind"] == "component")
+        .count();
+    assert_eq!(blocks, graph.skipped.len());
+
+    // Coverage: totals are the sums, and every discovered component is exactly one of touched, skipped, untouched.
+    let coverage = &done.coverage;
+    assert_eq!(coverage.states.len(), graph.states.len());
+    let totals = coverage.totals();
+    let mut sums = (0, 0, 0, 0);
+    for state in &coverage.states {
+        let sets = |list: &[String]| list.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+        let (discovered, touched, untouched) = (sets(&state.discovered), sets(&state.touched), sets(&state.untouched));
+        let skipped: std::collections::BTreeSet<String> = state.skipped.iter().map(|(c, _)| c.clone()).collect();
+        assert_eq!(
+            discovered.len(),
+            state.discovered.len(),
+            "a component is discovered once on a screen"
+        );
+        let mut union = touched.clone();
+        union.extend(skipped.iter().cloned());
+        union.extend(untouched.iter().cloned());
+        assert_eq!(union, discovered, "{}: the parts make up the whole", state.state);
+        assert_eq!(
+            touched.len() + skipped.len() + untouched.len(),
+            discovered.len(),
+            "{}: and do not overlap",
+            state.state
+        );
+        // Everything that was acted on is in the figures.
+        let acted: std::collections::BTreeSet<&str> = graph
+            .edges
+            .iter()
+            .filter(|e| e.from == state.state && e.status != Status::Missing)
+            .map(|e| e.component.as_str())
+            .collect();
+        assert_eq!(
+            touched
+                .iter()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            acted,
+            "{}: touched is what was acted on",
+            state.state
+        );
+        sums.0 += discovered.len();
+        sums.1 += touched.len();
+        sums.2 += skipped.len();
+        sums.3 += untouched.len();
+    }
+    assert_eq!(
+        (totals.discovered, totals.touched, totals.skipped, totals.untouched),
+        sums,
+        "the totals are the sums of the screens"
+    );
+    assert_eq!(coverage.unreachable, graph.unreachable);
+    assert_eq!(coverage.stopped, graph.stopped.as_str());
+    assert!(totals.touched <= totals.discovered && totals.per_mille() <= 1000);
+    assert_eq!(coverage.to_bytes(), coverage.clone().to_bytes());
 }
 
 /// home -> a, b; a -> a1; b -> b1. Leaves have nothing to act on.
@@ -1504,7 +1652,7 @@ fn the_person_watching_is_told_what_happens_and_why_something_did_not_work() {
     ]);
     let mut lines: Vec<String> = Vec::new();
     static NEVER: AtomicBool = AtomicBool::new(false);
-    let done = explore(&mut fake, &options(), &NEVER, &mut |line| lines.push(line.to_string()));
+    let done = explore(&mut fake, &options(), &NEVER, &mut |event| lines.push(event.message()));
     assert_eq!(done.graph.actions, 2, "one that worked and one that did not");
     assert!(lines.iter().any(|l| l.starts_with("s1 is new (depth 1)")), "{lines:?}");
     assert!(
@@ -1729,7 +1877,6 @@ fn the_answer_of_a_model_is_what_is_typed_and_the_call_is_recorded() {
     let call = &done.model_calls[0];
     assert_eq!(call.answer.as_deref(), Some("blue pen"));
     assert_eq!(call.request.label, "Search products");
-    assert_eq!(call.request.component, "", "the component id is not sent");
     assert_eq!(call.data()["source"], "said");
 }
 
@@ -1898,7 +2045,6 @@ fn what_is_sent_is_cut_short_and_has_no_query_strings_and_no_component_id() {
     assert_eq!(asked.len(), 1);
     assert!(!asked[0].label.contains("SECRET123"), "{}", asked[0].label);
     assert!(asked[0].label.chars().count() <= 200);
-    assert_eq!(asked[0].component, "");
     let logged = done.model_calls[0].data().to_string();
     assert!(!logged.contains("SECRET123"), "{logged}");
 }
@@ -2001,7 +2147,6 @@ fn a_replay_of_a_run_that_used_a_model_asks_no_model() {
         })
         .collect();
     let recorded = Recorded::from_events(&events);
-    assert!(!recorded.is_empty());
 
     // The second run is given the record and not the model. The model's counter does not move.
     let mut again = with_writes();
@@ -2044,7 +2189,6 @@ fn a_record_of_a_run_is_read_back_by_key_and_only_for_calls_that_were_used() {
     ]
     .join("\n");
     let recorded = Recorded::from_events(&text);
-    assert_eq!(recorded.len(), 1);
     assert_eq!(recorded.value(&field("B")), Ok("good".to_string()));
     assert!(recorded.value(&field("A")).is_err());
 }
@@ -2091,4 +2235,388 @@ fn two_walks_without_a_model_with_the_same_seed_write_the_same_bytes_whatever_th
         .graph
         .to_bytes();
     assert_eq!(one, two);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Events and coverage (EXP-7)
+// ---------------------------------------------------------------------------------------------------------------
+
+fn kinds(told: &[Told]) -> Vec<&'static str> {
+    told.iter().map(|t| t.kind).collect()
+}
+
+#[test]
+fn the_end_of_an_action_is_told_in_the_sentence_the_terminal_shows() {
+    let (_, told) = run_told(&mut Fake::new(tree()), &options());
+    let ends: Vec<&str> = told
+        .iter()
+        .filter(|t| t.kind == "explore.action.end")
+        .map(|t| t.message.as_str())
+        .collect();
+    assert_eq!(ends[0], r#"e0: click link "A" on s0 -> s1"#);
+    assert_eq!(ends.len(), 4);
+    let new: Vec<&str> = told
+        .iter()
+        .filter(|t| t.kind == "explore.state.new")
+        .map(|t| t.message.as_str())
+        .collect();
+    assert_eq!(new[0], format!("s0 is new (depth 0): {ORIGIN}/"));
+    assert_eq!(new[1], format!("s1 is new (depth 1): {ORIGIN}/a"));
+    // The data a tool reads.
+    let first = told.iter().find(|t| t.kind == "explore.action.end").unwrap();
+    assert_eq!(first.data["edge"], "e0");
+    assert_eq!(first.data["state"], "s0");
+    assert_eq!(first.data["to"], "s1");
+    assert_eq!(first.data["status"], "ok");
+    assert_eq!(first.data["action"], "click");
+}
+
+#[test]
+fn an_action_starts_before_it_ends_and_a_state_is_new_before_the_action_that_found_it_ends() {
+    let (_, told) = run_told(&mut Fake::new(tree()), &options());
+    let at = |kind: &str, field: &str, value: &str| {
+        told.iter()
+            .position(|t| t.kind == kind && t.data[field] == value)
+            .unwrap_or_else(|| panic!("no {kind} with {field} {value}"))
+    };
+    assert_eq!(told[0].kind, "explore.state.new", "the start page is announced first");
+    // e0 found s1: its start, then the screen is announced, then the edge ends.
+    assert!(at("explore.action.start", "edge", "e0") < at("explore.state.new", "state", "s1"));
+    assert!(at("explore.state.new", "state", "s1") < at("explore.action.end", "edge", "e0"));
+    // Each action's start names the edge its end will name.
+    let start = told.iter().find(|t| t.kind == "explore.action.start").unwrap();
+    assert_eq!(start.data["edge"], "e0");
+    assert_eq!(start.data["component"], "c_a");
+}
+
+#[test]
+fn a_replay_is_told_and_its_actions_are_not_edges() {
+    let (done, told) = run_told(&mut Fake::new(shop_with_a_dialog()), &options());
+    let replays: Vec<&Told> = told.iter().filter(|t| t.kind == "explore.replay").collect();
+    assert_eq!(replays.len(), 1);
+    assert_eq!(replays[0].data["state"], "s2");
+    assert_eq!(replays[0].data["actions"], 1);
+    assert_eq!(replays[0].data["reopened"], true);
+    assert_eq!(replays[0].message, "s2 reopened by replaying 1 actions");
+    // Five actions, four edges: the replayed one makes an `explore.replay` and no `explore.action.end`.
+    assert_eq!(done.graph.actions, 5);
+    assert_eq!(told.iter().filter(|t| t.kind == "explore.action.end").count(), 4);
+}
+
+#[test]
+fn a_request_the_browser_refused_is_told_once_with_the_edge_it_belongs_to_before_the_edge_ends() {
+    let mut fake = Fake::new(tree());
+    fake.refuse = Some(("c_a", "POST", "http://shop.test/api/cart"));
+    let (_, told) = run_told(&mut fake, &options());
+    let refused: Vec<&Told> = told
+        .iter()
+        .filter(|t| t.kind == "explore.policy.block" && t.data["kind"] == "request")
+        .collect();
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].data["edge"], "e0");
+    assert_eq!(refused[0].data["method"], "POST");
+    assert_eq!(refused[0].data["url"], "http://shop.test/api/cart");
+    assert_eq!(refused[0].data["reason"], "blocked_by_policy");
+    let at = told.iter().position(|t| std::ptr::eq(t, refused[0])).unwrap();
+    let end = told
+        .iter()
+        .position(|t| t.kind == "explore.action.end" && t.data["edge"] == "e0")
+        .unwrap();
+    assert!(at < end);
+}
+
+#[test]
+fn what_the_rules_leave_alone_is_told_with_the_reason_and_once() {
+    let (done, told) = run_told(&mut Fake::new(risky()), &options());
+    let blocks: Vec<&Told> = told
+        .iter()
+        .filter(|t| t.kind == "explore.policy.block" && t.data["kind"] == "component")
+        .collect();
+    assert!(!blocks.is_empty());
+    assert_eq!(blocks.len(), done.graph.skipped.len());
+    for (told, skipped) in blocks.iter().zip(&done.graph.skipped) {
+        assert_eq!(told.data["reason"], skipped.reason.as_str());
+        assert_eq!(told.data["component"], skipped.component.as_str());
+        assert_eq!(told.data["state"], skipped.state.as_str());
+    }
+}
+
+#[test]
+fn a_model_call_is_told_while_the_walk_goes_on_before_the_action_it_is_for() {
+    let mut opts = with_writes();
+    use_model(&mut opts, Said::new(Ok("blue pen")));
+    let (done, told) = run_told(&mut form(&["Search products"]), &opts);
+    assert_eq!(done.model_calls.len(), 1);
+    let order = kinds(&told);
+    let call = order.iter().position(|k| *k == "model.call").unwrap();
+    let start = order.iter().position(|k| *k == "explore.action.start").unwrap();
+    assert!(
+        call < start,
+        "the text is chosen before the field is typed into: {order:?}"
+    );
+    let told_call = &told[call];
+    assert_eq!(told_call.data["outcome"], "used");
+    assert_eq!(told_call.data["answer"], "blue pen");
+}
+
+#[test]
+fn a_walk_that_touches_everything_has_full_coverage() {
+    let done = run(&mut Fake::new(tree()), &options());
+    let totals = done.coverage.totals();
+    assert_eq!(
+        (totals.discovered, totals.touched, totals.skipped, totals.untouched),
+        (4, 4, 0, 0)
+    );
+    assert_eq!(totals.per_mille(), 1000);
+    assert_eq!(
+        done.coverage.summary(),
+        "Coverage: 4 of 4 components touched (100.0%), 0 left alone, 0 not reached. Of the 4 it was allowed to touch: 100.0%"
+    );
+    assert_eq!(
+        done.coverage.states[0].discovered,
+        ["c_a", "c_b"],
+        "headings are not components to act on"
+    );
+}
+
+#[test]
+fn what_the_walk_did_not_get_to_is_untouched_and_the_figures_still_add_up() {
+    let mut opts = options();
+    opts.budgets.max_actions = 1;
+    let done = run(&mut Fake::new(tree()), &opts);
+    assert_eq!(done.graph.stopped, Stop::MaxActions);
+    let totals = done.coverage.totals();
+    assert_eq!(totals.touched, 1);
+    assert_eq!(totals.untouched, totals.discovered - 1);
+    assert_eq!(done.coverage.states[0].untouched, ["c_b"]);
+}
+
+#[test]
+fn hidden_controls_are_not_discovered_disabled_ones_are_skipped_and_the_rules_give_the_reasons() {
+    let mut fake = Fake::new(vec![(
+        "home",
+        page(
+            "/",
+            vec![
+                C::link("Ok", "home", "/").at("a"),
+                C::link("Hidden", "home", "/").at("b").hidden(),
+                C::link("Off", "home", "/").at("c").disabled(),
+                c("Subscribe", "button").at("d"),
+            ],
+        ),
+    )]);
+    let done = run(&mut fake, &options());
+    let state = &done.coverage.states[0];
+    assert_eq!(
+        state.discovered,
+        ["c_off", "c_ok", "c_subscribe"],
+        "the hidden one is not there to find"
+    );
+    assert_eq!(state.touched, ["c_ok"]);
+    assert_eq!(
+        state.skipped,
+        [
+            ("c_off".to_string(), "disabled".to_string()),
+            ("c_subscribe".to_string(), "read-only".to_string()),
+        ]
+    );
+    assert!(state.untouched.is_empty());
+    let reasons: Vec<&str> = done.coverage.skipped.iter().map(|s| s.reason.as_str()).collect();
+    assert_eq!(reasons, ["disabled", "read-only"]);
+    assert_eq!(done.coverage.skipped[0].label, r#"link "Off""#);
+}
+
+#[test]
+fn a_component_on_every_page_is_counted_on_the_first_screen_that_shows_it_and_not_again() {
+    let nav = || -> Vec<C> {
+        vec![
+            C::link("Nav home", "home", "/").at("header"),
+            C::link("Nav about", "about", "/about").at("header"),
+            C::link("Nav shop", "shop", "/shop").at("header"),
+        ]
+    };
+    let mut home = nav();
+    home.push(C::link("Deals", "deals", "/deals").at("main"));
+    let mut about = nav();
+    about.push(c("About title", "heading"));
+    let mut shop = nav();
+    shop.push(c("Shop title", "heading"));
+    let mut deals = nav();
+    deals.push(c("Deals title", "heading"));
+    let mut opts = options();
+    opts.chrome_pages = 3;
+    let mut fake = Fake::new(vec![
+        ("home", page("/", home)),
+        ("about", page("/about", about)),
+        ("shop", page("/shop", shop)),
+        ("deals", page("/deals", deals)),
+    ]);
+    let done = run(&mut fake, &opts);
+    assert_eq!(done.coverage.shared, done.graph.chrome);
+    assert_eq!(done.coverage.shared.len(), 3);
+    assert_eq!(
+        done.coverage.states[0].discovered.len(),
+        4,
+        "the header and the link to Deals"
+    );
+    for later in &done.coverage.states[1..] {
+        assert!(later.discovered.is_empty(), "{}: {:?}", later.state, later.discovered);
+    }
+    assert_eq!(done.coverage.totals().discovered, 4);
+}
+
+#[test]
+fn the_coverage_of_a_walk_is_the_same_bytes_each_time() {
+    let one = run(&mut Fake::new(shop_with_a_dialog()), &options())
+        .coverage
+        .to_bytes();
+    let two = run(&mut Fake::new(shop_with_a_dialog()), &options())
+        .coverage
+        .to_bytes();
+    assert_eq!(one, two);
+}
+
+#[test]
+fn a_replay_that_fails_is_told_too_with_the_actions_it_cost() {
+    // The dialog comes the first time only: the replays click "Open" and find nothing. Two attempts, one action each.
+    struct Once(Fake, u32);
+    impl Browser for Once {
+        fn load(&mut self, url: &str) -> Result<View, StepError> {
+            self.0.load(url)
+        }
+        fn act(&mut self, i: &ViewInstance, a: &Act, t: u64) -> Result<Acted, StepError> {
+            if i.selector == "sel:c_open" {
+                self.1 += 1;
+                if self.1 > 1 {
+                    return Ok(Acted {
+                        effect: Effect::default(),
+                        view: self.0.view(),
+                    });
+                }
+            }
+            self.0.act(i, a, t)
+        }
+        fn requests(&self) -> Option<BTreeMap<String, u64>> {
+            self.0.requests()
+        }
+    }
+    let mut browser = Once(Fake::new(shop_with_a_dialog()), 0);
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let mut told = Vec::new();
+    let done = explore(&mut browser, &options(), &NEVER, &mut |event| {
+        told.push(Told {
+            kind: event.kind(),
+            message: event.message(),
+            data: event.data(),
+        });
+    });
+    check_walk(&done, &told);
+    let replays: Vec<&Told> = told.iter().filter(|t| t.kind == "explore.replay").collect();
+    assert_eq!(replays.len(), 2, "two attempts");
+    assert!(replays
+        .iter()
+        .all(|t| t.data["reopened"] == false && t.data["actions"] == 1));
+    assert_eq!(
+        replays[0].message,
+        "s2 was not brought back by replaying (1 actions made)"
+    );
+    assert_eq!(done.graph.unreachable, ["s2"]);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Time limits for the parts of a walk that can use all of it
+// ---------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn reading_the_pages_that_show_what_is_on_every_page_stops_when_it_uses_a_fifth_of_the_time() {
+    let site = || {
+        Fake::new(vec![
+            (
+                "home",
+                page(
+                    "/",
+                    vec![
+                        C::link("One", "one", "/one"),
+                        C::link("Two", "two", "/two"),
+                        C::link("Three", "three", "/three"),
+                    ],
+                ),
+            ),
+            ("one", leaf("/one", "One")),
+            ("two", leaf("/two", "Two")),
+            ("three", leaf("/three", "Three")),
+        ])
+    };
+    let mut opts = options();
+    opts.chrome_pages = 5;
+    opts.budgets.max_actions = 0;
+    // On a site where a load takes 250 ms and the walk has 2 s, a fifth is 400 ms: the start page and one more.
+    opts.budgets.timeout = Duration::from_secs(2);
+    let mut fake = site();
+    fake.load_delay = Duration::from_millis(250);
+    let mut lines = Vec::new();
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let done = explore(&mut fake, &opts, &NEVER, &mut |e| lines.push(e.message()));
+    assert_eq!(
+        done.graph.chrome_pages, 2,
+        "the start page and one more, not the three there were"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("using too much of the time")),
+        "{lines:?}"
+    );
+    // On a fast site all of them are read.
+    let mut fast = site();
+    let mut opts = options();
+    opts.chrome_pages = 5;
+    opts.budgets.max_actions = 0;
+    assert_eq!(run(&mut fast, &opts).graph.chrome_pages, 4);
+}
+
+#[test]
+fn replays_that_use_a_quarter_of_the_time_end_the_trying_and_the_screen_is_given_up_with_the_reason() {
+    // The click that opens the dialog is slow the second time (a slow site) and then does nothing: the replay fails
+    // after 800 ms. A quarter of 3 s is 750 ms, so there is no second attempt.
+    struct SlowReplay(Fake, u32);
+    impl Browser for SlowReplay {
+        fn load(&mut self, url: &str) -> Result<View, StepError> {
+            self.0.load(url)
+        }
+        fn act(&mut self, i: &ViewInstance, a: &Act, t: u64) -> Result<Acted, StepError> {
+            if i.selector == "sel:c_open" {
+                self.1 += 1;
+                if self.1 > 1 {
+                    std::thread::sleep(Duration::from_millis(800));
+                    return Ok(Acted {
+                        effect: Effect::default(),
+                        view: self.0.view(),
+                    });
+                }
+            }
+            self.0.act(i, a, t)
+        }
+        fn requests(&self) -> Option<BTreeMap<String, u64>> {
+            self.0.requests()
+        }
+    }
+    let mut browser = SlowReplay(Fake::new(shop_with_a_dialog()), 0);
+    let mut opts = options();
+    opts.budgets.timeout = Duration::from_secs(3);
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let mut told = Vec::new();
+    let done = explore(&mut browser, &opts, &NEVER, &mut |event| {
+        told.push(Told {
+            kind: event.kind(),
+            message: event.message(),
+            data: event.data(),
+        });
+    });
+    check_walk(&done, &told);
+    let replays = told.iter().filter(|t| t.kind == "explore.replay").count();
+    assert_eq!(replays, 1, "one attempt, and the time set aside was gone for a second");
+    assert!(told
+        .iter()
+        .any(|t| t.kind == "progress" && t.message.contains("the time set aside for replays is used up")));
+    assert_eq!(done.graph.unreachable, ["s2"]);
+    assert_eq!(done.graph.stopped, Stop::Complete);
 }

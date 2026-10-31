@@ -18,7 +18,7 @@
         "chrome": { "description": "The component ids that are on (nearly) every page, sorted. They are left out of the ids that screens are compared by, and are still listed in each screen's components when they were all it had.", "type": "array", "items": { "type": "string" } },
         "budgets": { "$ref": "#/$defs/GraphBudgets" },
         "stopped": { "$ref": "#/$defs/GraphStop" },
-        "actions": { "description": "How many actions were made. Equals the number of edges whose status is not missing.", "type": "integer", "minimum": 0 },
+        "actions": { "description": "How many actions were made, against --max-actions. At least the number of edges whose status is not missing: it is more when a screen that has no address of its own (a dialog, an open drawer) was reopened by replaying the actions that led to it, because those actions count and make no edge. Each one is an explore.replay event.", "type": "integer", "minimum": 0 },
         "states": { "description": "The screens, in the order they were first seen. A screen's id is s followed by its position.", "type": "array", "items": { "$ref": "#/$defs/GraphState" } },
         "edges": { "description": "The actions, in the order they were made. An edge's id is e followed by its position.", "type": "array", "items": { "$ref": "#/$defs/GraphEdge" } },
         "skipped": { "description": "Components that were found and not touched, once per screen and component.", "type": "array", "items": { "$ref": "#/$defs/GraphSkipped" } },

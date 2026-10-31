@@ -4,7 +4,9 @@
 //! that trait. Safety is two layers: the driver refuses writes in the browser itself, and [`policy::Rules`] decides
 //! before every action whether to try it at all (see the notes there).
 
+mod coverage;
 mod data;
+mod events;
 mod graph;
 mod live;
 mod model;
@@ -16,13 +18,15 @@ mod walk;
 #[cfg(test)]
 mod tests;
 
+pub use coverage::{Coverage, Discovered, SkippedItem, StateCoverage, Totals};
+pub use events::WalkEvent;
 pub use graph::{Edge, Graph, Skipped, State, Status, Stop, GRAPH_VERSION};
 pub use live::{Live, DEFAULT_LOAD_TIMEOUT_MS};
-pub use model::{Act, Acted, Browser, Effect, Hints, StepError, View, ViewComponent, ViewInstance};
+pub use model::{Act, Acted, Browser, Effect, Hints, Refused, StepError, View, ViewComponent, ViewInstance};
 pub use runner::{ExploreRun, Finished, Request, FEATURE};
 pub use values::{
-    CallOutcome, Field, ModelCall, ModelSettings, Recorded, SourceError, Stopped, ValueSource, Values,
-    DEFAULT_MAX_MODEL_CALLS, DEFAULT_MODEL_TIMEOUT, FAILURES_BEFORE_OFF,
+    CallOutcome, Field, ModelCall, ModelSettings, Recorded, SourceError, ValueSource, DEFAULT_MAX_MODEL_CALLS,
+    DEFAULT_MODEL_TIMEOUT,
 };
 pub use walk::{explore, Explored, Progress};
 

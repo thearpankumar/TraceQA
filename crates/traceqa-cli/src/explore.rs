@@ -21,6 +21,15 @@ use traceqa_engine::state::{Similarity, DEFAULT_SIMILARITY};
 use crate::args::{parse_browser, parse_viewport, DriverArgs};
 use crate::interrupt;
 
+/// The types of event whose sentence is printed while the walk goes on.
+const SHOWN_EVENTS: [&str; 5] = [
+    "progress",
+    "explore.state.new",
+    "explore.action.end",
+    "explore.replay",
+    "model.call",
+];
+
 #[derive(Clone, Copy, ValueEnum)]
 enum StrategyArg {
     Bfs,
@@ -145,8 +154,10 @@ Cancelling: closing the browser. Press Ctrl-C again to quit at once.",
             first_signal_bound: Some(interrupt::FIRST_SIGNAL_BOUND),
         });
     });
+    // The lines a person follows. The rest of the events (an action's start, what the rules left alone) are in
+    // events.jsonl only.
     let mut show = |event: &Event| {
-        if event.type_ == "progress" {
+        if SHOWN_EVENTS.contains(&event.type_.as_str()) {
             interrupt::say(&event.message);
         }
     };
@@ -157,7 +168,7 @@ Cancelling: closing the browser. Press Ctrl-C again to quit at once.",
             print!("{}", String::from_utf8_lossy(&explored.graph.to_bytes()));
             eprintln!("Run folder: {}", folder.display());
         } else {
-            print_summary(&explored.graph);
+            print_summary(&explored.graph, &explored.coverage);
             println!("\nRun folder: {}", folder.display());
         }
     } else {
@@ -174,28 +185,10 @@ Cancelling: closing the browser. Press Ctrl-C again to quit at once.",
 /// folder and no browser exist yet.
 fn build_request(args: &ExploreArgs) -> Result<Request, String> {
     check_start(&args.url, &args.allow_origin, args.i_understand_this_interacts)?;
-    let similarity = if (args.state_similarity - DEFAULT_SIMILARITY_SHARE).abs() < f64::EPSILON {
-        DEFAULT_SIMILARITY
-    } else {
-        Similarity::new(args.state_similarity).map_err(|error| format!("--state-similarity: {error}"))?
-    };
+    let similarity = similarity_of(args)?;
     let rules = Rules::with_origins(&args.url, &args.allow_origin, args.allow_writes, &args.deny_name)?;
     let storage_state = args.storage_state.as_deref().map(read_storage_state).transpose()?;
-    let model = args
-        .model
-        .as_deref()
-        .map(|spec| {
-            traceqa_models::source_from_spec(spec).map(|source| ModelSettings {
-                source,
-                max_calls: args.max_model_calls,
-                timeout: Duration::from_secs(args.model_timeout),
-            })
-        })
-        .transpose()
-        .map_err(|why| format!("--model: {why}"))?;
-    if model.is_some() && !args.allow_writes {
-        eprintln!("traceqa: --model has no effect without --allow-writes: nothing is typed, so nothing is asked.");
-    }
+    let model = model_of(args)?;
 
     // With the default drivers the browser names are known, so a typo fails here, before a folder exists.
     let custom_drivers = !args.drivers.drivers.is_empty()
@@ -226,14 +219,7 @@ fn build_request(args: &ExploreArgs) -> Result<Request, String> {
             },
             seed: args.seed,
             similarity,
-            budgets: Budgets {
-                max_states: args.max_states,
-                max_actions: args.max_actions,
-                max_depth: args.max_depth,
-                action_timeout: Duration::from_secs(args.action_timeout),
-                timeout: Duration::from_secs(args.timeout),
-                max_requests_per_origin: args.max_requests_per_origin,
-            },
+            budgets: budgets_of(args),
             rules,
             chrome_pages: args.chrome_pages,
             model,
@@ -244,6 +230,41 @@ fn build_request(args: &ExploreArgs) -> Result<Request, String> {
         out_dir: PathBuf::from(&args.out),
         drivers: driver_commands(&args.drivers.drivers),
     })
+}
+
+fn similarity_of(args: &ExploreArgs) -> Result<Similarity, String> {
+    if (args.state_similarity - DEFAULT_SIMILARITY_SHARE).abs() < f64::EPSILON {
+        Ok(DEFAULT_SIMILARITY)
+    } else {
+        Similarity::new(args.state_similarity).map_err(|error| format!("--state-similarity: {error}"))
+    }
+}
+
+fn budgets_of(args: &ExploreArgs) -> Budgets {
+    Budgets {
+        max_states: args.max_states,
+        max_actions: args.max_actions,
+        max_depth: args.max_depth,
+        action_timeout: Duration::from_secs(args.action_timeout),
+        timeout: Duration::from_secs(args.timeout),
+        max_requests_per_origin: args.max_requests_per_origin,
+    }
+}
+
+/// The model `--model` names, with the limits on its use. `None` when no model was asked for.
+fn model_of(args: &ExploreArgs) -> Result<Option<ModelSettings>, String> {
+    let Some(spec) = args.model.as_deref() else {
+        return Ok(None);
+    };
+    let source = traceqa_models::source_from_spec(spec).map_err(|why| format!("--model: {why}"))?;
+    if !args.allow_writes {
+        eprintln!("traceqa: --model has no effect without --allow-writes: nothing is typed, so nothing is asked.");
+    }
+    Ok(Some(ModelSettings {
+        source,
+        max_calls: args.max_model_calls,
+        timeout: Duration::from_secs(args.model_timeout),
+    }))
 }
 
 /// The share `--state-similarity` has when it is not given, so the default is the engine's own constant exactly.
@@ -260,7 +281,7 @@ fn read_storage_state(path: &Path) -> Result<StorageState, String> {
     })
 }
 
-fn print_summary(graph: &traceqa_engine::explore::Graph) {
+fn print_summary(graph: &traceqa_engine::explore::Graph, coverage: &traceqa_engine::explore::Coverage) {
     let touched = graph.edges.iter().filter(|e| e.status.as_str() == "ok").count();
     println!(
         "\nExplored {}: {} screens, {} actions ({} worked), stopped: {}",
@@ -270,6 +291,7 @@ fn print_summary(graph: &traceqa_engine::explore::Graph) {
         touched,
         graph.stopped.as_str()
     );
+    println!("{}", coverage.summary());
     if !graph.skipped.is_empty() {
         let mut reasons: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
         for item in &graph.skipped {

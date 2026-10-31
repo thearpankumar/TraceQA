@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "coverage.schema.json",
+  "title": "TraceQA exploration coverage",
+  "description": "coverage.json, written by `traceqa explore` into its run folder next to graph.json: how much of what the walk found it touched. It is worked out from the same data as graph.json, so the two agree, and it is written whole or not at all, after a cancel too. Given the same site, seed and limits the file is byte-identical: keys are sorted, lists are sorted by component id, and it holds no time. 'Discovered' on a screen means a component that the walker has an action for (link, button, tab, menu item, checkbox, radio, switch, disclosure, text box, search box, combo box or list box) with at least one instance that is visible in the screen's first reading. A component that is on the header or footer of every page is counted on the first screen that shows it and not again (see `shared`), so every total is the sum of the screens, with nothing counted twice. Each discovered component of a screen is exactly one of touched, skipped or untouched.",
+  "x-traceqa": { "contract": "coverage", "version": 1 },
+  "$defs": {
+    "CoverageFile": {
+      "type": "object",
+      "required": ["schemaVersion", "startUrl", "stopped", "totals", "states", "shared", "unreachable", "skipped"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 0 },
+        "startUrl": { "description": "The address the walk started from, as in graph.json.", "type": "string" },
+        "stopped": { "description": "Why the walk ended, as in graph.json. A walk that did not end with `complete` leaves untouched components.", "$ref": "graph.schema.json#/$defs/GraphStop" },
+        "totals": { "$ref": "#/$defs/CoverageTotals" },
+        "states": { "description": "One entry for each screen of graph.json, in the same order.", "type": "array", "items": { "$ref": "#/$defs/CoverageState" } },
+        "shared": { "description": "The component ids that are on (nearly) every page, sorted, as `chrome` in graph.json. Each is counted on the first screen that shows it.", "type": "array", "items": { "type": "string" } },
+        "unreachable": { "description": "Screens that could not be opened again after the walk left them, so what was left on them was not tried. Their untouched components are the ones it could not get to.", "type": "array", "items": { "type": "string" } },
+        "skipped": { "description": "Every component that was left alone, with the reason, sorted by screen and component. The same ones as the `skipped` lists of the screens.", "type": "array", "items": { "$ref": "#/$defs/CoverageSkipped" } }
+      }
+    },
+    "CoverageCounts": {
+      "description": "How many components of a screen, or of the whole walk, fall in each group. discovered = touched + skipped + untouched.",
+      "type": "object",
+      "required": ["discovered", "touched", "skipped", "untouched"],
+      "properties": {
+        "discovered": { "type": "integer", "minimum": 0 },
+        "touched": { "description": "An action was made on the component on this screen (an edge of graph.json whose status is not `missing`, a timeout and a failure included).", "type": "integer", "minimum": 0 },
+        "skipped": { "description": "Left alone, with a reason.", "type": "integer", "minimum": 0 },
+        "untouched": { "description": "Nothing was done: the walk ended first, the screen could not be opened again, the screen was deeper than --max-depth, or the component was gone when its turn came.", "type": "integer", "minimum": 0 }
+      }
+    },
+    "CoverageTotals": {
+      "description": "The counts over every screen, and the share that was touched.",
+      "allOf": [
+        { "$ref": "#/$defs/CoverageCounts" },
+        {
+          "type": "object",
+          "required": ["touchedPerMille", "touchedOfAllowedPerMille"],
+          "properties": {
+            "touchedPerMille": { "description": "touched / discovered in thousandths, rounded down: 1000 is all of it. 0 when nothing was discovered. A read-only walk may not press most buttons, so it cannot reach 1000 on a page that has them.", "type": "integer", "minimum": 0, "maximum": 1000 },
+            "touchedOfAllowedPerMille": { "description": "touched / (discovered - skipped) in thousandths, rounded down: how much of what the walk was allowed to touch it touched. The figure to judge a walk by when it was left alone on purpose. 0 when nothing was allowed.", "type": "integer", "minimum": 0, "maximum": 1000 }
+          }
+        }
+      ]
+    },
+    "CoverageState": {
+      "description": "One screen.",
+      "type": "object",
+      "required": ["id", "url", "counts", "discovered", "touched", "skipped", "untouched"],
+      "properties": {
+        "id": { "description": "The screen's id in graph.json.", "type": "string" },
+        "url": { "description": "As in graph.json.", "type": "string" },
+        "counts": { "$ref": "#/$defs/CoverageCounts" },
+        "discovered": { "description": "Component ids, sorted.", "type": "array", "items": { "type": "string" } },
+        "touched": { "type": "array", "items": { "type": "string" } },
+        "skipped": { "type": "array", "items": { "$ref": "#/$defs/CoverageSkip" } },
+        "untouched": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "CoverageSkip": {
+      "description": "A component of a screen that was left alone.",
+      "type": "object",
+      "required": ["component", "reason"],
+      "properties": {
+        "component": { "type": "string" },
+        "reason": { "description": "destructive: its name or address says it does something with a lasting effect. blocked: it leads to another origin or somewhere that is not a page. read-only: read-only mode only touches links, tabs and things that open and close. no-options: a list to pick from, whose options the walker does not know. disabled: the component could not be used.", "type": "string" }
+      }
+    },
+    "CoverageSkipped": {
+      "description": "A component that was left alone, in the list of the whole walk.",
+      "type": "object",
+      "required": ["state", "component", "label", "reason"],
+      "properties": {
+        "state": { "type": "string" },
+        "component": { "type": "string" },
+        "label": { "description": "The role and accessible name of the component, for people reading the file.", "type": "string" },
+        "reason": { "description": "The same words as in CoverageSkip.", "type": "string" }
+      }
+    }
+  }
+}
