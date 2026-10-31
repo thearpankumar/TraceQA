@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Demo shop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; } nav a, footer a { margin-right: 1em; }
+.cover { position: relative; display: inline-block; }
+.cover .overlay { position: absolute; inset: 0; background: rgba(0,0,0,.2); }</style></head>
+<body>
+<header><nav aria-label="Main">
+<a href="/shop/">Home</a> <a href="/shop/products.html">Products</a> <a href="/shop/cart.html">Cart</a>
+<a href="/shop/search.html">Search</a> <a href="/shop/account.html">Account</a>
+</nav></header>
+<main><h1>Demo shop</h1>
+<p><a href="/shop/products.html">Browse products</a> <a href="/shop/about.html">About us</a> <a href="/shop/gone">Old page</a></p>
+<p><a id="promo" href="/shop/products.html">Promo of the day</a></p>
+<p><a href="/shop/app">Open the app</a></p>
+<div role="tablist" aria-label="About the shop">
+  <button role="tab" id="tab-1" aria-selected="true" aria-controls="panel-1" type="button">Overview</button>
+  <button role="tab" id="tab-2" aria-selected="false" aria-controls="panel-2" type="button">Details</button>
+</div>
+<div role="tabpanel" id="panel-1"><p>Everything for your desk.</p></div>
+<div role="tabpanel" id="panel-2" hidden><p>Free returns. <a href="/shop/specs.html">Spec sheet</a></p></div>
+<p><button id="more-btn" type="button" aria-expanded="false" aria-controls="more">More</button></p>
+<div id="more" hidden><a href="/shop/archive.html">Archive</a></div>
+<p><button id="help-btn" type="button" aria-expanded="false" aria-controls="help">Help</button></p>
+<div id="help" role="dialog" aria-modal="true" aria-label="Help" hidden>
+  <a href="/shop/shipping.html">Shipping</a> <a href="/shop/returns.html">Returns</a>
+  <button id="help-close" type="button">Close help</button>
+</div>
+<p><button id="offer-btn" type="button" aria-expanded="false" aria-controls="offer">Offers</button></p>
+<div id="offer" role="dialog" aria-modal="true" aria-label="Special offer" hidden>
+  <p id="offer-text"></p>
+  <a href="/shop/offer.html">See the offer</a>
+  <button id="offer-close" type="button">Close offer</button>
+</div>
+<p class="cover"><a id="covered" href="/shop/covered-target.html">Hidden behind an overlay</a><span class="overlay"></span></p>
+<p><a href="http://other.invalid/">Partner site</a> <a href="mailto:hi@example.test">Email us</a></p>
+<form method="post" action="/shop/checkout"><button type="submit">Continue</button></form>
+<p><label>Your note <input type="text" name="note"></label></p>
+<p><button type="button" disabled>Size A</button> <button type="button" disabled>Size B</button> <button type="button" disabled>Size C</button> <button type="button" disabled>Size D</button> <button type="button" disabled>Size E</button> <button type="button" disabled>Size F</button> <button type="button" disabled>Size G</button> <button type="button" disabled>Size H</button> <button type="button" disabled>Size I</button> <button type="button" disabled>Size J</button> <button type="button" disabled>Size K</button> <button type="button" disabled>Size L</button></p>
+</main>
+<footer><a href="/shop/shipping.html">Shipping policy</a> <a href="/shop/terms.html">Terms</a></footer>
+<script src="/shop/shop.js"></script></body></html>

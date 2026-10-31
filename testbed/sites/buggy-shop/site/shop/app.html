@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Demo app</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>[hidden] { display: none !important; } nav a { margin-right: 1em; }</style></head>
+<body>
+<header><nav aria-label="Main">
+<a href="/shop/">Home</a> <a href="/shop/products.html">Products</a> <a href="/shop/cart.html">Cart</a>
+<a href="/shop/search.html">Search</a> <a href="/shop/account.html">Account</a>
+</nav></header>
+<nav aria-label="App">
+<a href="/shop/app" data-link>App home</a> <a href="/shop/app/docs" data-link>Docs</a>
+<a href="/shop/app/charts" data-link>Charts</a> <a href="/shop/app/report" data-link>Report</a>
+<a href="/shop/app/about" data-link>About the app</a>
+</nav>
+<main><h1 id="title"></h1><div id="view"></div></main>
+<footer><a href="/shop/shipping.html">Shipping policy</a> <a href="/shop/terms.html">Terms</a></footer>
+<script>
+/* A single-page app, as a framework's router makes one: every address under /shop/app is this page; the links are
+   ordinary anchors, a click is taken over, the address is changed with the history and the page is drawn again by a
+   script, with no page load. The report is slow: it arrives 2.5 seconds after the click, as when the next page is
+   fetched before the address changes. */
+var BASE = "/shop/app";
+var ROUTES = {
+  "": ["Welcome to the app", '<p>Start with the <a href="/shop/app/docs" data-link>documentation</a>.</p>'],
+  "/docs": ["Documentation", '<p><a href="/shop/app/docs/install" data-link>Install</a></p>'],
+  "/docs/install": ["Install", "<p>Nothing more to do here.</p>"],
+  "/charts": ["Charts", '<p><a href="/shop/app/charts/bar" data-link>Bar chart</a></p>'],
+  "/charts/bar": ["Bar chart", "<p>Nothing more to do here.</p>"],
+  "/report": ["Report", "<p>The report took a moment to arrive.</p>"],
+  "/about": ["About the app", "<p>Nothing more to do here.</p>"]
+};
+var DELAYS = { "/report": 2500 };
+function route() { return location.pathname.slice(BASE.length); }
+function draw() {
+  var found = ROUTES[route()] || ["Not found", "<p>No such page.</p>"];
+  document.title = found[0];
+  document.getElementById("title").textContent = found[0];
+  document.getElementById("view").innerHTML = found[1];
+}
+document.addEventListener("click", function (event) {
+  var link = event.target.closest("a[data-link]");
+  if (!link) return;
+  event.preventDefault();
+  var href = link.getAttribute("href");
+  setTimeout(function () {
+    history.pushState({}, "", href);
+    draw();
+  }, DELAYS[href.slice(BASE.length)] || 0);
+});
+window.addEventListener("popstate", draw);
+draw();
+</script>
+</body></html>
