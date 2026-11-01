@@ -230,6 +230,72 @@ Things to know about what it finds:
 - Selects are left alone (`no-options`): the walk does not know their options.
 - Every action reads the whole page again, which is slow on a long page. Use `--max-actions` and `--timeout`.
 
+## `traceqa replay`
+
+```sh
+traceqa replay runs/r_20261031_101500_ab12/graph.json --all
+traceqa replay runs/r_20261031_101500_ab12/graph.json --path e0 e4 e9
+traceqa replay runs/r_20261031_101500_ab12/graph.json --path s5
+```
+
+Performs the actions of a `graph.json` again and says, for each one, whether it led where it did. A finding that cannot be
+reproduced is ignored; this is how to show it again. Each component is found again by its id, and a page is the screen the
+graph says by the rule the walk used (at least `stateSimilarityPerMille` of the same component ids, with the ids that are
+on every page left out), built from the graph itself, so only `graph.json` is needed. It is not an agent and asks no
+model: the text it types is the text the walk recorded in the graph (layout 2 and later).
+
+| Ask for | What it does |
+|---|---|
+| `--path e0 e4 e9` | A **chain**: edges that follow one another from the start page, done in one session. Each must start on the screen the one before it led to, and the first on `s0`; otherwise the command is refused with exit code 2 before any browser is started. The chain ends at the first edge that does not reproduce, because after it the page is not known: the rest are `not-run`. |
+| `--path s5` | A chain made of the fewest recorded edges that lead to `s5`. Edges that typed text are not used for the way. |
+| `--all` | Every edge, each from the screen it was made on. A screen is reopened by its address, or, for one that has no address of its own (a dialog), by performing the recorded way to it; this costs actions, and is told in the events. |
+
+For each edge the result is one of:
+
+| Result | Meaning |
+|---|---|
+| `reproduced` | The action was made and the page is the screen the graph says. |
+| `diverged` | The action was made (or failed) and the page is not that screen. The screen it was is given (`sN`, or `unknown` when the graph has none like it). |
+| `missing` | The component is not on the page, so nothing was done. |
+| `blocked` | The safety rules leave it alone (a replay is **read-only** by default, like `explore`), or the graph has no text to type. |
+| `not-run` | An earlier step of the chain broke, its screen could not be reopened, or the replay ended first. |
+| `recorded-failed` | The walk itself did not complete this edge, so there is nothing to compare with. It is not counted against the replay. |
+
+The command exits 0 when the replay ended by itself and every replayable edge was reproduced, 1 when any was not (a
+`blocked` or `not-run` edge counts as not reproduced, so a pipeline never goes green on a step that was skipped) or the
+browser failed, 2 for a wrong command or a graph that cannot be used, and 130 after Ctrl-C. It prints the share
+reproduced, and `replay.json` has it in thousandths.
+
+It reuses the rules of `explore`: only GET and HEAD in read-only mode, `--allow-writes` with `--allow-origin` to type and
+press, `--deny-name`, and `--i-understand-this-interacts` for a site that is not on this machine. A click that is blocked
+is tried once with the keyboard, as in the walk. Nothing is retried to make a result come out right.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--origin ORIGIN` | the graph's | The site is now at this origin. Every address of the graph that begins with the origin it was explored at is changed to it. For a site served on another port than before. |
+| `--action-timeout SECONDS` | `10` | The most one action may take. |
+| `--timeout SECONDS` | `600` | The most the whole replay may take. The edges not reached are `not-run`. |
+| `--max-requests-per-origin N` | `2000` | Stop when the browser has sent this many requests to one origin. |
+| `--allow-writes`, `--allow-origin`, `--deny-name`, `--i-understand-this-interacts` | | As for `explore`. |
+| `--browser`, `--viewport`, `--storage-state`, `--out`, `--headed`, `--driver` | | As for `explore`. |
+| `--json` | off | Print `replay.json` only. |
+
+The graph file is treated as input from outside: a file that is not JSON, is too big (64 MiB), is newer than this
+`traceqa` knows, or does not hold what a walk writes (names out of order, an edge between screens that do not exist, an
+address that is not http or https) is refused with the reason and exit code 2, and never quoted.
+
+Things to know:
+
+- **The site must start as it did.** A cart that already has things in it, or an offer that is made only once, will not
+  lead where it did, and the result says so. That is the site, not the replay.
+- **A graph of layout 1** (before the typed text was recorded) can be replayed, but its typed edges are `blocked`: the
+  replay does not guess the text.
+- **A start address with hidden parameters** (a secret was replaced when the graph was written) cannot be opened again;
+  explore from an address without secrets.
+- A screen whose address has hidden parameters is reopened by performing the way to it and not by its address.
+- A page is judged by the same rule as in the walk, so a replay is as good as that rule: two screens that look alike to it
+  cannot be told apart by a replay either.
+
 ## `traceqa runs`
 
 ```sh

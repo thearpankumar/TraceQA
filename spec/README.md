@@ -231,6 +231,18 @@ schema. `events.jsonl` has one `explore.action.end` for each edge of `graph.json
 `explore.replay` for each attempt to reopen a screen by replay (failed ones too, with the actions they cost, so that the
 replays add up to the actions that are not edges), and `model.call` for each call to a model.
 
+`traceqa replay` writes a run folder of its own too (`feature` is `replay`): `run.json` with no targets, `events.jsonl`
+and `replay.json` (`ReplayFile`, `replay.schema.json`), written whole or not at all and byte-identical for the same site
+and graph. `events.jsonl` has one `replay.step` for each edge asked for, in the order asked, and `replay.reopen` for each
+attempt to reopen a screen that has no address of its own (failed ones too).
+
+```
+runs/<runId>/
+  run.json                  RunManifest               (feature replay, targets [])
+  events.jsonl              one Event per line
+  replay.json               ReplayFile
+```
+
 Given the same site, seed and limits, `graph.json` is byte-identical from run to run: keys are sorted, lists keep the
 order things happened in, and it holds no time. Screens are told apart by `traceqa-engine`'s `state` module (the
 address without fragment and volatile parameters, the open dialog, and at least 90% of the same component ids once the

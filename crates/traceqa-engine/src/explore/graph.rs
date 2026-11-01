@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 /// The version of the `graph.json` layout (`spec/graph.schema.json`).
-pub const GRAPH_VERSION: u32 = 1;
+pub const GRAPH_VERSION: u32 = 2;
 
 /// Why a walk ended. The words are the names of the budgets (`--max-actions` is `max-actions`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -92,6 +92,8 @@ pub struct Edge {
     /// `role "name"`, for people reading the file.
     pub label: String,
     pub action: &'static str,
+    /// The text that was typed, for a `type` action. A replay types it again.
+    pub value: Option<String>,
     /// The screen the action led to. `None` when it did not complete.
     pub to: Option<String>,
     pub status: Status,
@@ -190,6 +192,9 @@ impl Graph {
                 });
                 if let Some(to) = &edge.to {
                     value["to"] = json!(to);
+                }
+                if let Some(text) = &edge.value {
+                    value["value"] = json!(text);
                 }
                 value
             }).collect::<Vec<_>>(),

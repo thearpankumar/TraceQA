@@ -174,7 +174,7 @@ fn write_results(folder: &Path, explored: &Explored, progress: &Progress<'_, '_>
 }
 
 /// Writes a file of the run folder so that a reader never sees half of it.
-fn write_file(folder: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+pub(super) fn write_file(folder: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
     let temporary = folder.join(format!("{name}.tmp"));
     std::fs::write(&temporary, bytes)?;
     std::fs::rename(&temporary, folder.join(name))
@@ -182,7 +182,7 @@ fn write_file(folder: &Path, name: &str, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Waits for an abort request while the exploration goes on. On a request it writes the final `run.json` itself,
 /// because a browser that is stuck will not let the walk finish.
-fn watch_for_abort(
+pub(super) fn watch_for_abort(
     abort: &Abort,
     registration: &crate::run::Registration<'_>,
     done: &AtomicBool,

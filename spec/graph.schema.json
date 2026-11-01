@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "graph.schema.json",
   "title": "TraceQA exploration graph",
-  "description": "graph.json, written by `traceqa explore` into its run folder (feature explore) next to run.json and events.jsonl. The screens a walk found, the actions it made between them, what it left alone, and why it stopped. Given the same site, seed and budgets the file is byte-identical: keys are sorted, lists are in the order things happened, and nothing in it is a time. Addresses have secret parameters replaced, as in components.json.",
-  "x-traceqa": { "contract": "graph", "version": 1 },
+  "description": "graph.json, written by `traceqa explore` into its run folder (feature explore) next to run.json and events.jsonl. The screens a walk found, the actions it made between them, what it left alone, and why it stopped. Given the same site, seed and budgets the file is byte-identical: keys are sorted, lists are in the order things happened, and nothing in it is a time. Addresses have secret parameters replaced, as in components.json. Layout 2 adds the typed text (`value`) to type edges, which `traceqa replay` needs; layout 1 files are still read, and their typed edges are blocked in a replay for want of text.",
+  "x-traceqa": { "contract": "graph", "version": 2 },
   "$defs": {
     "GraphFile": {
       "type": "object",
@@ -65,6 +65,7 @@
         "component": { "type": "string" },
         "label": { "description": "The role and accessible name of the component, for people reading the file.", "type": "string" },
         "action": { "description": "press is a click that was blocked and was tried again with a key.", "enum": ["click", "type", "press"] },
+        "value": { "description": "The text that was typed, for a type action (layout 2 and later). `traceqa replay` types it again. It is text the walk chose (the built-in words, or a model's answer cut to 200 characters), never text read from the site.", "type": "string" },
         "to": { "description": "The screen the action led to. Absent when the action did not complete, or the page it led to could not be read.", "type": "string" },
         "status": { "description": "ok: it worked. missing: the component was not on the page any more, and nothing was done. timeout: it took longer than allowed. failed: the browser could not do it, or the page that followed had nothing on it.", "enum": ["ok", "missing", "timeout", "failed"] },
         "navigated": { "type": "boolean" },

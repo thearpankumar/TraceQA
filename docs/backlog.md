@@ -510,6 +510,38 @@ re-run the exact path that exposed a bug.
 - A replay against a copy of the site with one control removed reports that edge as `missing` and exits 1.
 - A replay never sends a non-GET request in read-only mode (server log).
 
+**Status.** Built and verified on 1 Nov 2026 (branch `backlog/exp-1-10`).
+
+**What was built.** `traceqa replay GRAPH [--path EDGE|STATE... | --all]`. A chain runs in one session and ends at
+the first step that does not reproduce (the rest are `not-run`); `--all` replays each edge from its own screen, reopening
+it by address or by performing the shortest recorded click-only way. Outcomes: reproduced, diverged, missing, blocked,
+not-run, recorded-failed. Exit 0 only if the replay ended complete and every replayable step reproduced; 1 otherwise;
+2 for a refusal or a bad graph; 130 after Ctrl-C. It writes `replay.json` (`spec/replay.schema.json`) and the usual run
+folder. It reuses `Rules`, `check_start` and `driver_policy`, so it is read-only by default. The graph file is treated as
+untrusted input (names in order, edges between existing screens, http/https only, size caps, schemaVersion 1..=2).
+`--origin` points a graph at a server on another port. Graph layout is now 2: a `type` edge keeps its `value`, so typed
+text is typed again (only with writes allowed); layout-1 graphs still read, and their typed edges are `blocked`.
+The walker's logic is unchanged (four real walks compared before and after: identical except version and `value`).
+
+**Verified (real).** Read-only replay of the 217-edge shop walk: 215 of 215 replayable reproduced (2 were
+recorded-failed), only GET requests in the server log, exit 0. Writes allowed: 12 of 12 with the same typed text.
+Read-only blocks the typing edges. Removed-control copy: that edge `missing`, exit 1. Chain in Chromium, Firefox and
+WebKit. Rust workspace 860 passed; Python `test_replay.py`, `test_explore.py`, `test_shop_demo.py` 84 passed (58 min);
+ruff, format, pyright and the protocol check are clean. Mutation testing of the three new files left 0 real misses; two
+survivors are equivalent (`replay_doc.rs` `>` vs `>=` on the version and `&&` vs `||` in the alike-screen check).
+
+**Limits (known).**
+- On a page with very few components, removing one control changes the screen identity (the 90% rule), so the replay
+  reports `diverged`, not `missing`.
+- The site must start in the same state it was walked in (a fresh server).
+- A screen whose address had hidden parameters cannot be opened by address; it is reopened by its way.
+- Layout-1 graphs have no typed text. A screen with no safe click-only way is listed as not reopenable.
+
+**Not verified.** Linux and Windows, WebDriver browsers, a real model run, and a trial on a real outside site.
+
+**Carried forward.** The `traceqa codegen` hand-off (a locator per component) is still not built. Clippy shows two
+`nonminimal_bool` warnings in `locator.rs`, untouched by this item.
+
 **Size.** M
 
 ### EXP-9: Incremental re-extraction (A9)

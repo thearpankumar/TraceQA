@@ -300,6 +300,7 @@ mod tests {
             component: component.to_string(),
             label: String::new(),
             action: "click",
+            value: None,
             to: None,
             status,
             navigated: false,

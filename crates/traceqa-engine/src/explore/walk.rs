@@ -35,7 +35,7 @@ pub struct Explored {
 pub type Progress<'a> = &'a mut dyn FnMut(&WalkEvent);
 
 /// The time a keyboard retry of a blocked click is given, at most.
-const PRESS_TIMEOUT_MS: u64 = 2_000;
+pub(super) const PRESS_TIMEOUT_MS: u64 = 2_000;
 
 /// Reading the pages that show what is on every page (the header, the footer) may use this part of the walk's time
 /// (`--timeout`), and stops there. On a slow site six pages could use most of it before the walk began.
@@ -48,14 +48,14 @@ const REPLAY_TIME_DIVISOR: u32 = 4;
 
 /// What the walker does with a role.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     Click,
     Type,
     /// A list to pick from. The options are not known, so these are left alone.
     Select,
 }
 
-fn kind_of(role: &str) -> Option<Kind> {
+pub(super) fn kind_of(role: &str) -> Option<Kind> {
     match role {
         "link" | "button" | "tab" | "menuitem" | "checkbox" | "radio" | "switch" | "disclosure" => Some(Kind::Click),
         "textbox" | "searchbox" => Some(Kind::Type),
@@ -65,7 +65,7 @@ fn kind_of(role: &str) -> Option<Kind> {
 }
 
 /// The key that does what a click does, for the roles that take one.
-fn key_for(role: &str) -> &'static str {
+pub(super) fn key_for(role: &str) -> &'static str {
     match role {
         "checkbox" | "radio" | "switch" => "Space",
         _ => "Enter",
@@ -129,6 +129,8 @@ struct Walker<'a> {
     chrome_counted: BTreeSet<String>,
     chrome_pages: u32,
     values: Values,
+    /// The text typed by the action in hand, for the edge that records it.
+    typed: Option<String>,
 }
 
 pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool, progress: Progress) -> Explored {
@@ -156,6 +158,7 @@ pub fn explore(browser: &mut dyn Browser, options: &Options, cancel: &AtomicBool
         chrome_counted: BTreeSet::new(),
         chrome_pages: 0,
         values: Values::new(options.seed, options.model.clone()),
+        typed: None,
     };
     let (stopped, error) = match walker.run() {
         Ok(()) => (
@@ -624,6 +627,9 @@ impl Walker<'_> {
             Kind::Type => Act::Type(self.typed_value(component, comp, instance)?),
             _ => Act::Click,
         };
+        if let Act::Type(text) = &act {
+            self.typed = Some(text.clone());
+        }
         let key = key_for(&comp.role);
         (self.progress)(&WalkEvent::ActionStart {
             edge: &format!("e{}", self.edges.len()),
@@ -772,6 +778,7 @@ impl Walker<'_> {
             component: component.to_string(),
             label: label.to_string(),
             action,
+            value: self.typed.take().filter(|_| action == "type"),
             to: outcome.to.map(|to| format!("s{to}")),
             status: outcome.status,
             navigated: outcome.navigated,
@@ -871,12 +878,12 @@ fn first_actionable(component: &ViewComponent) -> Option<&ViewInstance> {
 }
 
 /// The component with this id on the page, and the element to act on, when there is one.
-fn actionable<'v>(view: &'v View, id: &str) -> Option<(&'v ViewComponent, &'v ViewInstance)> {
+pub(super) fn actionable<'v>(view: &'v View, id: &str) -> Option<(&'v ViewComponent, &'v ViewInstance)> {
     let component = view.components.iter().find(|c| c.id == id)?;
     Some((component, first_actionable(component)?))
 }
 
-fn visible_ids(view: &View) -> BTreeSet<String> {
+pub(super) fn visible_ids(view: &View) -> BTreeSet<String> {
     view.components
         .iter()
         .filter(|c| c.instances.iter().any(|i| i.visible))

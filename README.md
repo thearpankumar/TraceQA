@@ -163,6 +163,7 @@ fixes it, or breaks something else, `traceqa diff` reports exactly which compone
 - GitHub annotations and SARIF output, `verify` manifests of what must exist, and per-component pixel compare.
 - `traceqa map` follows a site's links and lists which components live on which pages.
 - `traceqa explore` walks a site by acting on it, read-only by default, and writes the screens and the actions between them to `graph.json` and how much of what it found it touched to `coverage.json`.
+- `traceqa replay` performs the actions of a `graph.json` again, read-only by default, and says for each one whether it led where it did, so a finding can be shown again.
 
 </td>
 </tr>

@@ -303,6 +303,7 @@ fn options() -> Options {
 }
 
 /// What a walk told its listener.
+#[derive(Debug)]
 struct Told {
     kind: &'static str,
     message: String,
@@ -2619,4 +2620,765 @@ fn replays_that_use_a_quarter_of_the_time_end_the_trying_and_the_screen_is_given
         .any(|t| t.kind == "progress" && t.message.contains("the time set aside for replays is used up")));
     assert_eq!(done.graph.unreachable, ["s2"]);
     assert_eq!(done.graph.stopped, Stop::Complete);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Replay (EXP-8): a graph a walk wrote, performed again against a site in memory
+// ---------------------------------------------------------------------------------------------------------------
+
+/// The graph of a walk, read back the way `traceqa replay` reads it: from its bytes.
+fn doc_of(done: &Explored) -> Doc {
+    Doc::parse(std::str::from_utf8(&done.graph.to_bytes()).unwrap()).unwrap()
+}
+
+/// Walks `pages` with the rules given, and reads the graph back.
+fn walked(pages: Vec<(&'static str, P)>, writes: bool) -> Doc {
+    let mut opts = options();
+    opts.rules = Rules::new(&opts.start_url, writes, &[]).unwrap();
+    doc_of(&run(&mut Fake::new(pages), &opts))
+}
+
+/// Gives every page thirty more things to look at, so that a page which loses one control is still the same screen by
+/// the rule of ninety in a hundred. (A page of three components that loses one is a different screen, and a replay says so.)
+fn padded(mut pages: Vec<(&'static str, P)>) -> Vec<(&'static str, P)> {
+    for (key, page) in &mut pages {
+        for n in 0..30 {
+            page.comps.push(c(&format!("Filler {key} {n}"), "heading"));
+        }
+    }
+    pages
+}
+
+fn replay_options(writes: bool) -> ReplayOptions {
+    ReplayOptions {
+        rules: Rules::new(&format!("{ORIGIN}/"), writes, &[]).unwrap(),
+        action_timeout: Duration::from_secs(10),
+        timeout: Duration::from_secs(600),
+        max_requests_per_origin: 2000,
+    }
+}
+
+/// What a replay told its listener, and what it came to. Every replay of this file is checked by [`check_replay`].
+fn replayed_told(fake: &mut Fake, doc: &Doc, mode: &Mode, opts: &ReplayOptions) -> (Replayed, Vec<Told>) {
+    static NEVER: AtomicBool = AtomicBool::new(false);
+    let mut told = Vec::new();
+    let done = replay(fake, doc, mode, opts, &NEVER, &mut |event| {
+        told.push(Told {
+            kind: event.kind(),
+            message: event.message(),
+            data: event.data(),
+        });
+    });
+    check_replay(doc, mode, &done, &told);
+    (done, told)
+}
+
+fn replayed(fake: &mut Fake, doc: &Doc, mode: &Mode, opts: &ReplayOptions) -> Replayed {
+    replayed_told(fake, doc, mode, opts).0
+}
+
+/// What must hold for any replay, whatever the site.
+fn check_replay(doc: &Doc, mode: &Mode, done: &Replayed, told: &[Told]) {
+    let asked: Vec<usize> = match mode {
+        Mode::Chain(edges) => edges.clone(),
+        Mode::All => (0..doc.edges.len()).collect(),
+    };
+    // One step for each edge asked for, in the order asked, and one event for each step, in the same order.
+    let got: Vec<usize> = done.steps.iter().map(|s| s.edge).collect();
+    assert_eq!(got, asked, "a step for each edge asked for");
+    let events: Vec<&str> = told
+        .iter()
+        .filter(|t| t.kind == "replay.step")
+        .map(|t| t.data["edge"].as_str().unwrap())
+        .collect();
+    let ids: Vec<&str> = asked.iter().map(|&e| doc.edges[e].id.as_str()).collect();
+    assert_eq!(events, ids, "one replay.step for each step");
+    for (step, event) in done.steps.iter().zip(told.iter().filter(|t| t.kind == "replay.step")) {
+        assert_eq!(event.data["outcome"], step.outcome.as_str());
+    }
+    // The figures are the sums, and the file says the same as the steps.
+    let totals = done.totals();
+    assert_eq!(
+        totals.reproduced + totals.diverged + totals.missing + totals.blocked + totals.not_run + totals.recorded_failed,
+        done.steps.len()
+    );
+    let file = done.to_json(doc, mode);
+    assert_eq!(file["steps"].as_array().unwrap().len(), done.steps.len());
+    assert_eq!(file["totals"]["reproduced"], totals.reproduced);
+    assert_eq!(done.to_bytes(doc, mode), done.clone().to_bytes(doc, mode));
+    // Every break in a chain is followed only by steps that were not run.
+    if matches!(mode, Mode::Chain(_)) {
+        if let Some(first) = done.steps.iter().position(|s| s.outcome != Outcome::Reproduced) {
+            assert!(
+                done.steps[first + 1..].iter().all(|s| s.outcome == Outcome::NotRun),
+                "{:?}",
+                done.steps
+            );
+        }
+    }
+    // An action is made for a step that ran, and the replay says how many it made.
+    assert!(done.actions as usize >= done.steps.iter().filter(|s| s.outcome == Outcome::Reproduced).count());
+}
+
+fn replay_outcomes(done: &Replayed) -> Vec<Outcome> {
+    done.steps.iter().map(|s| s.outcome).collect()
+}
+
+#[test]
+fn replaying_every_edge_of_a_walk_of_the_same_site_reproduces_every_one() {
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(done.ended, Ended::Complete);
+    assert_eq!(done.steps.len(), 4);
+    assert!(
+        replay_outcomes(&done).iter().all(|o| *o == Outcome::Reproduced),
+        "{:?}",
+        done.steps
+    );
+    assert!(done.succeeded());
+    assert_eq!(done.totals().per_mille(), Some(1000));
+    // The same actions the walk made, in the same order.
+    assert_eq!(fake.acted, ["c_a", "c_b", "c_a1", "c_b1"]);
+}
+
+#[test]
+fn a_chain_is_performed_in_one_session_from_the_start_page() {
+    let doc = walked(tree(), false);
+    let chain = chain_of(&doc, &["e0".to_string(), "e2".to_string()]).unwrap();
+    assert_eq!(chain, [0, 2]);
+    let mut fake = Fake::new(tree());
+    let done = replayed(&mut fake, &doc, &Mode::Chain(chain), &replay_options(false));
+    assert_eq!(replay_outcomes(&done), [Outcome::Reproduced, Outcome::Reproduced]);
+    assert_eq!(fake.acted, ["c_a", "c_a1"]);
+    assert_eq!(
+        fake.loaded,
+        [format!("{ORIGIN}/")],
+        "the start page is opened once and the chain goes on from it"
+    );
+    assert_eq!(done.steps[1].actual.as_deref(), Some("s3"));
+}
+
+#[test]
+fn a_chain_ends_at_the_first_step_that_does_not_lead_where_it_did_and_the_rest_are_not_run() {
+    let doc = walked(padded(chain(3)), false);
+    let all = ["e0", "e1", "e2"].map(String::from);
+    let mut fake = Fake::new(padded(chain(3)));
+    // The second page has lost its link.
+    fake.pages.get_mut("p2").unwrap().comps.retain(|c| c.role != "link");
+    let done = replayed(
+        &mut fake,
+        &doc,
+        &Mode::Chain(chain_of(&doc, &all).unwrap()),
+        &replay_options(false),
+    );
+    assert_eq!(
+        replay_outcomes(&done),
+        [Outcome::Reproduced, Outcome::Reproduced, Outcome::Missing]
+    );
+
+    let mut fake = Fake::new(padded(chain(3)));
+    fake.pages.get_mut("p1").unwrap().comps.retain(|c| c.role != "link");
+    let done = replayed(
+        &mut fake,
+        &doc,
+        &Mode::Chain(chain_of(&doc, &all).unwrap()),
+        &replay_options(false),
+    );
+    assert_eq!(
+        replay_outcomes(&done),
+        [Outcome::Reproduced, Outcome::Missing, Outcome::NotRun]
+    );
+    assert_eq!(done.steps[2].note.as_deref(), Some("e1 did not reproduce"));
+    assert!(!done.succeeded());
+    assert_eq!(fake.acted, ["c_next_0"], "nothing was done after the break");
+}
+
+#[test]
+fn a_missing_component_is_reported_and_nothing_is_done_to_the_page() {
+    let doc = walked(padded(tree()), false);
+    let mut fake = Fake::new(padded(tree()));
+    fake.pages.get_mut("home").unwrap().comps.retain(|c| c.name != "B");
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(
+        replay_outcomes(&done),
+        [
+            Outcome::Reproduced,
+            Outcome::Missing,
+            Outcome::Reproduced,
+            Outcome::Reproduced
+        ]
+    );
+    assert!(!fake.acted.contains(&"c_b".to_string()));
+    assert_eq!(done.totals().missing, 1);
+    assert_eq!(done.totals().per_mille(), Some(750));
+    assert!(!done.succeeded());
+}
+
+#[test]
+fn a_page_that_is_another_screen_is_reported_as_diverged_with_the_screen_it_is() {
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    // "A" now leads to the page "B" leads to.
+    fake.pages
+        .get_mut("home")
+        .unwrap()
+        .comps
+        .iter_mut()
+        .find(|c| c.name == "A")
+        .unwrap()
+        .to = Some("b");
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    let first = &done.steps[0];
+    assert_eq!(first.outcome, Outcome::Diverged);
+    assert_eq!(first.actual.as_deref(), Some("s2"));
+    assert!(first.note.as_deref().unwrap().contains("s2") && first.note.as_deref().unwrap().contains("s1"));
+
+    // A page the graph has no screen like is `unknown`.
+    let mut fake = Fake::new(tree());
+    fake.pages.insert("new", leaf("/new", "A page nobody saw"));
+    fake.pages
+        .get_mut("home")
+        .unwrap()
+        .comps
+        .iter_mut()
+        .find(|c| c.name == "A")
+        .unwrap()
+        .to = Some("new");
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(done.steps[0].outcome, Outcome::Diverged);
+    assert_eq!(done.steps[0].actual.as_deref(), Some("unknown"));
+}
+
+#[test]
+fn an_action_that_does_not_complete_is_diverged_and_says_why() {
+    let doc = walked(tree(), false);
+    for error in [StepError::Failed("boom".into()), StepError::Timeout("slow".into())] {
+        let mut fake = Fake::new(tree());
+        fake.pages
+            .get_mut("home")
+            .unwrap()
+            .comps
+            .iter_mut()
+            .find(|c| c.name == "A")
+            .unwrap()
+            .fails = Some(error);
+        let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+        assert_eq!(done.steps[0].outcome, Outcome::Diverged);
+        assert_eq!(done.steps[0].actual, None);
+        assert!(
+            done.steps[0].note.as_deref().unwrap().contains("did not complete"),
+            "{:?}",
+            done.steps[0]
+        );
+    }
+}
+
+#[test]
+fn a_click_that_is_blocked_is_tried_once_with_the_key_as_the_walk_did() {
+    let blocked = || {
+        let mut pages = tree();
+        let home = &mut pages[0].1;
+        home.comps.iter_mut().find(|c| c.name == "A").unwrap().click_blocked = true;
+        pages
+    };
+    let doc = walked(blocked(), false);
+    assert_eq!(doc.edges[0].action, ActionKind::Press);
+    let mut fake = Fake::new(blocked());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert!(
+        replay_outcomes(&done).iter().all(|o| *o == Outcome::Reproduced),
+        "{:?}",
+        done.steps
+    );
+    assert_eq!(fake.keys, ["Enter"]);
+}
+
+#[test]
+fn an_edge_the_walk_did_not_complete_is_not_counted_against_the_replay() {
+    let failing = || {
+        let mut pages = tree();
+        pages[0].1.comps.iter_mut().find(|c| c.name == "B").unwrap().fails = Some(StepError::Failed("no".into()));
+        pages
+    };
+    let doc = walked(failing(), false);
+    assert_eq!(doc.edges[1].status, Status::Failed);
+    let mut fake = Fake::new(failing());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(done.steps[1].outcome, Outcome::RecordedFailed);
+    assert_eq!(done.totals().replayable, done.steps.len() - 1);
+    assert!(done.succeeded());
+    assert!(
+        !fake.acted.contains(&"c_b".to_string()),
+        "a failed edge is not done again"
+    );
+    assert_eq!(done.totals().per_mille(), Some(1000));
+
+    // A chain may not name one: it leads nowhere.
+    let why = chain_of(&doc, &["e1".to_string()]).err().unwrap().0;
+    assert!(why.contains("failed"), "{why}");
+}
+
+/// home has two text boxes and a link.
+fn text_form() -> Vec<(&'static str, P)> {
+    vec![
+        (
+            "home",
+            page(
+                "/",
+                vec![
+                    c("City", "textbox"),
+                    c("Company", "textbox"),
+                    C::link("About", "about", "/about"),
+                ],
+            ),
+        ),
+        ("about", leaf("/about", "About title")),
+    ]
+}
+
+#[test]
+fn what_was_typed_is_typed_again_when_writes_are_allowed_and_left_alone_when_they_are_not() {
+    let doc = walked(text_form(), true);
+    let typed: Vec<&str> = doc.edges.iter().filter_map(|e| e.value.as_deref()).collect();
+    assert_eq!(typed.len(), 2, "{:?}", doc.edges);
+
+    let mut fake = Fake::new(text_form());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(true));
+    assert!(done.succeeded(), "{:?}", done.steps);
+    assert_eq!(fake.typed, typed, "the same text, in the same order");
+
+    // Read-only: nothing is typed, the edges are blocked, and the run does not pass.
+    let mut fake = Fake::new(text_form());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert!(fake.typed.is_empty());
+    let blocked: Vec<_> = done.steps.iter().filter(|s| s.outcome == Outcome::Blocked).collect();
+    assert_eq!(blocked.len(), 2);
+    assert!(blocked[0].note.as_deref().unwrap().contains("read-only"));
+    assert!(!done.succeeded());
+}
+
+#[test]
+fn a_destructive_name_is_blocked_even_with_writes_allowed() {
+    let doc = walked(text_form(), true);
+    let mut opts = replay_options(true);
+    opts.rules = Rules::new(&format!("{ORIGIN}/"), true, &["city".to_string()]).unwrap();
+    let mut fake = Fake::new(text_form());
+    let done = replayed(&mut fake, &doc, &Mode::All, &opts);
+    let city = done
+        .steps
+        .iter()
+        .find(|s| doc.edges[s.edge].label.contains("City"))
+        .unwrap();
+    assert_eq!(city.outcome, Outcome::Blocked);
+    assert!(city.note.as_deref().unwrap().contains("destructive"));
+    assert_eq!(fake.typed.len(), 1, "only the other box was typed into");
+}
+
+#[test]
+fn a_graph_of_the_first_layout_has_no_text_to_type_and_the_edge_is_blocked_and_says_so() {
+    let mut doc = walked(text_form(), true);
+    for edge in &mut doc.edges {
+        edge.value = None;
+    }
+    let mut fake = Fake::new(text_form());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(true));
+    assert!(fake.typed.is_empty(), "nothing is guessed");
+    let blocked: Vec<_> = done.steps.iter().filter(|s| s.outcome == Outcome::Blocked).collect();
+    assert_eq!(blocked.len(), 2);
+    assert!(blocked[0].note.as_deref().unwrap().contains("no value"));
+}
+
+#[test]
+fn edges_on_one_screen_that_changed_nothing_are_done_one_after_another_without_opening_the_page_again() {
+    let doc = walked(text_form(), true);
+    let mut fake = Fake::new(text_form());
+    replayed(&mut fake, &doc, &Mode::All, &replay_options(true));
+    // Two typed edges on the start page share one load; the link then needs the page again.
+    assert_eq!(fake.loaded.len(), 2, "{:?}", fake.loaded);
+}
+
+#[test]
+fn a_screen_with_no_address_is_reopened_by_performing_the_way_to_it_and_this_is_told() {
+    let doc = walked(shop_with_a_dialog(), false);
+    let mut fake = Fake::new(shop_with_a_dialog());
+    let (done, told) = replayed_told(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert!(done.succeeded(), "{:?}", done.steps);
+    let reopened: Vec<&Told> = told.iter().filter(|t| t.kind == "replay.reopen").collect();
+    assert_eq!(reopened.len(), 2, "one for each edge made on the dialog");
+    let dialog = doc.states.iter().find(|s| s.modal.is_some()).unwrap().id.clone();
+    assert!(reopened
+        .iter()
+        .all(|t| t.data["reopened"] == true && t.data["state"] == dialog.as_str()));
+    // 4 edges, and a replayed "Open" for each of the two made on the dialog.
+    assert_eq!(done.actions, 6);
+    // The dialog's address is tried twice, once.
+    assert_eq!(fake.acted.iter().filter(|a| *a == "c_open").count(), 3);
+}
+
+#[test]
+fn a_screen_that_cannot_be_reopened_is_tried_once_and_its_edges_are_not_run() {
+    let doc = walked(padded(shop_with_a_dialog()), false);
+    let mut fake = Fake::new(padded(shop_with_a_dialog()));
+    // The link that opens the dialog is gone.
+    fake.pages.get_mut("home").unwrap().comps.retain(|c| c.name != "Open");
+    let (done, told) = replayed_told(&mut fake, &doc, &Mode::All, &replay_options(false));
+    let by_edge: Vec<(&str, Outcome)> = done
+        .steps
+        .iter()
+        .map(|s| (doc.edges[s.edge].label.as_str(), s.outcome))
+        .collect();
+    assert!(by_edge.contains(&("link \"Open\"", Outcome::Missing)), "{by_edge:?}");
+    let not_run: Vec<_> = done.steps.iter().filter(|s| s.outcome == Outcome::NotRun).collect();
+    assert_eq!(not_run.len(), 2);
+    assert!(not_run[0]
+        .note
+        .as_deref()
+        .unwrap()
+        .contains("could not be opened again"));
+    // Two attempts to reopen at most, for the first edge; the second edge does not try again.
+    assert!(told.iter().filter(|t| t.kind == "replay.reopen").count() <= 2);
+}
+
+#[test]
+fn the_way_to_a_screen_is_the_fewest_edges_and_never_one_that_typed_text() {
+    let doc = walked(chain(3), false);
+    assert_eq!(shortest_way(&doc, 3), Some(vec![0, 1, 2]));
+    assert_eq!(shortest_way(&doc, 0), Some(vec![]));
+    assert_eq!(shortest_way(&doc, 1), Some(vec![0]));
+
+    // A way that needs a typed edge is no way.
+    let mut typed = walked(tree(), false);
+    typed.edges[0].action = ActionKind::Type;
+    assert_eq!(shortest_way(&typed, 1), None);
+    assert_eq!(shortest_way(&typed, 2), Some(vec![1]));
+
+    // Edges the walk did not complete lead nowhere.
+    let mut failed = walked(tree(), false);
+    failed.edges[0].status = Status::Failed;
+    assert_eq!(shortest_way(&failed, 1), None);
+}
+
+#[test]
+fn a_chain_must_follow_on_from_the_start_page_and_each_edge_from_the_one_before() {
+    let doc = walked(tree(), false);
+    let names = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
+    assert!(chain_of(&doc, &names(&["e0", "e2"])).is_ok());
+    let apart = chain_of(&doc, &names(&["e0", "e1"])).err().unwrap().0;
+    assert!(apart.contains("e1") && apart.contains("s1"), "{apart}");
+    let not_start = chain_of(&doc, &names(&["e2"])).err().unwrap().0;
+    assert!(not_start.contains("e2"), "{not_start}");
+    assert!(chain_of(&doc, &names(&["e9"])).err().unwrap().0.contains("e9"));
+    assert!(chain_of(&doc, &[]).is_err());
+}
+
+#[test]
+fn a_start_page_that_is_not_the_first_screen_ends_a_chain_at_once() {
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    fake.pages.get_mut("home").unwrap().comps = vec![c("Something else", "heading"), C::link("Z", "a", "/a")];
+    let done = replayed(&mut fake, &doc, &Mode::Chain(vec![0, 2]), &replay_options(false));
+    assert_eq!(replay_outcomes(&done), [Outcome::Diverged, Outcome::NotRun]);
+    assert!(done.steps[0].note.as_deref().unwrap().contains("start page"));
+    assert!(fake.acted.is_empty());
+}
+
+#[test]
+fn cancel_ends_the_replay_and_every_edge_asked_for_still_has_a_step() {
+    static CANCEL: AtomicBool = AtomicBool::new(false);
+    CANCEL.store(false, Ordering::SeqCst);
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    fake.cancel = Some((2, &CANCEL));
+    let mut told = Vec::new();
+    let done = replay(
+        &mut fake,
+        &doc,
+        &Mode::All,
+        &replay_options(false),
+        &CANCEL,
+        &mut |event| {
+            told.push(Told {
+                kind: event.kind(),
+                message: event.message(),
+                data: event.data(),
+            })
+        },
+    );
+    check_replay(&doc, &Mode::All, &done, &told);
+    assert_eq!(done.ended, Ended::Cancelled);
+    assert_eq!(done.steps.len(), 4);
+    assert!(done.steps[2..].iter().all(|s| s.outcome == Outcome::NotRun));
+    assert!(!done.succeeded());
+}
+
+#[test]
+fn the_clock_ends_the_replay_and_the_edges_not_reached_were_not_run() {
+    let doc = walked(tree(), false);
+    let mut opts = replay_options(false);
+    opts.timeout = Duration::ZERO;
+    let mut fake = Fake::new(tree());
+    let done = replayed(&mut fake, &doc, &Mode::All, &opts);
+    assert_eq!(done.ended, Ended::Timeout);
+    assert!(replay_outcomes(&done).iter().all(|o| *o == Outcome::NotRun));
+    assert!(fake.acted.is_empty() && fake.loaded.is_empty());
+}
+
+#[test]
+fn the_request_budget_ends_the_replay() {
+    let doc = walked(tree(), false);
+    let mut opts = replay_options(false);
+    opts.max_requests_per_origin = 3;
+    let mut fake = Fake::new(tree());
+    let done = replayed(&mut fake, &doc, &Mode::All, &opts);
+    assert_eq!(done.ended, Ended::MaxRequests);
+    assert!(done.steps.iter().any(|s| s.outcome == Outcome::NotRun));
+    assert!(!done.succeeded());
+}
+
+#[test]
+fn a_browser_that_is_lost_ends_the_replay_with_the_error_and_every_edge_has_a_step() {
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    fake.stranded = true;
+    // Nothing can be acted on until a load works, and the first page to open is not there.
+    fake.pages.get_mut("home").unwrap().url = format!("{ORIGIN}/moved");
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert!(!done.succeeded());
+    assert_eq!(done.steps.len(), 4);
+}
+
+#[test]
+fn a_graph_the_screens_cannot_be_built_from_gives_an_error_and_a_step_for_every_edge() {
+    let mut doc = walked(tree(), false);
+    // Two screens that are alike.
+    doc.states[2] = doc.states[1].clone();
+    doc.states[2].id = "s2".to_string();
+    let mut fake = Fake::new(tree());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(done.ended, Ended::Error);
+    assert!(done.error.as_deref().unwrap().contains("alike"));
+    assert!(replay_outcomes(&done).iter().all(|o| *o == Outcome::NotRun));
+}
+
+#[test]
+fn a_secret_in_an_address_stays_hidden_in_the_graph_and_the_page_is_still_recognised() {
+    let secret = || {
+        vec![
+            (
+                "home",
+                page("/", vec![C::link("Account", "acct", "/acct?token=hunter2")]),
+            ),
+            ("acct", {
+                let mut p = leaf("/acct", "Account title");
+                p.url = format!("{ORIGIN}/acct?token=hunter2");
+                p
+            }),
+        ]
+    };
+    let doc = walked(secret(), false);
+    assert!(
+        doc.states[1].url.contains("REDACTED") && !doc.states[1].url.contains("hunter2"),
+        "{}",
+        doc.states[1].url
+    );
+
+    // A chain gets there by acting, so the hidden address is no obstacle.
+    let mut fake = Fake::new(secret());
+    let done = replayed(&mut fake, &doc, &Mode::Chain(vec![0]), &replay_options(false));
+    assert_eq!(replay_outcomes(&done), [Outcome::Reproduced]);
+
+    // The whole graph reopens it the same way, and the address with the hidden value is never opened.
+    let mut fake = Fake::new(secret());
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert!(done.succeeded());
+    assert!(fake.loaded.iter().all(|u| !u.contains("REDACTED")), "{:?}", fake.loaded);
+}
+
+#[test]
+fn the_same_replay_writes_the_same_bytes() {
+    let doc = walked(tree(), false);
+    let bytes = |fake: &mut Fake| replayed(fake, &doc, &Mode::All, &replay_options(false)).to_bytes(&doc, &Mode::All);
+    assert_eq!(bytes(&mut Fake::new(tree())), bytes(&mut Fake::new(tree())));
+}
+
+#[test]
+fn the_file_has_the_counts_the_mode_and_a_line_for_each_step() {
+    let doc = walked(padded(tree()), false);
+    let mut fake = Fake::new(padded(tree()));
+    fake.pages.get_mut("home").unwrap().comps.retain(|c| c.name != "B");
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    let file = done.to_json(&doc, &Mode::All);
+    assert_eq!(file["schemaVersion"], 1);
+    assert_eq!(file["mode"], "all");
+    assert_eq!(file["ended"], "complete");
+    assert_eq!(file["graph"]["edges"], 4);
+    assert_eq!(file["totals"]["replayable"], 4);
+    assert_eq!(file["totals"]["missing"], 1);
+    assert_eq!(file["totals"]["reproducedPerMille"], 750);
+    let second = &file["steps"][1];
+    assert_eq!(second["edge"], "e1");
+    assert_eq!(second["outcome"], "missing");
+    assert_eq!(second["expected"], "s2");
+    assert!(second.get("actual").is_none());
+    let none = Replayed {
+        steps: vec![],
+        ended: Ended::Complete,
+        actions: 0,
+        error: None,
+    }
+    .to_json(&doc, &Mode::Chain(vec![]));
+    assert!(none["totals"].get("reproducedPerMille").is_none());
+}
+
+#[test]
+fn the_person_watching_is_told_each_step_in_a_sentence() {
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    let (_, told) = replayed_told(&mut fake, &doc, &Mode::Chain(vec![0]), &replay_options(false));
+    let step = told.iter().find(|t| t.kind == "replay.step").unwrap();
+    assert_eq!(step.message, "e0: click link \"A\" on s0 -> reproduced");
+    assert_eq!(step.data["expected"], "s1");
+    assert_eq!(step.data["actual"], "s1");
+}
+
+#[test]
+fn a_chain_stops_at_a_step_that_led_to_another_page_though_the_page_is_there() {
+    let doc = walked(padded(chain(3)), false);
+    let all = ["e0", "e1", "e2"].map(String::from);
+    let mut fake = Fake::new(padded(chain(3)));
+    // The link on the second page now leads to the last page.
+    fake.pages
+        .get_mut("p1")
+        .unwrap()
+        .comps
+        .iter_mut()
+        .find(|c| c.role == "link")
+        .unwrap()
+        .to = Some("p3");
+    let done = replayed(
+        &mut fake,
+        &doc,
+        &Mode::Chain(chain_of(&doc, &all).unwrap()),
+        &replay_options(false),
+    );
+    assert_eq!(
+        replay_outcomes(&done),
+        [Outcome::Reproduced, Outcome::Diverged, Outcome::NotRun]
+    );
+    assert_eq!(fake.acted.len(), 2, "nothing was done after the step that diverged");
+}
+
+#[test]
+fn a_way_that_leads_to_another_page_does_not_bring_a_screen_back() {
+    let doc = walked(padded(shop_with_a_dialog()), false);
+    let mut fake = Fake::new(padded(shop_with_a_dialog()));
+    // "Open" now leads to the about page.
+    fake.pages
+        .get_mut("home")
+        .unwrap()
+        .comps
+        .iter_mut()
+        .find(|c| c.name == "Open")
+        .unwrap()
+        .to = Some("about");
+    let (done, told) = replayed_told(&mut fake, &doc, &Mode::All, &replay_options(false));
+    let reopens: Vec<&Told> = told.iter().filter(|t| t.kind == "replay.reopen").collect();
+    assert!(!reopens.is_empty());
+    assert!(reopens.iter().all(|t| t.data["reopened"] == false), "{reopens:?}");
+    assert!(
+        done.steps.iter().filter(|s| s.outcome == Outcome::NotRun).count() >= 2,
+        "{:?}",
+        done.steps
+    );
+    // What was told on the way: the screen could not be brought back.
+    assert!(
+        told.iter()
+            .any(|t| t.kind == "progress" && t.message.contains("did not bring it back")),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn a_reopening_tells_how_many_actions_it_made() {
+    let doc = walked(shop_with_a_dialog(), false);
+    let mut fake = Fake::new(shop_with_a_dialog());
+    let (_, told) = replayed_told(&mut fake, &doc, &Mode::All, &replay_options(false));
+    let reopened: Vec<&Told> = told.iter().filter(|t| t.kind == "replay.reopen").collect();
+    assert!(!reopened.is_empty());
+    assert!(reopened.iter().all(|t| t.data["actions"] == 1), "{reopened:?}");
+    assert!(
+        reopened[0].message.contains("by performing 1 actions"),
+        "{}",
+        reopened[0].message
+    );
+}
+
+#[test]
+fn a_missing_component_is_not_counted_as_an_action() {
+    let doc = walked(padded(tree()), false);
+    let mut fake = Fake::new(padded(tree()));
+    fake.pages.get_mut("home").unwrap().comps.retain(|c| c.name != "B");
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(done.actions as usize, fake.acted.len());
+    assert_eq!(done.actions, 3);
+}
+
+#[test]
+fn a_screen_with_a_hidden_part_in_its_address_is_reopened_by_its_way_and_the_address_is_not_opened() {
+    let pages = || {
+        vec![
+            (
+                "home",
+                page(
+                    "/",
+                    vec![
+                        C::link("Account", "acct", "/acct?token=hunter2"),
+                        C::link("Other", "other", "/other"),
+                    ],
+                ),
+            ),
+            ("acct", {
+                let mut p = page(
+                    "/acct",
+                    vec![c("Account title", "heading"), C::link("Deeper", "deep", "/deep")],
+                );
+                p.url = format!("{ORIGIN}/acct?token=hunter2");
+                p
+            }),
+            ("other", leaf("/other", "Other title")),
+            ("deep", leaf("/deep", "Deep title")),
+        ]
+    };
+    let doc = walked(pages(), false);
+    assert!(doc.states.iter().any(|s| s.url.contains("REDACTED")));
+    let mut fake = Fake::new(pages());
+    let (done, told) = replayed_told(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert!(done.succeeded(), "{:?}", done.steps);
+    assert!(fake.loaded.iter().all(|u| !u.contains("REDACTED")), "{:?}", fake.loaded);
+    assert!(
+        told.iter().any(|t| t.kind == "replay.reopen"),
+        "it was reopened by performing its way"
+    );
+}
+
+#[test]
+fn a_control_the_browser_cannot_find_when_it_acts_is_missing_and_is_not_counted_as_an_action() {
+    let doc = walked(tree(), false);
+    let mut fake = Fake::new(tree());
+    fake.pages
+        .get_mut("home")
+        .unwrap()
+        .comps
+        .iter_mut()
+        .find(|c| c.name == "A")
+        .unwrap()
+        .fails = Some(StepError::NotFound("gone".into()));
+    let done = replayed(&mut fake, &doc, &Mode::All, &replay_options(false));
+    assert_eq!(done.steps[0].outcome, Outcome::Missing);
+    assert_eq!(
+        done.actions as usize,
+        fake.acted.len() - 1,
+        "the try that found nothing made no action"
+    );
 }

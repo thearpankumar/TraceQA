@@ -10,6 +10,10 @@ mod events;
 mod graph;
 mod live;
 mod model;
+mod replay;
+mod replay_doc;
+mod replay_out;
+mod replay_run;
 mod runner;
 pub mod settle;
 mod values;
@@ -23,6 +27,10 @@ pub use events::WalkEvent;
 pub use graph::{Edge, Graph, Skipped, State, Status, Stop, GRAPH_VERSION};
 pub use live::{Live, DEFAULT_LOAD_TIMEOUT_MS};
 pub use model::{Act, Acted, Browser, Effect, Hints, Refused, StepError, View, ViewComponent, ViewInstance};
+pub use replay::{chain_of, replay, shortest_way, Ended, Mode, Options as ReplayOptions, Outcome, Replayed, Step};
+pub use replay_doc::{ActionKind, Doc, DocEdge, DocError, DocState, MAX_GRAPH_BYTES};
+pub use replay_out::{ReplayEvent, Totals as ReplayTotals, REPLAY_VERSION};
+pub use replay_run::{Finished as ReplayFinished, ReplayRun, Request as ReplayRequest, FEATURE as REPLAY_FEATURE};
 pub use runner::{ExploreRun, Finished, Request, FEATURE};
 pub use values::{
     CallOutcome, Field, ModelCall, ModelSettings, Recorded, SourceError, ValueSource, DEFAULT_MAX_MODEL_CALLS,

@@ -21,6 +21,7 @@ mod login;
 mod manifest;
 mod map;
 mod mcp;
+mod replay;
 mod robots;
 mod runs;
 mod serve;
@@ -97,6 +98,11 @@ enum Command {
     /// page limits) and never clicks. Links such as /logout and /delete are not followed.
     /// Writes site.json in a group folder next to the runs.
     Map(map::MapArgs),
+    /// Perform again the actions of an exploration's graph.json, and say whether each one led where it did.
+    ///
+    /// Read-only by default, like explore. Exit 0 when every step was reproduced, 1 when any was not, 2 on a wrong
+    /// command or a graph that cannot be used. Then: traceqa replay runs/RUN/graph.json --all
+    Replay(replay::ReplayArgs),
     /// List, count and delete the runs in the runs folder.
     ///
     /// Then: traceqa runs prune --keep 20 --dry-run
@@ -125,6 +131,7 @@ fn main() -> ExitCode {
         Command::Login(args) => login::run(&args),
         Command::Map(args) => map::run(&args),
         Command::Mcp(args) => mcp::run(&args),
+        Command::Replay(args) => replay::run(&args),
         Command::Runs(args) => runs::run(&args),
         Command::Serve(args) => serve::run(&args),
         Command::Visual(args) => visual::run(&args),

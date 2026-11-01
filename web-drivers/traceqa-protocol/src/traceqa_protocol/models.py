@@ -1358,6 +1358,10 @@ class GraphEdge(BaseModel):
         ...,
         description="press is a click that was blocked and was tried again with a key.",
     )
+    value: str | None = Field(
+        default=None,
+        description="The text that was typed, for a type action (layout 2 and later). `traceqa replay` types it again. It is text the walk chose (the built-in words, or a model's answer cut to 200 characters), never text read from the site.",
+    )
     to: str | None = Field(
         default=None,
         description="The screen the action led to. Absent when the action did not complete, or the page it led to could not be read.",
@@ -1542,6 +1546,123 @@ class VerifySkipped(BaseModel):
     reason: str
 
 
+class Mode(Enum):
+    """
+    chain: edges that follow one another from the start page, done in one session, and ended at the first that does not lead where it did. all: every edge of the graph, each from the screen it was made on.
+    """
+
+    chain = "chain"
+    all = "all"
+
+
+class Ended(Enum):
+    """
+    Why the replay ended. complete: every edge asked for was dealt with. timeout and max-requests: that limit was reached, and the edges not reached are not-run. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.
+    """
+
+    complete = "complete"
+    timeout = "timeout"
+    max_requests = "max-requests"
+    cancelled = "cancelled"
+    error = "error"
+
+
+class ReplayGraph(BaseModel):
+    """
+    The graph that was replayed.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(
+        ...,
+        validation_alias="schemaVersion", serialization_alias="schemaVersion",
+        description="The layout version of the graph.json.",
+        ge=0,
+    )
+    start_url: str = Field(
+        ...,
+        validation_alias="startUrl", serialization_alias="startUrl",
+        description="The address the replay started from, with secret parameters replaced. It is the graph's own, or, with --origin, the graph's with its origin changed.",
+    )
+    states: int = Field(..., ge=0)
+    edges: int = Field(..., ge=0)
+
+
+class ReplayCounts(BaseModel):
+    """
+    How the steps came out. `replayable` is the steps that were asked for and that the walk had completed: the others are recorded-failed and are not counted against the replay.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    replayable: int = Field(..., ge=0)
+    reproduced: int = Field(..., ge=0)
+    diverged: int = Field(..., ge=0)
+    missing: int = Field(..., ge=0)
+    blocked: int = Field(..., ge=0)
+    not_run: int = Field(..., validation_alias="notRun", serialization_alias="notRun", ge=0)
+    recorded_failed: int = Field(..., validation_alias="recordedFailed", serialization_alias="recordedFailed", ge=0)
+    reproduced_per_mille: int | None = Field(
+        default=None,
+        validation_alias="reproducedPerMille", serialization_alias="reproducedPerMille",
+        description="reproduced out of replayable, in thousandths, rounded down. Absent when nothing was replayable.",
+        ge=0,
+        le=1000,
+    )
+
+
+class Action1(Enum):
+    click = "click"
+    type = "type"
+    press = "press"
+
+
+class Outcome(Enum):
+    """
+    reproduced: the page is the screen the graph says. diverged: the action was made, or failed, and the page is not that screen. missing: the component is not on the page, and nothing was done. blocked: the safety rules leave it alone (a replay is read-only unless --allow-writes), or there is no recorded text to type. not-run: it was not tried, because an earlier step of the chain broke, its screen could not be reopened, or the replay ended first. recorded-failed: the walk did not complete it, so there is nothing to compare with.
+    """
+
+    reproduced = "reproduced"
+    diverged = "diverged"
+    missing = "missing"
+    blocked = "blocked"
+    not_run = "not-run"
+    recorded_failed = "recorded-failed"
+
+
+class ReplayStep(BaseModel):
+    """
+    One edge, and what performing it again came to.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    edge: str = Field(..., description="The edge, as named in graph.json.")
+    state: str = Field(..., description="The screen the edge was made on.")
+    component: str
+    label: str
+    action: Action1
+    outcome: Outcome = Field(
+        ...,
+        description="reproduced: the page is the screen the graph says. diverged: the action was made, or failed, and the page is not that screen. missing: the component is not on the page, and nothing was done. blocked: the safety rules leave it alone (a replay is read-only unless --allow-writes), or there is no recorded text to type. not-run: it was not tried, because an earlier step of the chain broke, its screen could not be reopened, or the replay ended first. recorded-failed: the walk did not complete it, so there is nothing to compare with.",
+    )
+    expected: str | None = Field(
+        default=None,
+        description="The screen the edge led to in the walk. Absent for an edge that led nowhere.",
+    )
+    actual: str | None = Field(
+        default=None,
+        description="For reproduced, the same as expected. For diverged, the screen the page was, or `unknown` for a page the graph has no screen like. Absent when the action did not complete.",
+    )
+    note: str | None = Field(
+        default=None, description="Why, in a sentence, when there is something to say."
+    )
+
+
 class Timings(BaseModel):
     """
     Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.
@@ -1603,7 +1724,7 @@ class Event(BaseModel):
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     type: str = Field(
         ...,
-        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error. `traceqa explore` also writes progress (a plain line), explore.state.new, explore.action.start, explore.action.end, explore.policy.block, explore.replay and model.call; their `data` is described in the notes of backlog items EXP-6 and EXP-7 and in the module comment of `crates/traceqa-engine/src/explore/events.rs`.",
+        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error. `traceqa explore` also writes progress (a plain line), explore.state.new, explore.action.start, explore.action.end, explore.policy.block, explore.replay and model.call; their `data` is described in the notes of backlog items EXP-6 and EXP-7 and in the module comment of `crates/traceqa-engine/src/explore/events.rs`. `traceqa replay` writes progress, replay.step (one for each edge asked for) and replay.reopen; their `data` is described in the note of backlog item EXP-8 and in `crates/traceqa-engine/src/explore/replay_out.rs`.",
     )
     target: str | None = Field(
         default=None,
@@ -2308,6 +2429,31 @@ class VerifyTarget(BaseModel):
     issues: list[VerifyIssue]
 
 
+class ReplayFile(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(..., validation_alias="schemaVersion", serialization_alias="schemaVersion", ge=0)
+    graph: ReplayGraph
+    mode: Mode = Field(
+        ...,
+        description="chain: edges that follow one another from the start page, done in one session, and ended at the first that does not lead where it did. all: every edge of the graph, each from the screen it was made on.",
+    )
+    ended: Ended = Field(
+        ...,
+        description="Why the replay ended. complete: every edge asked for was dealt with. timeout and max-requests: that limit was reached, and the edges not reached are not-run. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.",
+    )
+    actions: int = Field(
+        ...,
+        description="How many actions were made, the ones that only reopened a screen included.",
+        ge=0,
+    )
+    totals: ReplayCounts
+    steps: list[ReplayStep] = Field(
+        ..., description="One entry for each edge asked for, in the order asked."
+    )
+
+
 class TargetSummary(BaseModel):
     """
     One browser at one viewport.
@@ -2751,7 +2897,7 @@ class RunManifest(BaseModel):
     )
     format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
-    feature: str = Field(..., description="Known values: extract.")
+    feature: str = Field(..., description="Known values: extract, explore, replay.")
     url: str
     status: RunStatus
     started_at: str = Field(
