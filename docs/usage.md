@@ -181,6 +181,7 @@ That covers `--allow-origin` too. The walker clicks on the site it explores: run
 | `--action-timeout SECONDS` | `10` | The most one action may take. Five in a row that use all of it end the walk. |
 | `--timeout SECONDS` | `600` | The most the whole walk may take. |
 | `--max-requests-per-origin N` | `2000` | Stop when the browser has sent this many requests to one origin. Not enforced with a driver that cannot count. |
+| `--page-read fast\|plain\|verify` | `fast` | How a page is carried out of the browser after each action. `fast` has the page write what it found as one piece of JSON text, which gives the same page many times faster on a big one (about 5 times on 2000 controls). `plain` is how it was before. `verify` reads every page both ways, uses the plain one and says at the end whether the fast one ever differed; it makes a walk slower and is for checking. Does not change `graph.json`. |
 | `--strategy bfs\|dfs` | `bfs` | Which screen to explore next. |
 | `--seed N` | `0` | Decides the text typed into fields. |
 | `--state-similarity SHARE` | `0.9` | How alike two readings must be to be the same screen (share of the same component ids). |
@@ -276,6 +277,7 @@ is tried once with the keyboard, as in the walk. Nothing is retried to make a re
 | `--action-timeout SECONDS` | `10` | The most one action may take. |
 | `--timeout SECONDS` | `600` | The most the whole replay may take. The edges not reached are `not-run`. |
 | `--max-requests-per-origin N` | `2000` | Stop when the browser has sent this many requests to one origin. |
+| `--page-read fast\|plain\|verify` | `fast` | As for `explore`. |
 | `--allow-writes`, `--allow-origin`, `--deny-name`, `--i-understand-this-interacts` | | As for `explore`. |
 | `--browser`, `--viewport`, `--storage-state`, `--out`, `--headed`, `--driver` | | As for `explore`. |
 | `--json` | off | Print `replay.json` only. |

@@ -20,7 +20,7 @@ use super::replay_doc::Doc;
 use super::runner::{watch_for_abort, write_file};
 use super::{Live, DEFAULT_LOAD_TIMEOUT_MS};
 use crate::driver::{DriverCommand, Drivers};
-use crate::extract::{Progress, Sink};
+use crate::extract::{PageRead, Progress, Sink};
 use crate::run::{save, Abort, EngineError, RUN_FOLDER_VERSION};
 use crate::url_safety::{check_navigable, redact, redact_text};
 
@@ -37,6 +37,8 @@ pub struct Request {
     pub storage_state: Option<StorageState>,
     pub out_dir: PathBuf,
     pub drivers: Vec<DriverCommand>,
+    /// How pages are carried out of the browser (see [`PageRead`]).
+    pub page_read: PageRead,
 }
 
 /// A replay that has its folder and has not started.
@@ -118,7 +120,8 @@ impl ReplayRun {
                     request.options.rules.driver_policy(),
                     cancel,
                     DEFAULT_LOAD_TIMEOUT_MS,
-                );
+                )
+                .with_page_read(request.page_read);
                 let replayed = replay(
                     &mut browser,
                     &request.doc,
@@ -127,6 +130,7 @@ impl ReplayRun {
                     cancel,
                     &mut |event| progress.emit(event.kind(), None, redact_text(&event.message()), event.data()),
                 );
+                super::tell_page_read_check(&browser, request.page_read, &progress);
                 browser.close();
                 replayed
             });

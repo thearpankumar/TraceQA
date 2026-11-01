@@ -779,6 +779,11 @@ class PageEvalParams(BaseModel):
         validation_alias="awaitPromise", serialization_alias="awaitPromise",
         description="The function may return a Promise: wait for it and give its resolved value. A rejected Promise is an eval_failed error for that frame. Only drivers whose capabilities say evalAsync accept it; others refuse it with eval_failed. timeoutMs bounds the wait. Default false.",
     )
+    via_json: bool | None = Field(
+        default=None,
+        validation_alias="viaJson", serialization_alias="viaJson",
+        description="Ask for the value as JSON text written inside the page and read back, instead of as an object the browser serialises itself. The value is the same; for a result of thousands of objects it arrives many times faster. Only for a function that returns plain JSON data (no undefined, NaN or Infinity). A driver that cannot do this, or whose page does not allow it, gives the value the usual way, so the caller never needs to know which was used. Default false.",
+    )
     timeout_ms: int | None = Field(default=None, validation_alias="timeoutMs", serialization_alias="timeoutMs", ge=0)
 
 

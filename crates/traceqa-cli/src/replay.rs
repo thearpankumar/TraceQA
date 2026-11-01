@@ -16,7 +16,7 @@ use traceqa_engine::explore::{
 };
 use traceqa_engine::policy::{check_start, is_local_origin, Rules};
 
-use crate::args::{parse_browser, parse_viewport, DriverArgs};
+use crate::args::{parse_browser, parse_viewport, DriverArgs, PageReadArg};
 use crate::interrupt;
 
 /// The types of event whose sentence is printed while the replay goes on.
@@ -72,6 +72,10 @@ pub struct ReplayArgs {
     /// The most the whole replay may take, in seconds.
     #[arg(long, value_name = "SECONDS", default_value_t = 600, value_parser = clap::value_parser!(u64).range(1..=86_400))]
     timeout: u64,
+    /// How a page is carried out of the browser after each action: `fast` (the default), `plain` (the older way), or
+    /// `verify` (both, with any difference reported).
+    #[arg(long, value_enum, default_value_t = PageReadArg::Fast)]
+    page_read: PageReadArg,
     /// Stop when the browser has sent this many requests to one origin.
     #[arg(long, value_name = "N", default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
     max_requests_per_origin: u64,
@@ -206,6 +210,7 @@ fn build_request(args: &ReplayArgs) -> Result<ReplayRequest, String> {
         storage_state,
         out_dir: PathBuf::from(&args.out),
         drivers: driver_commands(&args.drivers.drivers),
+        page_read: args.page_read.into(),
     })
 }
 

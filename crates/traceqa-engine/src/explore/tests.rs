@@ -3382,3 +3382,39 @@ fn a_control_the_browser_cannot_find_when_it_acts_is_missing_and_is_not_counted_
         "the try that found nothing made no action"
     );
 }
+
+#[test]
+fn the_page_read_check_tells_how_many_were_compared_and_what_differed() {
+    let none: [String; 0] = [];
+    let same = page_read_message(&ReadChecks {
+        checked: 419,
+        moving: 0,
+        differing: 0,
+        first: &none,
+    });
+    assert_eq!(
+        same,
+        "page read check: the fast way gave the same page as the plain way on every reading it could compare (419 compared)"
+    );
+    let moving = page_read_message(&ReadChecks {
+        checked: 10,
+        moving: 5,
+        differing: 0,
+        first: &none,
+    });
+    assert!(
+        moving.ends_with("(10 compared, and 5 could not be compared because the page was still changing)"),
+        "{moving}"
+    );
+    let first = ["the frames differ".to_string(), "the address differs".to_string()];
+    let different = page_read_message(&ReadChecks {
+        checked: 10,
+        moving: 0,
+        differing: 2,
+        first: &first,
+    });
+    assert_eq!(
+        different,
+        "page read check: 2 of 10 readings differed between the fast way and the plain way. First: the frames differ; the address differs"
+    );
+}

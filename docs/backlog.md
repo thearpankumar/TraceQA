@@ -563,6 +563,44 @@ survivors are equivalent (`replay_doc.rs` `>` vs `>=` on the version and `&&` vs
   least 5 times shorter with incremental extraction than with a full one (print both medians).
 - `--no-incremental` gives the same `graph.json` byte for byte on the buggy shop.
 
+**Status.** Built and verified on 1-2 Nov 2026 (branch `backlog/exp-1-10`). **The design was changed after a measurement, and the backlog text above is
+not what was built.** Read this before the acceptance lines.
+
+**What the measurement showed (release build, Chromium, `testbed/sites/long-page`, 2088 elements).** The collector takes about 24 ms in the page. A read through
+the driver took about 350-420 ms, because Playwright serialises the 1.1 MB result of 2088 nested objects. Grouping in Rust is about 10 ms (2%). So the cost was
+carrying the result out, not reading the page, and a partial read with a merge would have saved about 20 ms while risking the ids (a component id depends on the
+whole page: a list becomes a "template" at a count, an unnamed control is numbered among its siblings, a changing name is a property of the page).
+
+**What was built instead.** `page.eval` takes `viaJson: true` (optional, additive; `spec/driver-protocol.schema.json`, `spec/README.md`): the page writes the
+function's result as one JSON text and the driver reads it back, with the `JSON.stringify` it captured before the page's scripts ran. The value is the same. If
+that copy is missing, or the page gave plain objects a `toJSON`, the driver answers the usual way. The Playwright driver does it; the WebDriver driver ignores the
+field. The explorer and the replay read this way by default: `--page-read fast|plain|verify` (`fast` is the default, `plain` is how it was, `verify` reads every
+page both ways, uses the plain one and says at the end how many readings it could compare and whether any differed; a reading where the plain way differs from
+itself a moment later is counted as "page still changing" and not compared). The walker, the matching and the graph are unchanged. `traceqa extract` is
+unchanged. The driver also stopped asking for the scroll position on a page with no frames (one round trip less).
+
+**Acceptance, as measured.**
+- Same ids: `--page-read verify` on a 100-action read-only walk of the demo shop compared 419 readings, 0 differences, 5 not compared (page still changing); also
+  0 differences in Firefox and WebKit (30 actions), on all 9 pattern pages and 11 collector-case pages, on the `act`, `heal`, `findings`, `visual`, `axe`,
+  `stability` and `long-page` fixtures, and in a replay. (This is the item's "zero id-set differences", checked on the whole component list, not only ids.)
+- `--page-read plain` and `fast` write the same `graph.json` byte for byte (60 actions, port masked), and so does leaving the flag out.
+- Driver: the same value with and without `viaJson` for the collector on the shop (all frames), on a page of 2000 controls and under a page that replaces
+  `JSON.stringify` or adds `toJSON`, in all three browsers (`web-drivers/playwright-py/tests/test_via_json.py`, 15 tests).
+- **Speed, and where it falls short of the item.** `testbed/bench/read_speed.py`: the read after a disclosure opens, 2000 controls, Chromium, medians over 15-25
+  reads: plain 390-430 ms, fast 75-90 ms, **4.4 to 5.4 times shorter** over six runs (the item asks for 5; the margin is thin and a run can land under it). A whole
+  action in a walk is only about **1.4 times** shorter (about 1.98 s to 1.46 s per action), because the explorer acts, then waits 500 ms before it trusts a
+  reading (`PAUSE_MS`) and reads at least twice, and the driver settles too; none of that was touched, since it decides when the walk moves on (EXP-2).
+  Shortening it is the larger saving and is not done.
+- Whole suites: Rust 869 passed; `web-drivers/playwright-py/tests` 200 passed (11 min); `tests/test_page_read.py` 33 passed; `tests/test_replay.py`,
+  `tests/test_explore.py`, `tests/test_shop_demo.py` 84 passed (58 min); WebDriver tests 4 passed, 4 skipped (no chromedriver). ruff, pyright, format, clippy
+  (on the new code) and the protocol check are clean. Mutation testing of the new Rust (`PageRead`, the comparison, the counting, the message): 0 missed on logic;
+  what is left is `tell_page_read_check` and the `check` field of `read_live`, which only a real browser reaches and `tests/test_page_read.py` covers.
+
+**Not built (and why).** Incremental merging by changed regions, `--no-incremental` and `--verify-incremental` under those names: `--page-read plain` and `verify`
+are the same switches for the thing that was built. A lean read (leaving out fields the explorer does not use) would shrink the result further; not done, because
+`group` and the locators use some of them and the gain is small next to the settle time. Not verified: Linux, Windows, Safari/WebDriver, pages with many frames,
+a real outside site.
+
 **Size.** L
 
 ### EXP-10: Explorer acceptance on the buggy shop

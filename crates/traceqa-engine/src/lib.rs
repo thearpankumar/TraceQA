@@ -40,6 +40,7 @@ mod util;
 
 /// axe-core for `--axe`: where it is installed from and how a run finds it.
 pub use extract::axe;
+pub use extract::PageRead;
 pub use run::{driver_commands, Abort, EngineError, Execution, InFlight, Interrupt, Run};
 pub use url_policy::UrlPolicy;
 /// Refuses an address a run may not be started on. The MCP server asks before it accepts a call.

@@ -218,6 +218,7 @@ fn check(
             arg: Some(json!(TAGS)),
             all_frames: Some(session.capabilities.eval_all_frames),
             await_promise: Some(true),
+            via_json: None,
             timeout_ms: Some(job.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
         })
         .map_err(|error| error.to_string())?;

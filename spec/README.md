@@ -85,6 +85,14 @@ Limits on what a driver sends:
   and gives the resolved value. A rejection is that frame's `eval_failed`. Playwright always waits; the WebDriver driver
   uses `/execute/async` for it, because `/execute/sync` cannot wait. The engine needs this for `--axe` (axe-core is asynchronous).
 
+- **Value as text:** `viaJson: true` in `page.eval` asks for the value of the function as JSON text written inside the page
+  and read back, which carries a result of thousands of objects many times faster than the browser's own serialising
+  (the collector's result on a page of 2000 controls: about 350 ms against 50). The value is the same, and a driver that
+  cannot do it, or whose page does not allow it (the driver took its copy of `JSON.stringify` before the page's scripts,
+  and gives the usual answer if that is missing or the page gave plain objects a `toJSON`), answers the usual way, so the
+  caller never needs to know which was used. Only for a function that returns plain JSON data; ignored with `awaitPromise`.
+  The Playwright driver does it; the WebDriver driver ignores the field.
+
 - **Actions:** a driver whose capabilities list `actionKinds` (optional; absent or empty means none) accepts `page.act`:
   one `click`, `hover`, `type`, `select` or `press` on the element `target.selector` names, in `target.frameId`
   (default `main`; only a frame id the engine has already been given by a `page.eval`). A selector written inside shadow

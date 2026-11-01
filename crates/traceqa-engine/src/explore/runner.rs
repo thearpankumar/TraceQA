@@ -19,7 +19,7 @@ use traceqa_recorder::{new_run_id, now_rfc3339, write_manifest_in, RunWriter};
 use super::walk::{explore, Explored};
 use super::{Live, Options, Stop, DEFAULT_LOAD_TIMEOUT_MS};
 use crate::driver::{DriverCommand, Drivers};
-use crate::extract::{Progress, Sink};
+use crate::extract::{PageRead, Progress, Sink};
 use crate::run::{lock_before, save, Abort, EngineError, ABORT_LOCK_WAIT, ABORT_POLL, RUN_FOLDER_VERSION};
 use crate::url_safety::{check_navigable, redact, redact_text};
 
@@ -34,6 +34,8 @@ pub struct Request {
     pub storage_state: Option<StorageState>,
     pub out_dir: PathBuf,
     pub drivers: Vec<DriverCommand>,
+    /// How pages are carried out of the browser (see [`PageRead`]).
+    pub page_read: PageRead,
 }
 
 /// An exploration that has its folder and has not started.
@@ -111,10 +113,12 @@ impl ExploreRun {
                     request.options.rules.driver_policy(),
                     cancel,
                     DEFAULT_LOAD_TIMEOUT_MS,
-                );
+                )
+                .with_page_read(request.page_read);
                 let explored = explore(&mut browser, &request.options, cancel, &mut |event| {
                     progress.emit(event.kind(), None, redact_text(&event.message()), event.data());
                 });
+                super::tell_page_read_check(&browser, request.page_read, &progress);
                 browser.close();
                 explored
             });

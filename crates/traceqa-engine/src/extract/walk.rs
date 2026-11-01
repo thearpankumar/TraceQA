@@ -72,6 +72,7 @@ fn list_controls(
             arg: None,
             all_frames: Some(false),
             await_promise: None,
+            via_json: None,
             timeout_ms: Some(5_000),
         })
     });

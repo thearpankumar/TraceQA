@@ -420,7 +420,28 @@ PRISTINE_INIT_SCRIPT = (
     '    Object.defineProperty(window, "__traceqa_pristine__", '
     "{ value: offer, writable: false, enumerable: false, configurable: false });\n"
     "  } catch (e) { /* already defined, or this frame is not a page */ }\n"
+    "  try {\n"
+    "    var stringify = JSON.stringify;\n"
+    "    var asJson = function (value) {\n"
+    "      // A page that gave plain objects or arrays a toJSON would change what is written down.\n"
+    '      if ("toJSON" in {} || "toJSON" in []) return null;\n'
+    "      return stringify(value);\n"
+    "    };\n"
+    '    Object.defineProperty(window, "__traceqa_json__", '
+    "{ value: asJson, writable: false, enumerable: false, configurable: false });\n"
+    "  } catch (e) { /* already defined, or this frame is not a page */ }\n"
     "})();"
+)
+
+# Runs the caller's function in the page and has the page write its result as JSON text with the JSON.stringify
+# captured before the page's own scripts (the init script above). `null` means it could not be done safely: the
+# originals were not captured, or the page gave plain objects a toJSON.
+AS_JSON_WRAPPER = (
+    "(arg) => {\n"
+    "  var write = window.__traceqa_json__;\n"
+    '  if (typeof write !== "function") return null;\n'
+    "  return write((\n__SCRIPT__\n)(arg));\n"
+    "}"
 )
 
 
@@ -714,7 +735,8 @@ class PlaywrightDriver(BaseDriver[Session]):
         session = self._session(params.session_id)
         page = session.page
         frames = page.frames if params.all_frames else [page.main_frame]
-        scroll = page.evaluate("() => [window.scrollX, window.scrollY]")
+        # Only the frames below the top one are placed on the page with it, so a page without frames is not asked.
+        scroll: list[float] | None = None
         results = []
         for frame in frames:
             if frame.is_detached():
@@ -730,11 +752,11 @@ class PlaywrightDriver(BaseDriver[Session]):
                     box = None
                 if box:
                     # bounding_box is relative to the viewport. The spec wants page coordinates.
-                    info.box = models.Rect(
-                        x=box["x"] + scroll[0], y=box["y"] + scroll[1], w=box["width"], h=box["height"]
-                    )
+                    at = scroll if scroll is not None else page.evaluate("() => [window.scrollX, window.scrollY]")
+                    scroll = at
+                    info.box = models.Rect(x=box["x"] + at[0], y=box["y"] + at[1], w=box["width"], h=box["height"])
             try:
-                value = frame.evaluate(params.script, params.arg)
+                value = self._evaluate(frame, params)
                 results.append(models.FrameEvalResult(frame=info, value=value))
             except PlaywrightError as error:
                 if frame == page.main_frame:
@@ -744,6 +766,16 @@ class PlaywrightDriver(BaseDriver[Session]):
             results=results,
             requests_failed=models.RequestsFailed(count=session.failed_count, urls=list(session.failed_urls)),
         )
+
+    @staticmethod
+    def _evaluate(frame: Frame, params: models.PageEvalParams) -> Any:
+        """The value the caller's function returns in `frame`. With `via_json` the page writes it as text, which is
+        read back; if that cannot be done safely the usual way is used, so the value is the same either way."""
+        if params.via_json and not params.await_promise:
+            text = frame.evaluate(AS_JSON_WRAPPER.replace("__SCRIPT__", params.script), params.arg)
+            if isinstance(text, str):
+                return json.loads(text)
+        return frame.evaluate(params.script, params.arg)
 
     def page_scroll(self, params: models.PageScrollParams) -> models.PageScrollResult:
         page = self._session(params.session_id).page

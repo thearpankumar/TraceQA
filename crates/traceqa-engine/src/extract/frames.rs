@@ -31,7 +31,7 @@ pub(super) struct Reading {
 
 /// Runs the collector in the main page and every frame the driver can reach.
 pub(super) fn read_frames(driver: &mut Driver, session: &SessionOpenResult, job: &Job) -> Result<Reading, EngineError> {
-    read_frames_with(driver, session, job.cancel, job.include_hidden, job.timeout_ms)
+    read_frames_with(driver, session, job.cancel, job.include_hidden, job.timeout_ms, false)
 }
 
 /// As [`read_frames`], for a caller that has no [`Job`] (the explorer, which reads a page it is already on).
@@ -41,6 +41,7 @@ pub(super) fn read_frames_with(
     cancel: &AtomicBool,
     include_hidden: bool,
     timeout_ms: Option<u64>,
+    via_json: bool,
 ) -> Result<Reading, EngineError> {
     let evaluated = driver.until(cancel).eval(&PageEvalParams {
         session_id: session.session_id.clone(),
@@ -48,6 +49,7 @@ pub(super) fn read_frames_with(
         arg: Some(json!({ "includeHidden": include_hidden })),
         all_frames: Some(session.capabilities.eval_all_frames),
         await_promise: None,
+        via_json: via_json.then_some(true),
         timeout_ms: Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS)),
     })?;
 

@@ -25,7 +25,7 @@ mod tests;
 pub use coverage::{Coverage, Discovered, SkippedItem, StateCoverage, Totals};
 pub use events::WalkEvent;
 pub use graph::{Edge, Graph, Skipped, State, Status, Stop, GRAPH_VERSION};
-pub use live::{Live, DEFAULT_LOAD_TIMEOUT_MS};
+pub use live::{Live, ReadChecks, DEFAULT_LOAD_TIMEOUT_MS};
 pub use model::{Act, Acted, Browser, Effect, Hints, Refused, StepError, View, ViewComponent, ViewInstance};
 pub use replay::{chain_of, replay, shortest_way, Ended, Mode, Options as ReplayOptions, Outcome, Replayed, Step};
 pub use replay_doc::{ActionKind, Doc, DocEdge, DocError, DocState, MAX_GRAPH_BYTES};
@@ -40,8 +40,54 @@ pub use walk::{explore, Explored, Progress};
 
 use std::time::Duration;
 
+use serde_json::json;
+
+use crate::extract::{PageRead, Progress as RunProgress};
 use crate::policy::Rules;
 use crate::state::Similarity;
+use crate::url_safety::redact_text;
+
+/// What is told at the end of a run that read pages both ways to check the fast one.
+fn page_read_message(found: &ReadChecks<'_>) -> String {
+    let moving = if found.moving == 0 {
+        String::new()
+    } else {
+        format!(
+            ", and {} could not be compared because the page was still changing",
+            found.moving
+        )
+    };
+    if found.differing == 0 {
+        format!(
+            "page read check: the fast way gave the same page as the plain way on every reading it could compare ({} compared{moving})",
+            found.checked
+        )
+    } else {
+        format!(
+            "page read check: {} of {} readings differed between the fast way and the plain way{moving}. First: {}",
+            found.differing,
+            found.checked,
+            found.first.join("; ")
+        )
+    }
+}
+
+/// With [`PageRead::Verify`], says at the end whether the fast way of reading gave the same page as the plain one
+/// wherever the two could be compared. Nothing is said for the other ways.
+fn tell_page_read_check(browser: &Live<'_>, how: PageRead, progress: &RunProgress<'_, '_>) {
+    if how != PageRead::Verify {
+        return;
+    }
+    let found = browser.read_check();
+    let message = redact_text(&page_read_message(&found));
+    eprintln!("traceqa: {message}");
+    progress.emit(
+        "progress",
+        None,
+        message,
+        json!({ "pageReadChecked": found.checked, "pageReadMoving": found.moving, "pageReadDifferences": found.differing }),
+    );
+}
 
 /// The order in which the screens waiting to be explored are taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

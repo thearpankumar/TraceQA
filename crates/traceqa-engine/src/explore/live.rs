@@ -16,11 +16,26 @@ use traceqa_common::types::{
 use super::model::{Act, Acted, Browser, Effect, Hints, Refused, StepError, View, ViewComponent, ViewInstance};
 use super::settle::{settled, wait_for_route, Reader, MAX_READS, PAUSE_MS, ROUTE_WAIT_MS};
 use crate::driver::{DriverError, Drivers, ErrorKind, DEFAULT_TIMEOUT_MS};
-use crate::extract::read_live;
+use crate::extract::{read_live, PageRead, ReadCheck};
 use crate::policy::enforced;
 use crate::state::clean_url;
 use crate::url_safety::redact;
 use crate::EngineError;
+
+/// The most descriptions of differing readings that are kept.
+const MAX_DIFFERENCES_KEPT: usize = 5;
+
+/// What comparing the two ways of reading found (see [`Live::read_check`]).
+pub struct ReadChecks<'a> {
+    /// Readings on which the ways could be compared.
+    pub checked: u64,
+    /// Readings on which they could not, because the page was changing.
+    pub moving: u64,
+    /// Of the readings compared, those on which the ways gave different pages.
+    pub differing: u64,
+    /// A description of the first few differences.
+    pub first: &'a [String],
+}
 
 pub struct Live<'a> {
     drivers: &'a mut Drivers,
@@ -41,6 +56,14 @@ pub struct Live<'a> {
     /// The driver has reported counts at least once. A driver that cannot count sends none, and the budget on
     /// requests is then not enforced.
     counts_known: bool,
+    /// How a reading is carried out of the browser.
+    page_read: PageRead,
+    /// With [`PageRead::Verify`]: the readings compared, those that could not be because the page was changing, and
+    /// those on which the ways differed, with a description of the first few.
+    checked: u64,
+    moving: u64,
+    differing: u64,
+    differences: Vec<String>,
 }
 
 impl<'a> Live<'a> {
@@ -66,6 +89,28 @@ impl<'a> Live<'a> {
             current: BTreeMap::new(),
             url: None,
             counts_known: false,
+            page_read: PageRead::default(),
+            checked: 0,
+            moving: 0,
+            differing: 0,
+            differences: Vec::new(),
+        }
+    }
+
+    /// Reads pages the way given. [`PageRead::Fast`] is what `new` starts with.
+    #[must_use]
+    pub fn with_page_read(mut self, how: PageRead) -> Self {
+        self.page_read = how;
+        self
+    }
+
+    /// With [`PageRead::Verify`]: what comparing the two ways found over the whole run.
+    pub fn read_check(&self) -> ReadChecks<'_> {
+        ReadChecks {
+            checked: self.checked,
+            moving: self.moving,
+            differing: self.differing,
+            first: &self.differences,
         }
     }
 
@@ -86,6 +131,22 @@ impl<'a> Live<'a> {
             if !driver.is_lost() {
                 if let Err(error) = driver.close_session(&session.session_id) {
                     eprintln!("traceqa: could not close the {} session: {error}", self.target.browser);
+                }
+            }
+        }
+    }
+
+    /// Counts what comparing the two ways of reading found on one reading.
+    fn note_check(&mut self, check: &ReadCheck) {
+        match check {
+            ReadCheck::Unchecked => {}
+            ReadCheck::Same => self.checked += 1,
+            ReadCheck::Moving => self.moving += 1,
+            ReadCheck::Different(difference) => {
+                self.checked += 1;
+                self.differing += 1;
+                if self.differences.len() < MAX_DIFFERENCES_KEPT {
+                    self.differences.push(difference.clone());
                 }
             }
         }
@@ -160,7 +221,7 @@ impl<'a> Live<'a> {
             .drivers
             .for_browser(&self.target.browser)
             .map_err(|e| step_error(&e.into()))?;
-        let reading = match read_live(driver, &session, self.cancel, Some(timeout_ms)) {
+        let reading = match read_live(driver, &session, self.cancel, Some(timeout_ms), self.page_read) {
             Ok(reading) => reading,
             Err(error) => {
                 if let EngineError::Driver(driver_error) = &error {
@@ -172,6 +233,7 @@ impl<'a> Live<'a> {
                 return Err(step_error(&error));
             }
         };
+        self.note_check(&reading.check);
         self.url = Some(reading.url.clone());
         Ok(view_of(reading.url, reading.frame_ids, &reading.components))
     }
@@ -512,5 +574,88 @@ mod tests {
         assert_eq!(dialog_in(""), None);
         // A name that merely starts with the word is not a dialog.
         assert_eq!(dialog_in("main > dialogue \"x\""), None);
+    }
+}
+
+#[cfg(test)]
+mod check_tests {
+    use std::sync::atomic::AtomicBool;
+
+    use traceqa_common::types::{BrowserTarget, Viewport};
+
+    use super::{Live, MAX_DIFFERENCES_KEPT};
+    use crate::driver::Drivers;
+    use crate::extract::{PageRead, ReadCheck};
+    use crate::policy::Rules;
+
+    fn with_live(test: impl FnOnce(&mut Live<'_>)) {
+        let mut drivers = Drivers::new(Vec::new());
+        let cancel = AtomicBool::new(false);
+        let policy = Rules::new("http://127.0.0.1:1/", false, &[]).unwrap().driver_policy();
+        let mut live = Live::new(
+            &mut drivers,
+            BrowserTarget::parse("chromium").unwrap(),
+            Viewport::parse("1280x800").unwrap(),
+            None,
+            policy,
+            &cancel,
+            1000,
+        );
+        test(&mut live);
+    }
+
+    #[test]
+    fn a_new_browser_reads_the_fast_way_and_has_checked_nothing() {
+        with_live(|live| {
+            assert_eq!(live.page_read, PageRead::Fast);
+            let found = live.read_check();
+            assert_eq!((found.checked, found.moving, found.differing), (0, 0, 0));
+            assert!(found.first.is_empty());
+        });
+    }
+
+    #[test]
+    fn the_way_of_reading_can_be_chosen() {
+        let mut drivers = Drivers::new(Vec::new());
+        let cancel = AtomicBool::new(false);
+        let policy = Rules::new("http://127.0.0.1:1/", false, &[]).unwrap().driver_policy();
+        let live = Live::new(
+            &mut drivers,
+            BrowserTarget::parse("chromium").unwrap(),
+            Viewport::parse("1280x800").unwrap(),
+            None,
+            policy,
+            &cancel,
+            1000,
+        )
+        .with_page_read(PageRead::Verify);
+        assert_eq!(live.page_read, PageRead::Verify);
+    }
+
+    #[test]
+    fn each_kind_of_check_is_counted_where_it_belongs_and_a_difference_counts_as_compared() {
+        with_live(|live| {
+            live.note_check(&ReadCheck::Unchecked);
+            live.note_check(&ReadCheck::Same);
+            live.note_check(&ReadCheck::Same);
+            live.note_check(&ReadCheck::Moving);
+            live.note_check(&ReadCheck::Different("the address differs".into()));
+            let found = live.read_check();
+            assert_eq!((found.checked, found.moving, found.differing), (3, 1, 1));
+            assert_eq!(found.first, ["the address differs"]);
+        });
+    }
+
+    #[test]
+    fn only_the_first_few_differences_are_kept_but_all_are_counted() {
+        with_live(|live| {
+            for n in 0..MAX_DIFFERENCES_KEPT + 3 {
+                live.note_check(&ReadCheck::Different(format!("difference {n}")));
+            }
+            let found = live.read_check();
+            assert_eq!(found.differing as usize, MAX_DIFFERENCES_KEPT + 3);
+            assert_eq!(found.first.len(), MAX_DIFFERENCES_KEPT);
+            assert_eq!(found.first[0], "difference 0");
+        });
     }
 }

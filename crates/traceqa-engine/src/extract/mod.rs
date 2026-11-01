@@ -152,6 +152,46 @@ pub(crate) struct LiveReading {
     /// The ids of the frames that were read, the main one included.
     pub frame_ids: Vec<String>,
     pub components: Vec<Component>,
+    /// With [`PageRead::Verify`]: what comparing the two ways found. [`ReadCheck::Unchecked`] for the other ways.
+    pub check: ReadCheck,
+}
+
+/// What [`PageRead::Verify`] found on one reading.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ReadCheck {
+    /// The reading was not compared.
+    #[default]
+    Unchecked,
+    /// The fast way gave the page the plain way gave.
+    Same,
+    /// The page changed while it was being read, so the two ways did not see the same page and nothing can be said.
+    Moving,
+    /// The page stood still and the ways gave different pages. Says how.
+    Different(String),
+}
+
+/// How the explorer gets what the collector found out of the browser. The collector's work in the page is a small
+/// share of a read of a big page; most of the time goes into carrying its result out. Having the page write the
+/// result as one piece of JSON text (see `viaJson` in the driver protocol) carries the same value many times faster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageRead {
+    /// As JSON text. The default.
+    #[default]
+    Fast,
+    /// As the browser's own serialised object, which is what every read was until now.
+    Plain,
+    /// Both ways on every read, the plain one used, and any difference told. For checking the fast way.
+    Verify,
+}
+
+impl PageRead {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Plain => "plain",
+            Self::Verify => "verify",
+        }
+    }
 }
 
 /// Reads the page the session is on, once: no loading, no scrolling and no waiting to see which names change. The
@@ -161,18 +201,92 @@ pub(crate) fn read_live(
     session: &SessionOpenResult,
     cancel: &AtomicBool,
     timeout_ms: Option<u64>,
+    how: PageRead,
 ) -> Result<LiveReading, EngineError> {
-    let Reading {
-        elements,
-        url,
-        frame_ids,
-        ..
-    } = read_frames_with(driver, session, cancel, false, timeout_ms)?;
-    Ok(LiveReading {
-        url,
-        frame_ids,
-        components: group(elements),
-    })
+    let read = |driver: &mut Driver, via_json: bool| -> Result<LiveReading, EngineError> {
+        let Reading {
+            elements,
+            url,
+            frame_ids,
+            ..
+        } = read_frames_with(driver, session, cancel, false, timeout_ms, via_json)?;
+        Ok(LiveReading {
+            url,
+            frame_ids,
+            components: group(elements),
+            check: ReadCheck::Unchecked,
+        })
+    };
+    match how {
+        PageRead::Fast => read(driver, true),
+        PageRead::Plain => read(driver, false),
+        PageRead::Verify => {
+            // The plain way twice, round the fast one: a page that is still changing (a route being fetched, a list
+            // loading) gives different readings whatever the way, and then the ways cannot be compared.
+            let plain = read(driver, false)?;
+            let fast = read(driver, true)?;
+            let again = read(driver, false)?;
+            let check = if differences(&plain, &again).is_some() {
+                ReadCheck::Moving
+            } else {
+                differences(&plain, &fast).map_or(ReadCheck::Same, ReadCheck::Different)
+            };
+            Ok(LiveReading { check, ..plain })
+        }
+    }
+}
+
+/// What two readings of the same page are compared on: the address, the frames, and every component as it is written.
+struct Snapshot {
+    url: String,
+    frame_ids: Vec<String>,
+    components: Vec<serde_json::Value>,
+}
+
+impl Snapshot {
+    fn of(reading: &LiveReading) -> Self {
+        Self {
+            url: reading.url.clone(),
+            frame_ids: reading.frame_ids.clone(),
+            components: reading
+                .components
+                .iter()
+                .map(|component| serde_json::to_value(component).unwrap_or_default())
+                .collect(),
+        }
+    }
+
+    fn ids(&self) -> std::collections::BTreeSet<&str> {
+        self.components
+            .iter()
+            .filter_map(|component| component["id"].as_str())
+            .collect()
+    }
+}
+
+/// How two readings of the same page differ, if they do.
+fn differences(plain: &LiveReading, fast: &LiveReading) -> Option<String> {
+    describe_difference(&Snapshot::of(plain), &Snapshot::of(fast))
+}
+
+fn describe_difference(plain: &Snapshot, fast: &Snapshot) -> Option<String> {
+    if plain.url != fast.url {
+        return Some("the address differs".to_string());
+    }
+    if plain.frame_ids != fast.frame_ids {
+        return Some("the frames differ".to_string());
+    }
+    if plain.components == fast.components {
+        return None;
+    }
+    let (plain_ids, fast_ids) = (plain.ids(), fast.ids());
+    let only_plain: Vec<_> = plain_ids.difference(&fast_ids).take(3).collect();
+    let only_fast: Vec<_> = fast_ids.difference(&plain_ids).take(3).collect();
+    Some(format!(
+        "components differ ({} in the plain reading, {} in the fast one; ids only in the plain {only_plain:?}, only in the fast {only_fast:?})",
+        plain.components.len(),
+        fast.components.len()
+    ))
 }
 
 fn check_cancelled(job: &Job) -> Result<(), EngineError> {
@@ -496,6 +610,106 @@ fn announce_warnings(progress: Progress, job: &Job, warnings: &[Warning]) {
             Some(job.name),
             item.message.clone(),
             json!({ "code": item.code }),
+        );
+    }
+}
+
+#[cfg(test)]
+mod page_read_tests {
+    use serde_json::json;
+
+    use traceqa_common::types::Component;
+
+    use super::{describe_difference, differences, LiveReading, PageRead, Snapshot};
+
+    fn snapshot(url: &str, frames: &[&str], components: &[serde_json::Value]) -> Snapshot {
+        Snapshot {
+            url: url.to_string(),
+            frame_ids: frames.iter().map(ToString::to_string).collect(),
+            components: components.to_vec(),
+        }
+    }
+
+    #[test]
+    fn two_readings_that_are_the_same_have_no_difference() {
+        let c = [json!({ "id": "a", "name": "A" }), json!({ "id": "b", "name": "B" })];
+        let one = snapshot("http://x/", &["main"], &c);
+        let two = snapshot("http://x/", &["main"], &c);
+        assert_eq!(describe_difference(&one, &two), None);
+    }
+
+    #[test]
+    fn an_address_a_frame_or_a_component_that_differs_is_told_with_the_ids() {
+        let base = [json!({ "id": "a", "name": "A" }), json!({ "id": "b", "name": "B" })];
+        let one = snapshot("http://x/", &["main"], &base);
+        assert_eq!(
+            describe_difference(&one, &snapshot("http://x/y", &["main"], &base)).as_deref(),
+            Some("the address differs")
+        );
+        assert_eq!(
+            describe_difference(&one, &snapshot("http://x/", &["main", "f1"], &base)).as_deref(),
+            Some("the frames differ")
+        );
+        let other = [json!({ "id": "a", "name": "A" }), json!({ "id": "c", "name": "C" })];
+        let said = describe_difference(&one, &snapshot("http://x/", &["main"], &other)).unwrap();
+        assert!(
+            said.contains("only in the plain [\"b\"]") && said.contains("only in the fast [\"c\"]"),
+            "{said}"
+        );
+        // The same ids with a different field is a difference too, with no id to name.
+        let changed = [json!({ "id": "a", "name": "A" }), json!({ "id": "b", "name": "Other" })];
+        let said = describe_difference(&one, &snapshot("http://x/", &["main"], &changed)).unwrap();
+        assert!(
+            said.starts_with("components differ (2 in the plain reading, 2 in the fast one"),
+            "{said}"
+        );
+    }
+
+    fn component(id: &str, name: &str) -> Component {
+        serde_json::from_value(json!({
+            "id": id, "role": "button", "name": name, "nameIsTemplate": false, "confidence": "high",
+            "signals": ["native"], "path": "",
+            "instances": [{
+                "key": format!("{id}:0"), "name": name, "tag": "button", "attrs": {}, "selectors": ["#x"],
+                "box": { "x": 0, "y": 0, "w": 1, "h": 1 },
+                "state": { "visible": true, "enabled": true, "inViewport": true },
+                "frameId": "main", "inShadowDom": false
+            }]
+        }))
+        .expect("a component")
+    }
+
+    fn reading(url: &str, components: Vec<Component>) -> LiveReading {
+        LiveReading {
+            url: url.to_string(),
+            frame_ids: vec!["main".to_string()],
+            components,
+            check: super::ReadCheck::Unchecked,
+        }
+    }
+
+    #[test]
+    fn two_real_readings_are_compared_on_every_field_of_every_component() {
+        let a = reading("http://x/", vec![component("a", "A"), component("b", "B")]);
+        let same = reading("http://x/", vec![component("a", "A"), component("b", "B")]);
+        assert_eq!(differences(&a, &same), None);
+        let moved = reading("http://x/other", vec![component("a", "A"), component("b", "B")]);
+        assert_eq!(differences(&a, &moved).as_deref(), Some("the address differs"));
+        let other_id = reading("http://x/", vec![component("a", "A"), component("c", "B")]);
+        assert!(differences(&a, &other_id)
+            .unwrap()
+            .contains("only in the plain [\"b\"]"));
+        // The same ids, one name different: only the fields can tell.
+        let renamed = reading("http://x/", vec![component("a", "A"), component("b", "Renamed")]);
+        assert!(differences(&a, &renamed).unwrap().starts_with("components differ"));
+    }
+
+    #[test]
+    fn the_ways_of_reading_have_names_and_fast_is_the_default() {
+        assert_eq!(PageRead::default(), PageRead::Fast);
+        assert_eq!(
+            [PageRead::Fast, PageRead::Plain, PageRead::Verify].map(PageRead::as_str),
+            ["fast", "plain", "verify"]
         );
     }
 }
