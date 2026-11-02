@@ -114,7 +114,7 @@ def test_a_download_is_reported_and_not_a_navigation(page: Page) -> None:
     result = page.click("download")
     assert result.downloads == [
         models.ActDownload(url=page.site.base + "files/receipt.txt", suggested_name="receipt.txt")
-    ]
+    ], result
     assert result.navigated is None
     assert result.url == page.site.base
 
@@ -337,7 +337,7 @@ def test_a_new_tab_to_another_origin_is_reported_with_the_address_it_was_stopped
 def test_a_new_tab_that_becomes_a_download_is_not_reported_with_an_empty_address(page: Page) -> None:
     result = page.click("download-blank")
     assert all(address for address in result.popups or [])
-    assert [d.suggested_name for d in result.downloads or []] == ["receipt.txt"]
+    assert [d.suggested_name for d in result.downloads or []] == ["receipt.txt"], result
 
 
 # ---- the safety policy -------------------------------------------------------------------------
