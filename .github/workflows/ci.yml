@@ -99,15 +99,11 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync --locked
-      # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
-      # - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        # with:
-          # node-version: 24
-          # cache: npm
-          # cache-dependency-path: sdks/typescript/package-lock.json
-      # - name: Install the TypeScript tools
-        # working-directory: sdks/typescript
-        # run: npm ci
+      # pyright is a Node program. Without Node on the runner it downloads one with nodeenv, which fails when the
+      # newest Node version name has a suffix (ValueError: invalid literal for int() with base 10: '0-alpha').
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
 
       - name: Every package has the same version
         run: python3 scripts/check_version.py
