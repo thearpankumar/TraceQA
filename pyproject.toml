@@ -40,6 +40,7 @@ traceqa-driver-webdriver = { workspace = true }
 # testpaths = ["page-script", "web-drivers", "sdks", "tests"]  # the SDKs (sdks/) were removed
 testpaths = ["page-script", "web-drivers", "tests"]
 addopts = "--import-mode=importlib"
+markers = ["slow: real-browser explorer walks that take minutes; CI runs them in their own job"]
 
 [tool.ruff]
 line-length = 120

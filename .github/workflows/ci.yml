@@ -179,16 +179,21 @@ jobs:
   # the installer and the bench. Built once, in debug, which keeps Rust's overflow and sanity
   # checks on. Release binaries are built by the release workflow when a version is tagged.
   test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.os }}, ${{ matrix.part }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(needs.changes.outputs.runner) || matrix.os }}
-    timeout-minutes: 45
+    # The slow part is the real-browser explorer walks (tests marked slow); the fast part is everything else.
+    timeout-minutes: ${{ matrix.part == 'slow' && 150 || 90 }}
     strategy:
       # One system failing should not hide what the others do.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        part: [fast]
+        include:
+          - os: ubuntu-latest
+            part: slow
     env:
       # The SDK tests, the end-to-end tests and the bench use this binary.
       TRACEQA_BIN: ${{ github.workspace }}/target/debug/traceqa${{ matrix.os == 'windows-latest' && '.exe' || '' }}
@@ -244,8 +249,10 @@ jobs:
 
       # Rust: every crate's tests, then the binaries, which reuse what the tests compiled.
       - name: Rust tests
+        if: matrix.part == 'fast'
         run: cargo test --locked
       - name: Rust lint (clippy)
+        if: matrix.part == 'fast'
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Build the binaries
         run: cargo build --locked
@@ -285,7 +292,7 @@ jobs:
           echo "chromedriver: $found"
           echo "TRACEQA_CHROMEDRIVER=$found" >> "$GITHUB_ENV"
       - name: Python tests
-        run: uv run pytest
+        run: uv run pytest -m "${{ matrix.part == 'slow' && 'slow' || 'not slow' }}"
 
       # The TypeScript SDK (sdks/typescript) was removed; kept commented out.
       # # TypeScript: the SDK against the binary, real browsers and the transcripts.

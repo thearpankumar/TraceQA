@@ -27,6 +27,9 @@ from typing import Any
 
 import pytest
 
+# Real-browser walks: minutes each. CI runs them in their own job (pytest -m slow); the rest runs with -m "not slow".
+pytestmark = pytest.mark.slow
+
 ROOT = Path(__file__).resolve().parents[1]
 SITES = ROOT / "testbed" / "sites"
 BINARY = Path(
