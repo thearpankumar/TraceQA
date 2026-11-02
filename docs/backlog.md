@@ -622,6 +622,26 @@ shop's server logs nothing today, so it gains the request-method log that EXP-5 
 
 **Carried forward.** From EXP-5: the buggy shop's `serve.py` records the method of every request (`testbed/sites/act/serve.py` already does, and is the model), and the test asserts that a read-only walk produced only GET and HEAD, in all three browsers. "Clear cart" must appear as skipped, not touched.
 
+**Status.** Built and verified on 2 Nov 2026 (branch `backlog/exp-1-10`): `tests/test_acceptance.py`, run with `make explorer-acceptance` (about 50 minutes for the three
+browsers; `-s` prints the figures, and `acceptance-<browser>.json` is written to the test's temporary folder or to `$TRACEQA_ACCEPTANCE_REPORT`). The shop's server already
+logged the method of every request (done in an earlier item), so nothing in the shop changed. Nothing in the engine changed either. 24 tests, all passed, none skipped, none retried.
+
+**Measured** (demo shop `/shop/`, read-only, `--seed 1 --max-actions 150`, a fresh server for each walk; **the same in Chromium, Firefox and WebKit**):
+the walk **completed by itself after 106 actions** (91 edges, 23 screens; so the 150-action budget was not the limit), 327 s in Chromium, 465 s in Firefox, 360 s in WebKit.
+259 requests, all GET. Coverage: 165 components discovered, 91 touched, 61 skipped, 13 untouched.
+- **80% touched: met on `touched / allowed`, 87.5%.** **`touched / discovered` is 55.1%, so the 80% of the item as written ("of the discoverable components") is not met,
+  and cannot be in read-only mode on this shop:** 61 of the 165 are buttons and fields a read-only walk may not press or type into. The test asserts the 80% on the
+  share of what was allowed and records the other figure. (EXP-7 measured 68.9% on another seed and setting; both are the same kind of number. The shop was not tuned.)
+- Zero non-GET and non-HEAD requests, in the walks and in the replay.
+- Two walks with the same seed on fresh servers write the same `graph.json` byte for byte (port masked).
+- Budgets: screens, actions, depth, requests to the origin and the clock are at or below their limits.
+- "Clear cart", "Pay now" and "Delete account" are in `skipped` with reason `destructive`, no edge acts on them, and no destructive address was asked for.
+- Replay of the recorded edges on a fresh server: **89 of 89 reproduced (100%)**, GET and HEAD only.
+- Ctrl-C at action 40 (read as: when `e39` is told): exit 130, a folder that validates, marked `cancelled`, graph and coverage agree, nothing left running, in all three browsers.
+
+**Not verified.** Linux, Windows, Safari/WebDriver, a real model, a real outside site. The shop has no popup, download or alert, so they are not in this end-to-end walk
+(they are tested on `testbed/sites/act`); an extra unlinked shop page for them was considered and not built.
+
 **Size.** S (on top of EXP-1 to EXP-9)
 
 ## 2. Interaction oracles (F7)
