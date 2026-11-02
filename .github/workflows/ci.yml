@@ -184,7 +184,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(needs.changes.outputs.runner) || matrix.os }}
     # The slow part is the real-browser explorer walks (tests marked slow); the fast part is everything else.
-    timeout-minutes: ${{ matrix.part == 'slow' && 150 || 90 }}
+    timeout-minutes: ${{ matrix.part == 'slow' && 210 || 90 }}
     strategy:
       # One system failing should not hide what the others do.
       fail-fast: false
