@@ -125,10 +125,6 @@ class Recorder:
     downloads: list[models.ActDownload] = field(default_factory=list)
     # Responses to navigations (in any tab) that are downloads. Each is followed by a `download` event, which can be late.
     attachments: int = 0
-    # Navigations that were requested and have neither an answer nor a failure yet. A download that the browser does not
-    # announce with a response (WebKit on Linux) is only seen this way: the request is made and nothing follows but a
-    # `download` event.
-    unanswered: set[Request] = field(default_factory=set)
     console_errors: list[models.ActConsoleError] = field(default_factory=list)
     failed: list[models.ActFailedRequest] = field(default_factory=list)
     failed_seen: set[Request] = field(default_factory=set)
@@ -148,8 +144,6 @@ class Watch:
         page.on("response", self._response)
         context.on("page", self._popup)
         context.on("response", self._count_attachment)
-        context.on("request", self._note_navigation)
-        context.on("requestfailed", self._navigation_ended)
 
     def _dialog(self, dialog: Dialog) -> None:
         # A dialog is always dismissed, as Playwright does when nobody listens.
@@ -238,24 +232,10 @@ class Watch:
         if response.status >= 400:
             self._note_failed(request, status=response.status, failure=None)
 
-    def _note_navigation(self, request: Request) -> None:
-        recorder = self.recorder
-        if recorder is None:
-            return
-        with contextlib.suppress(PlaywrightError):
-            if request.is_navigation_request():
-                recorder.unanswered.add(request)
-
-    def _navigation_ended(self, request: Request) -> None:
-        recorder = self.recorder
-        if recorder is not None:
-            recorder.unanswered.discard(request)
-
     def _count_attachment(self, response: Response) -> None:
         recorder = self.recorder
         if recorder is None:
             return
-        recorder.unanswered.discard(response.request)
         with contextlib.suppress(PlaywrightError):
             attachment = response.headers.get("content-disposition", "").lower().startswith("attachment")
             if attachment and response.request.is_navigation_request():
@@ -270,16 +250,9 @@ class Watch:
 
 
 def _await_downloads(page: Page, recorder: Recorder) -> None:
-    """Gives the `download` event of every response that was a download the time to arrive.
-
-    It also waits when a navigation was requested and never answered, because that is how a download looks in a browser
-    that does not report its response. The wait is over when a download arrives or after DOWNLOAD_WAIT_S."""
+    """Gives the `download` event of every response that was a download the time to arrive."""
     deadline = time.monotonic() + DOWNLOAD_WAIT_S
-
-    def waiting() -> bool:
-        return len(recorder.downloads) < recorder.attachments or (bool(recorder.unanswered) and not recorder.downloads)
-
-    while waiting() and time.monotonic() < deadline:
+    while len(recorder.downloads) < recorder.attachments and time.monotonic() < deadline:
         with contextlib.suppress(PlaywrightError):
             page.wait_for_timeout(DOWNLOAD_POLL_MS)
 

@@ -137,7 +137,13 @@ Changes to earlier items that this needed: the driver counts requests per origin
 itself reports for `page.act` no longer makes the engine replace the driver (it took the session with it); `extract` got `read_live`, a single reading of the page
 a session is on; `state::Screens::matches`. And for PR #41 (EXP-4): the driver waits up to 3 s for the `download` event once a download response has arrived and
 listens for downloads on new tabs, and one test that makes eight actions in a row has 5 s per action. Those two fixes are a best reading of the CI logs (WebKit on
-Linux and Windows); they could not be reproduced here.
+Linux and Windows); they could not be reproduced here. The first did not help on Linux: in CI (PR #50) WebKit on Linux ends the click on the file's address and sends no
+`download` event, so `downloads` stays empty (Chromium, Firefox and Windows, and WebKit on macOS, report it). A wait for unanswered navigations was tried and removed. The cause is Playwright's WebKit build
+for Linux, not TraceQA: reproduced in a Playwright 1.64.1 Ubuntu container (Linux on ARM; CI is x86) with a plain script, no route and no TraceQA code, where clicking a
+`Content-Disposition: attachment` link gives no `download` event even after 12 s (a link with the `download` attribute, an `application/octet-stream` file and a `target=_blank`
+link gave none either, and in the last three cases no response event for the file). Two tests (`test_a_download_is_reported_and_not_a_navigation`,
+`test_a_new_tab_that_becomes_a_download_…`) are marked as a known failure on WebKit on Linux only, and pass if Playwright fixes it. A download on that browser shows as a
+page that moved to the file, which the explorer treats as a new screen.
 Tests: 63 unit tests in the explore module, 20 real-browser tests in Chromium, Firefox and WebKit (a read-only walk of the fixture; the same bytes twice; each
 budget; writes; the refusals; Ctrl-C twice), mutation testing with nothing missed in `policy.rs`, `graph.rs`, `data.rs`, `settle.rs` and `state.rs`, and two
 survivors in `walk.rs` (`depth < max_depth` when a page-wide link is marked done: a page-wide link is on a shallow screen first, so no test short of a contrived
