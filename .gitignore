@@ -74,6 +74,9 @@ blob-report/
 *.coverprofile
 coverage.*
 !coverage.go
+# The explorer's coverage module and schema (backlog EXP-7) are source, not the output of a coverage tool.
+!crates/traceqa-engine/src/explore/coverage.rs
+!spec/coverage.schema.json
 profile.cov
 go.work
 go.work.sum

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Noisy page</title></head>
+<body>
+  <h1>Noisy page</h1>
+  <!-- A page that changes all the time by itself, as one with a ticker and an animation does: the text of the clock
+       changes and the spinner is restyled many times a second, whatever anyone does. -->
+  <p>Time: <span id="clock">0</span></p>
+  <div id="spinner" style="width: 20px; height: 20px; background: gray">spin</div>
+  <button id="n-dead">Dead</button>
+  <button id="n-open" onclick="var p = document.createElement('div'); p.id = 'panel'; p.textContent = 'opened'; document.body.appendChild(p)">Open</button>
+  <button id="n-class" onclick="document.getElementById('box').classList.toggle('on')">Toggle class</button>
+  <button id="n-hide" onclick="document.getElementById('box').style.display = 'none'">Hide with style</button>
+  <button id="n-fade" onclick="document.getElementById('box').style.opacity = '0.2'">Fade with style</button>
+  <div id="box" class="off">box</div>
+  <div id="parallax" style="width: 10px; height: 10px; background: black"></div>
+  <!-- Far below the fold. Reaching it scrolls the page, and this page answers every scroll by changing a class and an
+       attribute, as one with an image sequence or scroll-linked effects does. -->
+  <div style="height: 3000px">&nbsp;</div>
+  <button id="far-dead">Far away, does nothing</button>
+  <button id="far-open" onclick="var p = document.createElement('div'); p.id = 'far-panel'; p.textContent = 'opened'; document.body.appendChild(p)">Far away, opens</button>
+  <script>
+    window.addEventListener('scroll', function () {
+      document.documentElement.classList.toggle('scrolled');
+      document.body.setAttribute('data-y', String(window.scrollY));
+    });
+  </script>
+  <script>
+    // Parallax: the page restyles an element on any mouse move, as a page that follows the cursor does.
+    document.addEventListener('mousemove', function (e) {
+      document.getElementById('parallax').style.transform = 'translate(' + (e.clientX % 17) + 'px, ' + (e.clientY % 13) + 'px)';
+    });
+    var n = 0;
+    setInterval(function () {
+      n++;
+      document.getElementById('clock').textContent = String(n);
+      document.getElementById('spinner').style.transform = 'rotate(' + (n * 7) + 'deg)';
+    }, 30);
+  </script>
+</body>
+</html>

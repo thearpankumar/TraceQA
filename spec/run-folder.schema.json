@@ -12,7 +12,7 @@
       "properties": {
         "formatVersion": { "type": "integer", "minimum": 0 },
         "runId": { "type": "string" },
-        "feature": { "description": "Known values: extract.", "type": "string" },
+        "feature": { "description": "Known values: extract, explore, replay.", "type": "string" },
         "url": { "type": "string" },
         "status": { "$ref": "common.schema.json#/$defs/RunStatus" },
         "startedAt": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
@@ -62,7 +62,7 @@
         "ts": { "description": "RFC 3339 timestamp in UTC.", "type": "string" },
         "runId": { "type": "string" },
         "type": {
-          "description": "Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error.",
+          "description": "Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error. `traceqa explore` also writes progress (a plain line), explore.state.new, explore.action.start, explore.action.end, explore.policy.block, explore.replay and model.call; their `data` is described in the notes of backlog items EXP-6 and EXP-7 and in the module comment of `crates/traceqa-engine/src/explore/events.rs`. `traceqa replay` writes progress, replay.step (one for each edge asked for) and replay.reopen; their `data` is described in the note of backlog item EXP-8 and in `crates/traceqa-engine/src/explore/replay_out.rs`.",
           "type": "string"
         },
         "target": { "description": "The target folder name this event belongs to, when it belongs to one.", "type": "string" },

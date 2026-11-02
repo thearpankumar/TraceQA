@@ -61,6 +61,23 @@ that tree edit distance is too slow, which is why it supports configurable compa
 
 **Size.** M
 
+**Status (branch `backlog/exp-1-screen-identity`).** Built as a module with no command and no output file:
+`crates/traceqa-engine/src/state.rs` (`Screens::observe`, `clean_url`, `chrome_ids`, `Similarity`). A look is taken for the screen it
+is most alike (the earliest of equals) among those of the same cleaned address and dialog, or becomes the next `s<n>`; the
+share is kept in thousandths and compared with whole numbers; a screen keeps the ids of its first look; frames are kept and not
+compared; an address that cannot be read, is not http or https, or is over 4096 characters, and a look with no component, are
+errors. Tests: 29 unit tests, and 7 on ids the real engine found (`tests/data/screen_ids.json`, made by
+`scripts/capture_screen_ids.py` from the Buggy Shop and `testbed/sites/patterns`; the test says when the fingerprint version
+has moved on), mutation testing on `state.rs` with nothing missed. Measured on the real ids: the shop read twice is one screen
+(35 of 35); the shop with and without its two hidden controls is one (35 of 37, 94.6%); the shop on a phone is another screen at
+90% and the same at 85% (31 of 36, 86.1%); no two pattern pages share an id.
+Not done: the shop has no cookie banner, so "banner open or closed" is shown with its two hidden controls instead, and "the
+product list and the cart are two screens" needs the walk to reach both (EXP-2, EXP-10); `--state-similarity` and `graph.json` do
+not exist yet. Known limits, from the module notes: small pages (one change is a big share), addresses with an id in them
+(`/product/123`), and lists that grow after the look. Tried on the real pages of two sites (read-only extractions, 9 and 8 looks): the home page read twice was one screen and every other page its own,
+with overlaps between different pages of 10% to 44%, so the 90% line was never close. A same-address case with a large shared header is covered by
+unit tests only; no real site gave one.
+
 ### EXP-2: Walk algorithm and budgets
 
 **Why.** A walker without limits never finishes on a large site, and one that picks actions in random order
@@ -93,7 +110,61 @@ cannot be debugged.
   command exits with code 130.
 - Candidate order: a test that shuffles the extraction order of a fixture page gives the same action sequence.
 
+**Carried forward.** From EXP-5 (safety), which built the rules but nothing that calls them: the `explore` command must (1) refuse to start on an address that `policy::is_local_origin` says is not local, with exit code 2 and no browser opened, unless `--i-understand-this-interacts` is given; (2) take `--allow-writes` (which requires `--allow-origin`), `--allow-origin` and `--deny-name`; (3) open its session with `policy::Rules::driver_policy()` and close the session when `policy::enforced` says the driver did not say the same policy back; (4) ask `policy::Rules::decide` before every action and never act on a `Skip`. Nothing else calls `page.act` yet.
+From EXP-1 (screens), which built the rule and nothing that supplies its inputs: the walk must (5) take `--state-similarity` (`state::Similarity::new`, default `DEFAULT_SIMILARITY`); (6) give `state::Screens` the page-wide ids (`state::chrome_ids`, from the ids shown on at least 80% of the pages read). `traceqa map` lists only the ids on every page today, so it needs that share added first, or the walk reads a few pages itself; (7) build a `Look` from each extraction (the ids of the components with a visible instance, the open dialog's id, the frame ids) and treat an `Err` from `observe` as a failed read, not as a screen; (8) measure the known limits on real sites (address ids, small pages, growing lists) and tune the share with those numbers.
+
 **Size.** L
+
+**Status (branch `backlog/exp-1-10`).** Built: `traceqa explore` (`crates/traceqa-cli/src/explore.rs`) and the walk in `crates/traceqa-engine/src/explore/`
+(`walk.rs` the worklist, order, budgets and safety; `live.rs` the real browser; `settle.rs` waiting for a page to stop appearing; `runner.rs` the run folder and
+the abort watcher; `graph.rs` the file; `data.rs` the typed values; `model.rs` the `Browser` trait the walk is written against), `spec/graph.schema.json`
+(`GraphFile`), the demo shop `testbed/sites/buggy-shop` (`/shop/`; EXP-2 first used a small site of its own, `testbed/sites/explore`, which was merged into the shop on 28 Oct 2026) and `tests/test_explore.py`. The run folder holds `run.json` (feature `explore`, no targets),
+`events.jsonl` (progress lines) and `graph.json`. All six budgets exist and are written into `graph.json` with the reason the walk stopped; Ctrl-C leaves
+a valid folder (`cancelled`, exit 130) and so does a second one.
+Of the carried-forward lines: (1) to (4) are done (a non-local address, or an `--allow-origin` that is not local, exits 2 with no driver started and no folder;
+`policy::Rules::with_origins` and `policy::check_start` are new for it; `live.rs` closes the session when the driver does not say the policy back, which no test
+has tried with a driver that fails to; `decide` runs before every action and again on the element that is acted on). (5) `--state-similarity` is taken. (6) The ids that are on every page come from a short read
+before the walk (up to `--chrome-pages` links the rules allow, default 6, opened and never clicked), not from `traceqa map`; those controls are tried once, on
+the first screen that has them. (7) A `Look` is built from every reading; a dialog has no component id, so a screen with one open is named by the dialog's role
+and name, taken from the path of the controls inside it; an `Err` from `observe` is a failed read (status `failed`), not a screen. (8) Measured on four real
+sites, see below.
+Choices made where the item was silent: `action-timeout` as a stop reason means five actions in a row that used up all their time; a click that fails or is
+blocked is tried once with a key (`press`, Enter or Space) and, if that fails too, the click's own failure is the one reported; a screen that is opened
+again is tried twice before it is given up, and counts as the screen when it is alike by the rule, not when it is the closest of all; typing happens only
+with `--allow-writes`; selects are left alone (`no-options`) because their options are not known; the page is read after every load and action until two
+readings agree to 90% (at most 6 readings); every action starts from a new browser session.
+Changes to earlier items that this needed: the driver counts requests per origin (`requestCounts` in `page.goto` and `page.act`); a `timeout` that the driver
+itself reports for `page.act` no longer makes the engine replace the driver (it took the session with it); `extract` got `read_live`, a single reading of the page
+a session is on; `state::Screens::matches`. And for PR #41 (EXP-4): the driver waits up to 3 s for the `download` event once a download response has arrived and
+listens for downloads on new tabs, and one test that makes eight actions in a row has 5 s per action. Those two fixes are a best reading of the CI logs (WebKit on
+Linux and Windows); they could not be reproduced here. The first did not help on Linux: in CI (PR #50) WebKit on Linux ends the click on the file's address and sends no
+`download` event, so `downloads` stays empty (Chromium, Firefox and Windows, and WebKit on macOS, report it). A wait for unanswered navigations was tried and removed. The cause is Playwright's WebKit build
+for Linux, not TraceQA: reproduced in a Playwright 1.64.1 Ubuntu container (Linux on ARM; CI is x86) with a plain script, no route and no TraceQA code, where clicking a
+`Content-Disposition: attachment` link gives no `download` event even after 12 s (a link with the `download` attribute, an `application/octet-stream` file and a `target=_blank`
+link gave none either, and in the last three cases no response event for the file). Two tests (`test_a_download_is_reported_and_not_a_navigation`,
+`test_a_new_tab_that_becomes_a_download_…`) are marked as a known failure on WebKit on Linux only, and pass if Playwright fixes it. A download on that browser shows as a
+page that moved to the file, which the explorer treats as a new screen.
+Tests: 63 unit tests in the explore module, 20 real-browser tests in Chromium, Firefox and WebKit (a read-only walk of the fixture; the same bytes twice; each
+budget; writes; the refusals; Ctrl-C twice), mutation testing with nothing missed in `policy.rs`, `graph.rs`, `data.rs`, `settle.rs` and `state.rs`, and two
+survivors in `walk.rs` (`depth < max_depth` when a page-wide link is marked done: a page-wide link is on a shallow screen first, so no test short of a contrived
+site tells them apart).
+Tried read-only on four of the five sites in the notes (the fifth, `avqentra.in`, refused secure connections while this was done, for `extract` too). Two
+sites: 8 screens in 10 to 13 actions and the same bytes on a second run. The two single-page portfolio sites: 14 actions each, the same bytes on one and nearly
+the same on the other. The trial found and fixed four things: the walk acted in a session that a failed page read had closed; a screen was given up after one
+reload that looked different; a page was read before it had finished appearing (the same fresh load showed 23, 26 or 32 controls); and the question asked of a
+reload ("is it this screen by the rule") was "is this the closest screen".
+Not done, and limits: `traceqa explore` cannot run in Safari (the WebDriver driver lists no actions) and does not enforce `--max-requests-per-origin` with a
+driver that cannot count; Escape is not used as a fallback; clickable elements with no role (`generic`) are not acted on; `coverage.json` and the named
+`explore.*` events are EXP-7; after a second Ctrl-C that cannot wait for the browser the folder is closed but `graph.json` may be missing. Measured: a new session per action means nothing is
+cached, so one action cost about 25 to 37 requests on `t3aiworks.com` and took about 18 s on the two 3D portfolio sites (the page read and the settle are most
+of it). Not verified: Linux, Windows, Rust 1.88, and the CI fix above.
+For other items (not fixed here): EXP-1, on a single-page site whose sections fade in on scroll the same address shows as several screens (30 to 57 controls,
+53% to 88% alike), so no share would merge them; a small page whose controls change on every load is split (`t3aiworks.com` home 0.875), and a control whose
+name changes has a new id on every visit, so it is `missing` when the walk comes back for it (the settle of `extract` that marks such names is not in the live read);
+EXP-3, a screen that is only reached by a click or a scroll (a dialog, an open disclosure, a scrolled page) is listed in `unreachable` after the walk leaves it,
+and a walk of a site that is mostly such screens ends early and says `complete`; EXP-9, every action reads the whole page twice and waits for it to settle;
+EXP-10, the buggy shop has no cart page and its only open-and-close control is the mobile menu, and read-only mode skips its buttons, so the 80% target needs a
+look; EXP-6, a select needs its options, and the typed values are a fixed generator.
 
 ### EXP-3: Reset between branches
 
@@ -156,6 +227,23 @@ action did: whether the page navigated, whether a popup, dialog or download appe
   difference.
 - `uv run scripts/gen_python_protocol.py` and `npm run gen` leave no diff after the change is committed.
 
+**Status (branch `backlog/explorer-page-act-and-safety`).** Built for the Playwright driver and the engine's `Driver::act`:
+the schema (all new fields optional, five examples), the five actions, dialogs, popups, downloads, console and failed-request
+reports, `domChanged` (shadow roots included) and `settle`, `actionKinds` and `eventKinds` in `session.open`, and the tests in
+`web-drivers/playwright-py/tests/test_act.py` against `testbed/sites/act` in Chromium, Firefox and WebKit. The WebDriver driver
+lists no actions and no events and still answers `page.act` with `unsupported`; clicking in Safari is not built (optional, and only needed if the explorer must run in Safari).
+Tried read-only on three real sites (a Next.js portfolio with a 3D hero, a company site, a learning app; 40, 26 and 28 controls). It found three
+bugs, all fixed with tests: scroll-linked effects were credited to the click, a stopped new tab was reported as an error page, and a blocked
+same-tab link reported a change. It also showed `blocked_by_policy` doing its job: clicking "Start Learning" tries to `POST /api/auth/guest` on the live
+backend, which read-only mode stopped. Limits seen: a click is also a first gesture, so a page that starts music or shows a banner on the first click
+reports it on whatever action comes first; a control in a scroll-driven panel that is hidden on a fresh page times out, though extraction (which
+leaves the panel on its last state) listed it.
+Not done: the engine never calls `page.act` (no safety policy yet, EXP-5); `driver.log` is not used for actions; transcripts were
+not re-recorded because the client protocol did not change; `npm run gen` no longer exists (the TypeScript SDK was removed).
+Rust readers cannot tell an absent list from an empty one (the generated types use an empty `Vec`), so a reader relies on
+`Capabilities.eventKinds` and not on an absent field. Firefox does not report a failed cross-origin `fetch` as a failed request
+(it reports an uncaught error), so the failed-request test uses a same-origin request the server drops.
+
 **Size.** L
 
 ### EXP-5: Safety policy and read-only mode (A10)
@@ -194,6 +282,23 @@ and are translated.
 
 **Size.** M
 
+**Status (branch `backlog/explorer-page-act-and-safety`).** Built: layer 1 and the layers that belong to the driver, in
+`web-drivers/playwright-py/src/traceqa_driver_playwright/safety.py`, and the deny-list and address rules (layers 3 and 5) as
+functions in `crates/traceqa-engine/src/policy.rs`. `session.open` takes an `ActPolicy` and says it back; `page.act` is
+refused on a session without one (fail closed); in read-only mode (the default) the browser aborts every request that is
+not GET or HEAD and no WebSocket is ever connected, and a navigation of the top-level page to another origin is aborted
+before it is made. The deny-list is in English, Spanish, French, German, Hindi and Arabic and has not been reviewed by
+native speakers. Tests: `web-drivers/playwright-py/tests/test_act.py` in Chromium, Firefox and WebKit against
+`testbed/sites/act` (whose server records every request), and unit tests in `policy.rs`.
+Measured limits (details in `spec/README.md`): a redirect to another origin cannot be stopped, because the browser follows
+it without asking Playwright, so that request is made (a GET in read-only mode) and the driver then notices, reports it and
+goes back; Playwright's `service_workers="block"` does not stop registration in any of the three browsers, so pages are not
+given `navigator.serviceWorker` instead, which does not cover a dedicated worker the page starts; a GET with a side effect
+is stopped only by the name and address lists. Writing a blocked request to `events.jsonl` waits for the explorer.
+Not done: the `explore` command, so the refusal to start on a non-local origin exists only as `policy::is_local_origin`
+and the flags `--allow-writes`, `--allow-origin`, `--deny-name` and `--i-understand-this-interacts` do not exist yet;
+`page.act` still has no caller in the engine; layer 4 (dialogs, downloads, popups) is done in the driver by EXP-4.
+
 ### EXP-6: Language model boundary (A7)
 
 **Why.** An explorer whose every step depends on a model is slow, costs money and cannot be replayed. The model
@@ -222,6 +327,53 @@ is useful for two things only, and must stay outside the engine core.
 
 **Size.** M
 
+**Built (EXP-6, 28 Oct 2026).** `explore/values.rs` (the `ValueSource` trait, `Values`, the guard around a call, `ModelCall`, `Recorded`), the new crate
+`crates/traceqa-models` (`mock` only), and `--model NAME`, `--max-model-calls` (default 50) and `--model-timeout` (default 20 s) on `traceqa explore`.
+Without `--model` nothing changes except that a search box now gets one of six words by seed (`data.rs`) and not the fixed word `test`.
+How it works: the walk asks `Values` for the text of a field only when it is about to type (the safety rules have let the field through and
+`--allow-writes` is on). With a model, the source is asked first, on its own thread; the walk waits in steps of 100 ms, so Ctrl-C and the wall-clock budget end
+the wait whatever the source is doing. A call has its own time limit; the run has a cap on calls; three calls in a row without a usable answer switch the
+source off for the rest of the run; the same kind of field (role, label, type, placeholder, autocomplete) is asked once per run. An answer that is empty, over
+200 characters, has a control character or a line break, or does not fit the field's `type` (`email`, `number`, `tel`, `url`) is thrown away, and the
+generator types instead. Fields that hold secrets (type `password`, autocomplete `cc-*` or `*password*`, labels such as card number, CVV, SSN) are never sent.
+What is sent is the role, the label and the `type`, placeholder and autocomplete hints, cut to 200 characters with addresses redacted (as driver errors are) and
+without the component id. An answer is only text for the field it was asked for: it cannot choose an action, an address or a component, and the safety policy
+(EXP-5) decides every action as before. Every call is written to `events.jsonl` as a `model.call` event (`data`: source, key, request, outcome, answer, note,
+millis), with outcomes `used`, `rejected`, `failed`, `timed-out`, `stopped`, `over-cap`. `Recorded::from_events` reads those back as a source, so a replay uses the
+recorded text and makes no call.
+Tests: 18 unit tests in `explore/tests.rs` against an in-memory site and a counting source (the answer is typed, nothing is asked read-only, the cap, a cap of
+zero, a source that always fails, one that panics, long and odd answers, answers that do not fit the field type, secrets, redaction, one question per kind of field,
+Ctrl-C in a call that sleeps 60 s ends the walk in under 2 s, a call that is too slow, the wall-clock budget, a replay that asks no model, the same bytes), 3 in
+`traceqa-models`, `crates/traceqa-engine/tests/no_network_dependencies.rs` (runs `cargo tree -p traceqa-engine` and fails on an HTTP client, a TLS library, an
+async runtime or `traceqa-models`), and 9 real-browser tests in `tests/test_explore.py` on the fixture page `/form`, which reports what was typed to the server.
+
+**Not done, and limits (read before building the real connections).**
+- **No real model is connected yet.** `--model mock` sends nothing anywhere; it exists so that everything around a model is tested. The next step is to add real
+  sources in `traceqa-models`: one for any endpoint that speaks the common chat format (GLM from Z.ai works this way; the address must be configurable so that a
+  customer can point it at their own gateway), and one for Amazon Bedrock, which has its own format and sign-in. Keys come from the environment, never from
+  arguments, and never go into a file. A source that sends text out of this machine must need a second flag, like `--i-understand-this-interacts` does for a site that
+  is not local (a model on localhost does not need it). Whether the Jev judge of the sourcing project can be a source is not decided: its interface was not looked at.
+  The judge of the oracles (ORA-9) uses the same boundary and is its own item.
+- **A call that is given up on leaves its thread behind.** The walk stops waiting (Ctrl-C, the call's time limit or the wall clock), but a thread cannot be killed, so
+  the call goes on in the background until it ends by itself and its answer goes nowhere. For a command that exits when the run ends this costs nothing (checked:
+  Ctrl-C with a call that sleeps 60 s ends in under 3 s). If the engine is ever run as a long-lived service, many runs would collect one waiting thread per stuck
+  call. The fix then is a source that can be cancelled (an HTTP client with its own timeout) and/or a bounded pool for the calls. The comment on `ask` in
+  `values.rs` says the same.
+- **What is sent is only redacted for web addresses.** `redact_text` strips query strings from addresses (a `?token=...`) and nothing else. A label
+  that holds a name, an email address or a customer reference is sent as it is, up to 200 characters. Fields that hold secrets (passwords, card numbers, CVV, SSN)
+  are never sent, but that is a list of words and types, not a promise about every label. Before a real model is connected: decide what else to remove (email
+  addresses, long digit runs), say in the first message of a run with `--model` exactly what is sent and where, and keep the second flag for addresses that are not
+  local. The mock sends nothing, so none of this applies yet.
+- **Field limits are only partly known.** The page script copies `type`, `placeholder`, `autocomplete` and `name`, and the state has `required`, but not `maxlength` or
+  `pattern`; those need a change to `COPIED_ATTRS` in `page-script/page-script.js`, which changes every `components.json` and the fingerprint golden files, so it was left alone.
+  An answer is cut off by length (200) and checked against `type`, not against `maxlength` or `pattern`.
+- **`model.call` events are written when the walk ends**, from what the walk returned, and not one by one while it runs. After a normal end or the first Ctrl-C they are all
+  there; after a second Ctrl-C that kills the run only the progress lines (`model mock for "...": used`) are. They go to `events.jsonl` with type `model.call`, which the
+  schema allows (`type` is an open string); its list of known values in `spec/run-folder.schema.json` was not extended.
+- **Replay needs EXP-8.** `Recorded` and its test exist; the command that replays a run with it does not.
+- A `select` is still left alone (`no-options`): its options are not known to the walker. The model could choose among them once they are.
+- Not verified: a real model of any kind; Linux, Windows, Rust 1.88.
+
 ### EXP-7: Outputs and coverage
 
 **Why.** The graph and the coverage figure are the product. They have to be files with a schema, so that other
@@ -249,6 +401,98 @@ tools and the CI gate can read them.
   read-only action can open; it is listed in `coverage.json` as `discovered`.
 - `events.jsonl` has one `explore.action.end` per edge in `graph.json`.
 
+**Carried forward.** From EXP-5: `coverage.json` lists a skipped component with the reason `policy::Skip::reason()` gives (`destructive`, `blocked` or `read-only`), and a request the driver stopped (`failedRequests` entry with the failure `blocked_by_policy`) is written to `events.jsonl`.
+
+**Size.** M
+
+**Built (EXP-7, 28 Oct 2026).** `explore/coverage.rs` (the report, worked out at the end from the same data as the graph), `explore/events.rs` (`WalkEvent`: what the walk
+tells its listener), `spec/coverage.schema.json` (`CoverageFile`, registered in `spec/README.md`, and the Python protocol files regenerated), and `coverage.json`
+written next to `graph.json` (aside and renamed, after a cancel or an error too). The walk's callback now gets typed events and not plain lines, so `events.jsonl` has
+`explore.state.new` (also for the start page), `explore.action.start`, `explore.action.end`, `explore.policy.block` (for each component the rules left alone, and for each
+request the browser refused: `Effect.refused`, from `failedRequests` with the failure `blocked_by_policy`), `explore.replay` (for each attempt, a failed one too, with the actions it
+cost: the replays add up to `actions` minus the edges, a rule every walk of the test suite checks) and `model.call`, **as the walk goes**
+(this also fixes the EXP-6 limit that `model.call` was only written at the end). The terminal prints the sentences of the state, end, replay and model events, the same
+lines as before, and one coverage line at the end. `graph.json` is unchanged except for the description of `actions` (it counts replayed actions, which EXP-3 made true).
+Decisions where the item was open:
+- **The edge keeps its flat fields** (`navigated`, `popups`, `dialogs`, `downloads`) and gets no nested `result`: they are the essentials of what an action did, and moving
+  them would break the file for nothing. There are no oracle findings yet (ORA); when there are, they are an added field.
+- **"Discovered" is defined** (see the schema): a component with an action for its role and at least one visible instance in the screen's first reading. Hidden ones are not
+  discovered. A component on every page is counted on the first screen that shows it, so totals are sums with nothing counted twice. Each discovered component is exactly one of
+  touched (an edge whose status is not `missing`, a timeout or a failure included), skipped (with a reason, `disabled` added to the rules' and the walker's), or untouched.
+- **Two shares, not one.** `touchedPerMille` is touched / discovered, as the item says. `touchedOfAllowedPerMille` is touched / (discovered - skipped), added because a read-only
+  walk may not press buttons, so on a page that has them the first share cannot reach 100% by design. `graph.json` and the events are unaffected.
+- `explore.action.start` has no end only for the last action of a walk that did not finish (Ctrl-C or the clock, a lost browser, or `max-states`, where the action that would have
+  found one screen too many is not kept). An edge whose component was gone (`missing`) has an end and no start, because no action was made.
+- **The `traceqa codegen` hand-off is not built.** Code generation needs a locator for each component, and the explorer does not save the components of each screen. EXP-8 (replay)
+  needs the same data, so the two should share one design: save a `components.json` per screen, then let `codegen` take a path through the graph.
+- The `.gitignore` had `coverage.*` (a Go template line for the output of coverage tools), which hid `coverage.rs` and `coverage.schema.json` from git. Two exceptions were added
+  for those two paths. `runs/` is still ignored as a whole.
+**Measured on the demo shop** (the new `/shop/` section of `testbed/sites/buggy-shop`; read-only, Chromium, up to 150 actions, 28 Oct 2026): complete after 67
+actions (40 edges and 27 replay actions, two of the attempts failed), 15 screens, only GET requests (152). Coverage: 58 components discovered, 40 touched, 12 skipped (the read-only buttons and fields, and
+"Delete account", "Clear cart" and "Pay now" as destructive), 6 untouched, all on the one screen that could not be reopened (the once-only offer dialog, as designed).
+**`touched / discovered` is 68.9%, not the 80% the item asks for;** `touched / allowed` is 87.0%. The item's 80% on the old buggy shop could not be tried: its home page is one
+screen with no cart, and it was left alone because other tests read it. The 80% in the item is met only in the sense of the second figure, and only on this shop, which was built
+with that in mind; no shop was tuned to reach a number.
+**Not done, and limits.**
+- 40% of the actions on the demo (27 of 67) were replays: a page with tabs and dialogs is many screens at one address (EXP-1 splits it by dialog and by tab, so Home, Home with Help
+  open, Home on the Details tab, and both together are four screens), and each one is reached again by replay. A page that has many such states would spend a large share of
+  `--max-actions` on getting back. EXP-9 (not re-reading the whole page) and a smarter way back (Escape to close a dialog) are where that gets cheaper.
+- `explore.action.start` and `explore.policy.block` are not printed on the terminal (they are in `events.jsonl`); a second Ctrl-C that kills the run can still leave `graph.json` and
+  `coverage.json` missing, as before, but the events written up to then are there.
+- **A real site gives different answers on two runs of the same code.** `https://www.t3aiworks.com`, read-only, Chromium, `--max-actions 30`, 28 Oct 2026, two runs with the replay
+  and matching code unchanged between them: the first reopened 6 of 6 screens by replay and finished its 30 actions with 0 unreachable; the second failed all 7 replay attempts (3
+  screens unreachable) and ended on the 540 s `timeout` at 25 edges, because each action takes about 12 s on that site, the first screen took 54 s to appear (six header pages are
+  read first), and each failed replay attempt cost 14 to 54 s. What differs is whether the page, after a click on an in-page link ("About Us", "Talent Solutions"), looks 90% like the
+  screen it was recorded as: the site is one long page whose sections fade in on scroll, so which components are visible depends on timing (the EXP-1 limit already noted). The files
+  were right both times (`coverage.json` and `graph.json` validate, one `explore.action.end` per edge, the replays add up to the actions that are not edges); what degraded is how
+  much of the site the walk reached. Next steps if this matters: check a replayed screen by its address and its dialog and not by the component share, or give replay a time cap of its
+  own so that a failing screen cannot use the clock, or tell the caller which screens were given up in the terminal summary (it does: "Could not be opened again").
+- **`https://ui.shadcn.com` (public docs site, Next.js, read-only, Chromium, 30 actions, 28 Oct 2026) showed two problems, both fixed the same day (see "Fixed after the real-site runs").**
+  The first screen appeared after 290 s and an action took about 30 s, so the walk ended on the 540 s `timeout` with 18 actions and 4 screens; and 11 header links were each clicked and
+  reported as no change, with the address still `/`.
+- Not verified: Linux, Windows, a real model.
+
+**Fixed after the real-site runs (28 Oct 2026).**
+- **A link in a single-page app was credited with the wrong screen.** Reproduced first on a local app (`/slowspa` of the first explore fixture, now `/shop/app` of the shop: links are anchors, a click is taken over, the
+  route arrives 2.5 s later and then `pushState` changes the address). The walk read the page at once after the click, so it was still the old page; every click was credited with the
+  screen the click before it led to, and one route was never found. The instant version of the same app (`/spa`) was always handled correctly. Fix (`Live::act`): after a click on a link
+  that should end on another address (`expects_new_address`: an http(s) page that is not the one the page is on; a place in the same page, a mail link or a script is not), and when the
+  address has not changed, the walk reads the page again until the address does, for at most 8 s (`settle::ROUTE_WAIT_MS`, never more than the action's own time), and then settles the
+  page. Whatever moved the page, an address that differs now counts as a change (`effect.changed`), which `arrived` uses to know whether the browser is still where it was. A link that
+  never changes the address costs the 8 s once. `navigated` still means a page load, so a route change of a single-page app has `navigated: false` and a new screen.
+- **Time.** `settle::SETTLE_BUDGET_MS` (12 s): the wait for a page to stop changing is cut off when it has used that, after two readings at least, where a page that never stops (an
+  animation) took six readings of seconds each. The pages read before the walk to find what is on every page (the header, the footer) may use a fifth of `--timeout`
+  (`CHROME_TIME_DIVISOR`), and replays together a quarter (`REPLAY_TIME_DIVISOR`); when a share is used up a screen that its address does not bring back is given up with the reason "the
+  time set aside for replays is used up". Both are shares of `--timeout`, so a walk given more time gets more.
+- Tests: `settle.rs` (4: the budget, waiting for an address, giving up at the limit, cancel), `live.rs` (3: which links are expected to change the address), `explore/tests.rs` (2: the
+  limits on the header pages and on replays), and real browsers (`tests/test_explore.py`: both apps, every click credited with the right page). Not yet re-run on the real sites that showed
+  the problems; see the results below if they were. The real-browser tests were later merged into the file `tests/test_explore.py` that runs on the shop (see the next note).
+
+**One test site, and the cleanup (28 Oct 2026).**
+- **The explorer's tests use one site, the demo shop (`/shop/` of `testbed/sites/buggy-shop`).** Until now there were two: the shop and a small site of the first explorer tests
+  (`testbed/sites/explore`). Everything that site had is now in the shop: a banner that changes on every load (`server.rotate`, off by default), twelve disabled buttons, a "More"
+  disclosure, a link an overlay covers, a link to another site and a mail link, a link to a missing page, a "Continue" form button and a note box, a 12-page chain
+  (`/shop/chain/1..12.html`, for the depth and screen limits), pages that never answer (`/shop/hang/N`, `server.hang_seconds`), leaf pages, and five fields on the search page. The
+  chain and the hanging pages are not linked from the shop, so an ordinary walk does not meet them; a test starts a walk on them. The old site and its single-page-app copy were
+  deleted, and `tests/test_explore.py` and `tests/test_explore_shop.py` became one file, `tests/test_explore.py`, that runs on the shop. Moved, not weakened: each old assertion is
+  in the new file with the addresses and labels of the shop. Changed on purpose: the model tests start on the search page with `--max-depth 1`, so that the walk types into the five
+  fields there and no others; walks of the whole shop get `--timeout 1800`, so that a slow machine ends them by their own limits and not by the clock.
+- **Dead code and long functions.** The `pub` items of the explorer that only tests used, and had no other user, were removed or made private to the module (`Values`, `Stopped`,
+  `FAILURES_BEFORE_OFF`, `COVERAGE_VERSION`; `Recorded::len`, `is_empty` and `from_file`). `Recorded` itself stays, exported and with no caller, on purpose: the EXP-6 test of "a
+  replay asks no model" needs it and the command that replays a run (EXP-8) is its first user. `Field` no longer has the component's id (the walk passes it apart, so what a model
+  is sent cannot hold it). Split: the model call (`Values::value_for` and four small functions), a step that did not give a page (`Walker::failed`), the wait after a click
+  (`Live::after_click`), the results of a run (`write_results`), and the options of the command (`similarity_of`, `budgets_of`, `model_of`). One helper for "the element of this
+  component that a person could act on" replaces four copies. Checked by a snapshot of the graph, coverage and every event of eight in-memory walks (dialogs, writes, a model,
+  budgets, both strategies) taken before and after: byte for byte the same. The snapshot test was temporary and is not in the tree.
+
+**Tests (EXP-7 and the demo shop).** In the engine: 5 unit tests of the coverage report and 12 of events and coverage in `explore/tests.rs`, and every walk of that file (more than a
+hundred) now checks the rules that hold for any walk: one `explore.action.end` for each edge, one `explore.state.new` for each screen, the replays add up to the actions that are not
+edges, and the coverage parts make up the whole with totals that are the sums. In Python: `tests/test_shop_demo.py` (17, the shop and its server, no browser) and
+`tests/test_explore.py` (the real-browser tests, which were split over two files until they were merged), and
+every real walk in `tests/test_explore.py` now also validates `coverage.json` and checks the events. The first run of the demo test found a real gap, fixed in the same change:
+a replay that fails spent actions and was not told, so the events did not add up to the graph. Whole suite on 28 Oct 2026: Rust 793 passed; Python 1554 passed, 11 skipped
+(Windows installers, PowerShell, CI-only, no `chromedriver`), 0 failed, 1 h 7 min.
+
 **Size.** M
 
 ### EXP-8: Replay
@@ -272,6 +516,38 @@ re-run the exact path that exposed a bug.
 - A replay against a copy of the site with one control removed reports that edge as `missing` and exits 1.
 - A replay never sends a non-GET request in read-only mode (server log).
 
+**Status.** Built and verified on 1 Nov 2026 (branch `backlog/exp-1-10`).
+
+**What was built.** `traceqa replay GRAPH [--path EDGE|STATE... | --all]`. A chain runs in one session and ends at
+the first step that does not reproduce (the rest are `not-run`); `--all` replays each edge from its own screen, reopening
+it by address or by performing the shortest recorded click-only way. Outcomes: reproduced, diverged, missing, blocked,
+not-run, recorded-failed. Exit 0 only if the replay ended complete and every replayable step reproduced; 1 otherwise;
+2 for a refusal or a bad graph; 130 after Ctrl-C. It writes `replay.json` (`spec/replay.schema.json`) and the usual run
+folder. It reuses `Rules`, `check_start` and `driver_policy`, so it is read-only by default. The graph file is treated as
+untrusted input (names in order, edges between existing screens, http/https only, size caps, schemaVersion 1..=2).
+`--origin` points a graph at a server on another port. Graph layout is now 2: a `type` edge keeps its `value`, so typed
+text is typed again (only with writes allowed); layout-1 graphs still read, and their typed edges are `blocked`.
+The walker's logic is unchanged (four real walks compared before and after: identical except version and `value`).
+
+**Verified (real).** Read-only replay of the 217-edge shop walk: 215 of 215 replayable reproduced (2 were
+recorded-failed), only GET requests in the server log, exit 0. Writes allowed: 12 of 12 with the same typed text.
+Read-only blocks the typing edges. Removed-control copy: that edge `missing`, exit 1. Chain in Chromium, Firefox and
+WebKit. Rust workspace 860 passed; Python `test_replay.py`, `test_explore.py`, `test_shop_demo.py` 84 passed (58 min);
+ruff, format, pyright and the protocol check are clean. Mutation testing of the three new files left 0 real misses; two
+survivors are equivalent (`replay_doc.rs` `>` vs `>=` on the version and `&&` vs `||` in the alike-screen check).
+
+**Limits (known).**
+- On a page with very few components, removing one control changes the screen identity (the 90% rule), so the replay
+  reports `diverged`, not `missing`.
+- The site must start in the same state it was walked in (a fresh server).
+- A screen whose address had hidden parameters cannot be opened by address; it is reopened by its way.
+- Layout-1 graphs have no typed text. A screen with no safe click-only way is listed as not reopenable.
+
+**Not verified.** Linux and Windows, WebDriver browsers, a real model run, and a trial on a real outside site.
+
+**Carried forward.** The `traceqa codegen` hand-off (a locator per component) is still not built. Clippy shows two
+`nonminimal_bool` warnings in `locator.rs`, untouched by this item.
+
 **Size.** M
 
 ### EXP-9: Incremental re-extraction (A9)
@@ -293,6 +569,44 @@ re-run the exact path that exposed a bug.
   least 5 times shorter with incremental extraction than with a full one (print both medians).
 - `--no-incremental` gives the same `graph.json` byte for byte on the buggy shop.
 
+**Status.** Built and verified on 1-2 Nov 2026 (branch `backlog/exp-1-10`). **The design was changed after a measurement, and the backlog text above is
+not what was built.** Read this before the acceptance lines.
+
+**What the measurement showed (release build, Chromium, `testbed/sites/long-page`, 2088 elements).** The collector takes about 24 ms in the page. A read through
+the driver took about 350-420 ms, because Playwright serialises the 1.1 MB result of 2088 nested objects. Grouping in Rust is about 10 ms (2%). So the cost was
+carrying the result out, not reading the page, and a partial read with a merge would have saved about 20 ms while risking the ids (a component id depends on the
+whole page: a list becomes a "template" at a count, an unnamed control is numbered among its siblings, a changing name is a property of the page).
+
+**What was built instead.** `page.eval` takes `viaJson: true` (optional, additive; `spec/driver-protocol.schema.json`, `spec/README.md`): the page writes the
+function's result as one JSON text and the driver reads it back, with the `JSON.stringify` it captured before the page's scripts ran. The value is the same. If
+that copy is missing, or the page gave plain objects a `toJSON`, the driver answers the usual way. The Playwright driver does it; the WebDriver driver ignores the
+field. The explorer and the replay read this way by default: `--page-read fast|plain|verify` (`fast` is the default, `plain` is how it was, `verify` reads every
+page both ways, uses the plain one and says at the end how many readings it could compare and whether any differed; a reading where the plain way differs from
+itself a moment later is counted as "page still changing" and not compared). The walker, the matching and the graph are unchanged. `traceqa extract` is
+unchanged. The driver also stopped asking for the scroll position on a page with no frames (one round trip less).
+
+**Acceptance, as measured.**
+- Same ids: `--page-read verify` on a 100-action read-only walk of the demo shop compared 419 readings, 0 differences, 5 not compared (page still changing); also
+  0 differences in Firefox and WebKit (30 actions), on all 9 pattern pages and 11 collector-case pages, on the `act`, `heal`, `findings`, `visual`, `axe`,
+  `stability` and `long-page` fixtures, and in a replay. (This is the item's "zero id-set differences", checked on the whole component list, not only ids.)
+- `--page-read plain` and `fast` write the same `graph.json` byte for byte (60 actions, port masked), and so does leaving the flag out.
+- Driver: the same value with and without `viaJson` for the collector on the shop (all frames), on a page of 2000 controls and under a page that replaces
+  `JSON.stringify` or adds `toJSON`, in all three browsers (`web-drivers/playwright-py/tests/test_via_json.py`, 15 tests).
+- **Speed, and where it falls short of the item.** `testbed/bench/read_speed.py`: the read after a disclosure opens, 2000 controls, Chromium, medians over 15-25
+  reads: plain 390-430 ms, fast 75-90 ms, **4.4 to 5.4 times shorter** over six runs (the item asks for 5; the margin is thin and a run can land under it). A whole
+  action in a walk is only about **1.4 times** shorter (about 1.98 s to 1.46 s per action), because the explorer acts, then waits 500 ms before it trusts a
+  reading (`PAUSE_MS`) and reads at least twice, and the driver settles too; none of that was touched, since it decides when the walk moves on (EXP-2).
+  Shortening it is the larger saving and is not done.
+- Whole suites: Rust 869 passed; `web-drivers/playwright-py/tests` 200 passed (11 min); `tests/test_page_read.py` 33 passed; `tests/test_replay.py`,
+  `tests/test_explore.py`, `tests/test_shop_demo.py` 84 passed (58 min); WebDriver tests 4 passed, 4 skipped (no chromedriver). ruff, pyright, format, clippy
+  (on the new code) and the protocol check are clean. Mutation testing of the new Rust (`PageRead`, the comparison, the counting, the message): 0 missed on logic;
+  what is left is `tell_page_read_check` and the `check` field of `read_live`, which only a real browser reaches and `tests/test_page_read.py` covers.
+
+**Not built (and why).** Incremental merging by changed regions, `--no-incremental` and `--verify-incremental` under those names: `--page-read plain` and `verify`
+are the same switches for the thing that was built. A lean read (leaving out fields the explorer does not use) would shrink the result further; not done, because
+`group` and the locators use some of them and the gain is small next to the settle time. Not verified: Linux, Windows, Safari/WebDriver, pages with many frames,
+a real outside site.
+
 **Size.** L
 
 ### EXP-10: Explorer acceptance on the buggy shop
@@ -311,6 +625,28 @@ shop's server logs nothing today, so it gains the request-method log that EXP-5 
 - "Clear cart" and the checkout-like controls are never activated.
 - Replay of the recorded edges reproduces at least 95% of the transitions.
 - A cancel at action 40 yields a folder that validates.
+
+**Carried forward.** From EXP-5: the buggy shop's `serve.py` records the method of every request (`testbed/sites/act/serve.py` already does, and is the model), and the test asserts that a read-only walk produced only GET and HEAD, in all three browsers. "Clear cart" must appear as skipped, not touched.
+
+**Status.** Built and verified on 2 Nov 2026 (branch `backlog/exp-1-10`): `tests/test_acceptance.py`, run with `make explorer-acceptance` (about 50 minutes for the three
+browsers; `-s` prints the figures, and `acceptance-<browser>.json` is written to the test's temporary folder or to `$TRACEQA_ACCEPTANCE_REPORT`). The shop's server already
+logged the method of every request (done in an earlier item), so nothing in the shop changed. Nothing in the engine changed either. 24 tests, all passed, none skipped, none retried.
+
+**Measured** (demo shop `/shop/`, read-only, `--seed 1 --max-actions 150`, a fresh server for each walk; **the same in Chromium, Firefox and WebKit**):
+the walk **completed by itself after 106 actions** (91 edges, 23 screens; so the 150-action budget was not the limit), 327 s in Chromium, 465 s in Firefox, 360 s in WebKit.
+259 requests, all GET. Coverage: 165 components discovered, 91 touched, 61 skipped, 13 untouched.
+- **80% touched: met on `touched / allowed`, 87.5%.** **`touched / discovered` is 55.1%, so the 80% of the item as written ("of the discoverable components") is not met,
+  and cannot be in read-only mode on this shop:** 61 of the 165 are buttons and fields a read-only walk may not press or type into. The test asserts the 80% on the
+  share of what was allowed and records the other figure. (EXP-7 measured 68.9% on another seed and setting; both are the same kind of number. The shop was not tuned.)
+- Zero non-GET and non-HEAD requests, in the walks and in the replay.
+- Two walks with the same seed on fresh servers write the same `graph.json` byte for byte (port masked).
+- Budgets: screens, actions, depth, requests to the origin and the clock are at or below their limits.
+- "Clear cart", "Pay now" and "Delete account" are in `skipped` with reason `destructive`, no edge acts on them, and no destructive address was asked for.
+- Replay of the recorded edges on a fresh server: **89 of 89 reproduced (100%)**, GET and HEAD only.
+- Ctrl-C at action 40 (read as: when `e39` is told): exit 130, a folder that validates, marked `cancelled`, graph and coverage agree, nothing left running, in all three browsers.
+
+**Not verified.** Linux, Windows, Safari/WebDriver, a real model, a real outside site. The shop has no popup, download or alert, so they are not in this end-to-end walk
+(they are tested on `testbed/sites/act`); an extra unlinked shop page for them was considered and not built.
 
 **Size.** S (on top of EXP-1 to EXP-9)
 
@@ -353,6 +689,8 @@ messages from non-allow-listed origins are dropped. Rule ids `uncaught-error`, `
 fixture that calls `console.error` gives one `console-error`; a third-party script that logs from another origin
 gives none. The `not_observed` marker appears on the WebDriver driver. The `consoleEvents` capability exists
 today but is false in both drivers, and `not_observed` is a new marker set from it.
+
+**Carried forward.** From EXP-4: a driver says which events it observes in `Capabilities.eventKinds`; the findings of an oracle mark a signal `not_observed` when the session's driver does not list its kind (the WebDriver driver lists none), and must not read an empty list as "nothing happened". Same for ORA-3.
 
 **Size.** S
 
@@ -869,7 +1207,7 @@ component's locator from the detailed answer.
 
 ## How to read this file
 
-Every item is a heading of the form `### ID: title`, followed by four labelled parts:
+Every item is a heading of the form `### ID: title`, followed by four labelled parts, and sometimes a fifth, **Carried forward**, for work that an earlier item left for this one because it needs something this item builds:
 
 - **Why.** The problem, in a sentence or two.
 - **Design.** Notes on how to build it, including the existing code it builds on.

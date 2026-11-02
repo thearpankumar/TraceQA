@@ -11,6 +11,7 @@ mod baseline;
 mod codegen;
 mod diff;
 mod doctor;
+mod explore;
 mod extract;
 mod findings;
 mod heal;
@@ -20,6 +21,7 @@ mod login;
 mod manifest;
 mod map;
 mod mcp;
+mod replay;
 mod robots;
 mod runs;
 mod serve;
@@ -58,6 +60,12 @@ enum Command {
     /// Prints Markdown, or json, github (workflow commands) or sarif with --format. With --against
     /// NAME a baseline is side A. Exit 0 when the diff ran, 1 when --fail-on matched, 2 on bad input.
     Diff(diff::DiffArgs),
+    /// Walk a site by clicking through it, and write the screens and the actions between them to graph.json.
+    ///
+    /// Read-only by default: the browser refuses every request that is not GET or HEAD, and controls named delete,
+    /// pay, send, sign out and the like are left alone. A site that is not on this machine needs
+    /// --i-understand-this-interacts. Then: traceqa explore http://127.0.0.1:4173 --max-actions 100
+    Explore(explore::ExploreArgs),
     /// List every interactive component on a page.
     Extract(extract::ExtractArgs),
     /// Run automated accessibility and quality checks over a finished run.
@@ -90,6 +98,11 @@ enum Command {
     /// page limits) and never clicks. Links such as /logout and /delete are not followed.
     /// Writes site.json in a group folder next to the runs.
     Map(map::MapArgs),
+    /// Perform again the actions of an exploration's graph.json, and say whether each one led where it did.
+    ///
+    /// Read-only by default, like explore. Exit 0 when every step was reproduced, 1 when any was not, 2 on a wrong
+    /// command or a graph that cannot be used. Then: traceqa replay runs/RUN/graph.json --all
+    Replay(replay::ReplayArgs),
     /// List, count and delete the runs in the runs folder.
     ///
     /// Then: traceqa runs prune --keep 20 --dry-run
@@ -110,6 +123,7 @@ fn main() -> ExitCode {
         Command::Codegen(args) => codegen::run(&args),
         Command::Diff(args) => diff::run(&args),
         Command::Doctor(args) => doctor::run(&args),
+        Command::Explore(args) => explore::run(&args),
         Command::Extract(args) => extract::run(&args),
         Command::Findings(args) => findings::run(&args),
         Command::Heal(args) => heal::run(&args),
@@ -117,6 +131,7 @@ fn main() -> ExitCode {
         Command::Login(args) => login::run(&args),
         Command::Map(args) => map::run(&args),
         Command::Mcp(args) => mcp::run(&args),
+        Command::Replay(args) => replay::run(&args),
         Command::Runs(args) => runs::run(&args),
         Command::Serve(args) => serve::run(&args),
         Command::Visual(args) => visual::run(&args),

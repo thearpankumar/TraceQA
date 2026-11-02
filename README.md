@@ -162,6 +162,8 @@ fixes it, or breaks something else, `traceqa diff` reports exactly which compone
 - `traceqa diff --against main --fail-on removed,disabled` fails the build on the changes you choose.
 - GitHub annotations and SARIF output, `verify` manifests of what must exist, and per-component pixel compare.
 - `traceqa map` follows a site's links and lists which components live on which pages.
+- `traceqa explore` walks a site by acting on it, read-only by default, and writes the screens and the actions between them to `graph.json` and how much of what it found it touched to `coverage.json`.
+- `traceqa replay` performs the actions of a `graph.json` again, read-only by default, and says for each one whether it led where it did, so a finding can be shown again.
 
 </td>
 </tr>
@@ -254,6 +256,7 @@ flowchart TB
     subgraph engine["Rust engine"]
         direction LR
         orchestrate["Orchestrate<br/>browsers x viewports"] --> group["Group and fingerprint<br/>stable component IDs"] --> analyse["Diff, findings, verify,<br/>codegen, heal, visual"]
+        explorer["Explore and replay<br/>screens, safety policy, coverage"]
     end
 
     subgraph drivers["Python drivers"]
@@ -268,12 +271,13 @@ flowchart TB
         b2["Safari,<br/>WebDriver grids"]
     end
 
-    runs[("Run folder<br/>run.json, events.jsonl,<br/>components.json, crops")]
+    runs[("Run folder<br/>run.json, events.jsonl, components.json,<br/>crops, graph.json, coverage.json, replay.json")]
 
     cli --> engine
     ai --> engine
     lang -->|JSON-RPC over stdio| engine
     engine <-->|JSON-RPC over stdio| drivers
+    explorer -.->|page.act| drivers
     pw --> b1
     wd --> b2
     engine --> runs
@@ -306,6 +310,23 @@ sequenceDiagram
     E->>D: session.close
 ```
 
+### One walk of the explorer
+
+`traceqa explore` repeats this loop, using the same drivers and the same component IDs:
+
+```mermaid
+flowchart LR
+    read["Read the page<br/>components and screen"] --> pick["Pick the next<br/>component to act on"]
+    pick --> policy{"Safety policy<br/>allowed?"}
+    policy -->|no| skip["Skip it and<br/>write down why"]
+    policy -->|yes| act["page.act<br/>click, type, select"]
+    act --> settle["Wait until the<br/>page settles"]
+    settle --> read
+    skip --> pick
+    read --> out[("graph.json<br/>coverage.json")]
+    out --> replay["traceqa replay<br/>performs the actions again"]
+```
+
 ### How you use it every day
 
 ```mermaid
@@ -315,6 +336,8 @@ flowchart LR
     run --> diff["traceqa diff<br/>--against main"]
     run --> codegen["traceqa codegen"]
     codegen --> pages["Playwright<br/>page objects"]
+    explore["traceqa explore"] --> graphfile[("graph.json")]
+    graphfile --> replay["traceqa replay"]
     baseline[("baseline<br/>main")] --> diff
     findings --> gate{"CI gate"}
     diff --> gate
@@ -329,8 +352,9 @@ flowchart LR
 | Path | What lives there |
 |---|---|
 | [`crates/traceqa-cli`](crates/traceqa-cli) | The `traceqa` binary, one module per command. |
-| [`crates/traceqa-engine`](crates/traceqa-engine) | All the logic: orchestration, grouping and component IDs. |
+| [`crates/traceqa-engine`](crates/traceqa-engine) | All the logic: orchestration, grouping, component IDs, the safety policy and the explorer. |
 | [`crates/traceqa-common`](crates/traceqa-common) | Types generated from `spec/`, the JSON-RPC line format and shared helpers. |
+| [`crates/traceqa-models`](crates/traceqa-models) | Where the explorer gets text for the fields it types into. |
 | [`crates/traceqa-recorder`](crates/traceqa-recorder) | Writes the run folder and the live event stream. |
 | [`crates/traceqa-diff`](crates/traceqa-diff) | Compares two runs by component ID. |
 | [`crates/traceqa-findings`](crates/traceqa-findings) | The accessibility and quality checks. |
@@ -438,7 +462,7 @@ A complete GitHub Actions job is in [docs/usage.md](docs/usage.md#baselines-and-
 | [Architecture](docs/architecture.md) | How the engine, drivers and page script fit together, and why. |
 | [Clients](docs/clients.md) | Driving the engine from any language with `traceqa serve`. |
 | [Testing](docs/testing.md) | Mutation testing of the component ID and checks of the generated page objects. |
-| [Backlog](docs/backlog.md) | Designed but not built yet: the explorer, interaction oracles and more. |
+| [Backlog](docs/backlog.md) | Designed but not built yet: interaction oracles and more. |
 | [Contracts](spec/README.md) | The JSON Schemas, their versions and the rules for changing them. |
 | [Component IDs](spec/fingerprint.md) | The exact ID recipe and its known limits. |
 | [Security](docs/SECURITY.md) | How to report a vulnerability privately. |

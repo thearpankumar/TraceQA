@@ -27,9 +27,12 @@ def wait_until_settled(
     *,
     animations: bool = True,
     now: Callable[[], float] = time.monotonic,
-) -> None:
+) -> bool:
     """Return once the page height has stopped changing and no ending animation is running,
     for two checks in a row. Gives up after `limit_s` of real time, reads included, because some pages never rest.
+
+    Returns True when the page was quiet, False when the wait ended at its limit with the
+    page still changing.
 
     `read_state` evaluates `PAGE_STATE` in the page. `sleep` waits the given number of seconds.
     With `animations=False` only the height has to be stable, which is quicker and enough
@@ -45,3 +48,4 @@ def wait_until_settled(
         still = state["height"] == height and (state["animating"] == 0 or not animations)
         quiet = quiet + 1 if still else 0
         height = state["height"]
+    return quiet >= 2

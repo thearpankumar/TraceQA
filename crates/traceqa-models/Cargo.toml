@@ -1,0 +1,15 @@
+[package]
+name = "traceqa-models"
+description = "Sources of text for the fields `traceqa explore` types into. Everything that may reach a model lives here, never in traceqa-engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+traceqa-engine.workspace = true
+
+[lints]
+workspace = true

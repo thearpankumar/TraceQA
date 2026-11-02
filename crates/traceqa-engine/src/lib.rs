@@ -22,19 +22,25 @@
 //! `test-support` feature, which no release build enables.
 
 pub mod driver;
+pub mod explore;
 mod extract;
 mod fingerprint;
 mod group;
 pub mod home;
 mod locator;
+pub mod policy;
 pub mod run;
 pub mod serve;
+pub mod state;
+#[cfg(test)]
+mod state_real_tests;
 pub mod url_policy;
 mod url_safety;
 mod util;
 
 /// axe-core for `--axe`: where it is installed from and how a run finds it.
 pub use extract::axe;
+pub use extract::PageRead;
 pub use run::{driver_commands, Abort, EngineError, Execution, InFlight, Interrupt, Run};
 pub use url_policy::UrlPolicy;
 /// Refuses an address a run may not be started on. The MCP server asks before it accepts a call.

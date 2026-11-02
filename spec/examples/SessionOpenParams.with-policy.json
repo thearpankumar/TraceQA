@@ -1,0 +1,5 @@
+{
+  "target": { "browser": "chromium", "headless": true },
+  "viewport": { "width": 1280, "height": 800 },
+  "policy": { "allowOrigins": ["http://127.0.0.1:4173"] }
+}

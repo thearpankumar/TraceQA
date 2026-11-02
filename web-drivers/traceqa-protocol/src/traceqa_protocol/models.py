@@ -487,6 +487,84 @@ class RunStatus(StrEnum):
     cancelled = "cancelled"
 
 
+class CoverageCounts(BaseModel):
+    """
+    How many components of a screen, or of the whole walk, fall in each group. discovered = touched + skipped + untouched.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    discovered: int = Field(..., ge=0)
+    touched: int = Field(
+        ...,
+        description="An action was made on the component on this screen (an edge of graph.json whose status is not `missing`, a timeout and a failure included).",
+        ge=0,
+    )
+    skipped: int = Field(..., description="Left alone, with a reason.", ge=0)
+    untouched: int = Field(
+        ...,
+        description="Nothing was done: the walk ended first, the screen could not be opened again, the screen was deeper than --max-depth, or the component was gone when its turn came.",
+        ge=0,
+    )
+
+
+class CoverageTotals(CoverageCounts):
+    """
+    The counts over every screen, and the share that was touched.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    touched_per_mille: int = Field(
+        ...,
+        validation_alias="touchedPerMille", serialization_alias="touchedPerMille",
+        description="touched / discovered in thousandths, rounded down: 1000 is all of it. 0 when nothing was discovered. A read-only walk may not press most buttons, so it cannot reach 1000 on a page that has them.",
+        ge=0,
+        le=1000,
+    )
+    touched_of_allowed_per_mille: int = Field(
+        ...,
+        validation_alias="touchedOfAllowedPerMille", serialization_alias="touchedOfAllowedPerMille",
+        description="touched / (discovered - skipped) in thousandths, rounded down: how much of what the walk was allowed to touch it touched. The figure to judge a walk by when it was left alone on purpose. 0 when nothing was allowed.",
+        ge=0,
+        le=1000,
+    )
+
+
+class CoverageSkip(BaseModel):
+    """
+    A component of a screen that was left alone.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    component: str
+    reason: str = Field(
+        ...,
+        description="destructive: its name or address says it does something with a lasting effect. blocked: it leads to another origin or somewhere that is not a page. read-only: read-only mode only touches links, tabs and things that open and close. no-options: a list to pick from, whose options the walker does not know. disabled: the component could not be used.",
+    )
+
+
+class CoverageSkipped(BaseModel):
+    """
+    A component that was left alone, in the list of the whole walk.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    state: str
+    component: str
+    label: str = Field(
+        ...,
+        description="The role and accessible name of the component, for people reading the file.",
+    )
+    reason: str = Field(..., description="The same words as in CoverageSkip.")
+
+
 class DiffSide(BaseModel):
     """
     One of the two compared pages.
@@ -609,53 +687,24 @@ class DriverHelloResult(BaseModel):
     )
 
 
-class Capabilities(BaseModel):
+class ActPolicy(BaseModel):
     """
-    What this browser session can do. The engine adapts to these instead of knowing browser names.
+    What the browser of a session may do while it is being acted on. Enforced by the driver on the browser's own requests, so it does not depend on what a button is called. Unless `allowWrites` is true: every request whose method is not GET or HEAD is aborted, and every WebSocket is never connected and is closed. Whatever `allowWrites` says: a navigation of the top-level page to an origin that is not in `allowOrigins` is aborted, and a page that ends up at such an origin anyway (a redirect, which the browser follows without asking the driver) is taken back to the page it came from. A blocked request is reported in `failedRequests` with the failure `blocked_by_policy`. Pages are not given `navigator.serviceWorker`, because a service worker makes requests of its own that the driver cannot see; a worker that a page starts itself is not covered.
     """
 
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    clip_screenshot: bool = Field(
+    allow_origins: list[str] = Field(
         ...,
-        validation_alias="clipScreenshot", serialization_alias="clipScreenshot",
-        description="Can screenshot one rectangle of the page.",
+        validation_alias="allowOrigins", serialization_alias="allowOrigins",
+        description="Origins (scheme, host and port, for example http://127.0.0.1:4173) the top-level page may navigate to. At least one.",
+        min_length=1,
     )
-    full_page_screenshot: bool = Field(
-        ...,
-        validation_alias="fullPageScreenshot", serialization_alias="fullPageScreenshot",
-        description="Can screenshot the whole scrollable page.",
-    )
-    eval_all_frames: bool = Field(
-        ...,
-        validation_alias="evalAllFrames", serialization_alias="evalAllFrames",
-        description="Can run a script in every frame, not only the top one.",
-    )
-    cross_origin_frames: bool = Field(
-        ...,
-        validation_alias="crossOriginFrames", serialization_alias="crossOriginFrames",
-        description="Can run a script inside frames from another origin.",
-    )
-    parallel_sessions: bool = Field(
-        ...,
-        validation_alias="parallelSessions", serialization_alias="parallelSessions",
-        description="Can hold more than one session at a time.",
-    )
-    set_viewport: bool = Field(
-        ..., validation_alias="setViewport", serialization_alias="setViewport", description="Can set an exact viewport size."
-    )
-    console_events: bool = Field(..., validation_alias="consoleEvents", serialization_alias="consoleEvents")
-    network_events: bool = Field(..., validation_alias="networkEvents", serialization_alias="networkEvents")
-    failed_requests: bool | None = Field(
+    allow_writes: bool | None = Field(
         default=None,
-        validation_alias="failedRequests", serialization_alias="failedRequests",
-        description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
-    )
-    eval_async: bool | None = Field(
-        default=None,
-        validation_alias="evalAsync", serialization_alias="evalAsync",
-        description="page.eval accepts awaitPromise. Absent means false.",
+        validation_alias="allowWrites", serialization_alias="allowWrites",
+        description="Let requests other than GET and HEAD through. Absent means false.",
     )
 
 
@@ -668,19 +717,6 @@ class SessionStorageParams(BaseModel):
         populate_by_name=True,
     )
     session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
-
-
-class SessionOpenResult(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
-    browser: BrowserInfo
-    capabilities: Capabilities
-    viewport: Viewport | None = Field(
-        default=None,
-        description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
-    )
 
 
 class SessionCloseParams(BaseModel):
@@ -742,6 +778,11 @@ class PageEvalParams(BaseModel):
         default=None,
         validation_alias="awaitPromise", serialization_alias="awaitPromise",
         description="The function may return a Promise: wait for it and give its resolved value. A rejected Promise is an eval_failed error for that frame. Only drivers whose capabilities say evalAsync accept it; others refuse it with eval_failed. timeoutMs bounds the wait. Default false.",
+    )
+    via_json: bool | None = Field(
+        default=None,
+        validation_alias="viaJson", serialization_alias="viaJson",
+        description="Ask for the value as JSON text written inside the page and read back, instead of as an object the browser serialises itself. The value is the same; for a result of thousands of objects it arrives many times faster. Only for a function that returns plain JSON data (no undefined, NaN or Infinity). A driver that cannot do this, or whose page does not allow it, gives the value the usual way, so the caller never needs to know which was used. Default false.",
     )
     timeout_ms: int | None = Field(default=None, validation_alias="timeoutMs", serialization_alias="timeoutMs", ge=0)
 
@@ -890,7 +931,7 @@ class ElementTarget(BaseModel):
 
 class PageActParams(BaseModel):
     """
-    Reserved for the explorer. Component extraction never sends it.
+    Performs one action on one element and reports what it did. Component extraction never sends it. A driver whose capabilities list no actionKinds answers it with `unsupported`; a session opened without a policy answers `invalid_params`.
     """
 
     model_config = ConfigDict(
@@ -902,13 +943,129 @@ class PageActParams(BaseModel):
     value: str | None = Field(
         default=None, description="Text to type, option to select, or key to press."
     )
+    timeout_ms: int | None = Field(
+        default=None,
+        validation_alias="timeoutMs", serialization_alias="timeoutMs",
+        description="How long to wait for the element and for the action itself. Default 10000.",
+        ge=1,
+    )
+
+
+class ActNavigation(BaseModel):
+    """
+    The main document was loaded because of the action.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: int | None = Field(
+        default=None,
+        description="HTTP status of the main document, when the driver can see it.",
+    )
+
+
+class ActDialog(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: str = Field(..., description="alert, confirm, prompt or beforeunload.")
+    message: str = Field(..., description="Cut to 500 characters.")
+    handled: bool = Field(..., description="The driver dismissed it.")
+
+
+class ActDownload(BaseModel):
+    """
+    A download the action started. The driver cancels it: the file is never stored.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    url: str = Field(..., description="Without query or fragment.")
+    suggested_name: str | None = Field(default=None, validation_alias="suggestedName", serialization_alias="suggestedName")
+
+
+class ActConsoleError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    text: str = Field(
+        ...,
+        description="Cut to 500 characters, with query and fragment removed from any address in it.",
+    )
+    source: str = Field(
+        ...,
+        description="`uncaught` for an uncaught exception, `console` for console.error.",
+    )
+
+
+class ActFailedRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    url: str = Field(..., description="Without query or fragment.")
+    method: str
+    status: int | None = Field(default=None, description="HTTP status, 400 or more.")
+    failure: str | None = Field(
+        default=None,
+        description="The browser's reason when there was no response, or `blocked_by_policy` when the session's policy aborted the request.",
+    )
+
+
+class ActSettle(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    waited_ms: int = Field(..., validation_alias="waitedMs", serialization_alias="waitedMs", ge=0)
+    quiet: bool = Field(
+        ...,
+        description="False when the wait ended at its limit with the page still changing.",
+    )
 
 
 class PageActResult(BaseModel):
+    """
+    What an action did. Every field except `ok` is optional. A list is empty when nothing of that kind happened, or when the driver cannot observe that kind: the session's Capabilities.eventKinds says which kinds it observes, and a caller must not read an empty list as 'nothing happened' for a kind the session does not list. Readers in some languages cannot tell an absent list from an empty one, so no reader may depend on the difference.
+    """
+
     model_config = ConfigDict(
         populate_by_name=True,
     )
     ok: bool
+    request_counts: dict[str, int] | None = Field(
+        default=None,
+        validation_alias="requestCounts", serialization_alias="requestCounts",
+        description="As in PageGotoResult: how many requests the session's browser has sent to each origin so far. The same counts, so the engine can add up what a run cost whichever call came last.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="The address of the page after the action and after settling.",
+    )
+    navigated: ActNavigation | None = None
+    popups: list[str] | None = Field(
+        default=None,
+        description="Addresses of new pages the action opened. The driver closes them. A page the policy stopped is given as the address it was going to, not that of the error page the browser shows instead, and a page with no address (one that became a download) as `about:blank`.",
+    )
+    dialogs: list[ActDialog] | None = None
+    downloads: list[ActDownload] | None = None
+    console_errors: list[ActConsoleError] | None = Field(
+        default=None, validation_alias="consoleErrors", serialization_alias="consoleErrors"
+    )
+    failed_requests: list[ActFailedRequest] | None = Field(
+        default=None, validation_alias="failedRequests", serialization_alias="failedRequests", description="At most 50."
+    )
+    dom_changed: bool | None = Field(
+        default=None,
+        validation_alias="domChanged", serialization_alias="domChanged",
+        description="The page changed because of the action: it navigated, or a mutation observer saw, in some frame, more changes of some kind than three times what the page changes of that kind by itself at rest, over the time the action took. The kinds are elements added or removed, text, attributes other than `style`, and `style` changes that show or hide something (`display` or `visibility`). A style change that only moves or fades an element is not counted, because pages restyle themselves that way in answer to any mouse move or scroll. A page at rest makes no changes, so for it any change counts. A change that is no bigger than the page's own noise of the same kind (a label changing on a page with a ticking clock) is not seen.",
+    )
+    settle: ActSettle | None = None
+    not_observed: list[str] | None = Field(
+        default=None,
+        validation_alias="notObserved", serialization_alias="notObserved",
+        description="The event kinds this driver could not observe for this action.",
+    )
 
 
 class LogLevel(StrEnum):
@@ -936,7 +1093,7 @@ class RpcErrorData(BaseModel):
     )
     kind: str = Field(
         ...,
-        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal.",
+        description="Known values: timeout, navigation_failed, unsupported, session_not_found, eval_failed, version_mismatch, invalid_params, invalid_request, blocked_url, busy, internal, element_not_found.",
     )
     retryable: bool
 
@@ -1082,6 +1239,162 @@ class FindingsFile(BaseModel):
         validation_alias="needsReview", serialization_alias="needsReview",
         description="Present when axe-core results were included: how many results axe could not decide and left for a person to review (its incomplete results). Not counted in counts.",
         ge=0,
+    )
+
+
+class Strategy(Enum):
+    """
+    The order screens waiting to be explored are taken: bfs takes everything one action away before going deeper, dfs goes as deep as it can first.
+    """
+
+    bfs = "bfs"
+    dfs = "dfs"
+
+
+class GraphBudgets(BaseModel):
+    """
+    The limits the walk was given.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    max_states: int = Field(..., validation_alias="maxStates", serialization_alias="maxStates", ge=0)
+    max_actions: int = Field(..., validation_alias="maxActions", serialization_alias="maxActions", ge=0)
+    max_depth: int = Field(
+        ...,
+        validation_alias="maxDepth", serialization_alias="maxDepth",
+        description="Screens deeper than this (in actions from the start page) are found and not explored.",
+        ge=0,
+    )
+    action_timeout_ms: int = Field(
+        ..., validation_alias="actionTimeoutMs", serialization_alias="actionTimeoutMs", description="The most one action may take.", ge=0
+    )
+    timeout_ms: int = Field(
+        ..., validation_alias="timeoutMs", serialization_alias="timeoutMs", description="The most the whole walk may take.", ge=0
+    )
+    max_requests_per_origin: int = Field(..., validation_alias="maxRequestsPerOrigin", serialization_alias="maxRequestsPerOrigin", ge=0)
+
+
+class GraphStop(Enum):
+    """
+    Why the walk ended. complete: every action that could be tried was tried. max-states, max-actions, timeout and max-requests: that limit was reached. max-depth: nothing else was left but screens deeper than the limit. action-timeout: several actions in a row used up all their time. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.
+    """
+
+    complete = "complete"
+    max_states = "max-states"
+    max_actions = "max-actions"
+    max_depth = "max-depth"
+    action_timeout = "action-timeout"
+    timeout = "timeout"
+    max_requests = "max-requests"
+    cancelled = "cancelled"
+    error = "error"
+
+
+class GraphState(BaseModel):
+    """
+    One screen.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    url: str = Field(
+        ...,
+        description="The address without fragment and volatile parameters, with secret parameters replaced.",
+    )
+    modal: str | None = Field(
+        default=None,
+        description="The dialog that was open, as role and name. Absent when none.",
+    )
+    components: list[str] = Field(
+        ...,
+        description="The ids the screen is compared by, sorted: the visible components of its first reading without the page-wide ones.",
+    )
+    frames: list[str]
+    depth: int = Field(
+        ...,
+        description="The fewest actions from the start page that were found to lead here.",
+        ge=0,
+    )
+
+
+class Action(Enum):
+    """
+    press is a click that was blocked and was tried again with a key.
+    """
+
+    click = "click"
+    type = "type"
+    press = "press"
+
+
+class Status(Enum):
+    """
+    ok: it worked. missing: the component was not on the page any more, and nothing was done. timeout: it took longer than allowed. failed: the browser could not do it, or the page that followed had nothing on it.
+    """
+
+    ok = "ok"
+    missing = "missing"
+    timeout = "timeout"
+    failed = "failed"
+
+
+class GraphEdge(BaseModel):
+    """
+    One action, and what it led to.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str
+    from_: str = Field(
+        ..., validation_alias="from", serialization_alias="from", description="The screen the action was made on."
+    )
+    component: str
+    label: str = Field(
+        ...,
+        description="The role and accessible name of the component, for people reading the file.",
+    )
+    action: Action = Field(
+        ...,
+        description="press is a click that was blocked and was tried again with a key.",
+    )
+    value: str | None = Field(
+        default=None,
+        description="The text that was typed, for a type action (layout 2 and later). `traceqa replay` types it again. It is text the walk chose (the built-in words, or a model's answer cut to 200 characters), never text read from the site.",
+    )
+    to: str | None = Field(
+        default=None,
+        description="The screen the action led to. Absent when the action did not complete, or the page it led to could not be read.",
+    )
+    status: Status = Field(
+        ...,
+        description="ok: it worked. missing: the component was not on the page any more, and nothing was done. timeout: it took longer than allowed. failed: the browser could not do it, or the page that followed had nothing on it.",
+    )
+    navigated: bool
+    popups: int = Field(..., ge=0)
+    dialogs: int = Field(..., ge=0)
+    downloads: int = Field(..., ge=0)
+
+
+class GraphSkipped(BaseModel):
+    """
+    A component that was found and left alone.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    state: str
+    component: str
+    label: str
+    reason: str = Field(
+        ...,
+        description="destructive: its name or address says it does something with a lasting effect. blocked: it leads to another origin or somewhere that is not a page. read-only: read-only mode only touches links, tabs and things that open and close. no-options: a list to pick from, whose options the walker does not know.",
     )
 
 
@@ -1238,6 +1551,123 @@ class VerifySkipped(BaseModel):
     reason: str
 
 
+class Mode(Enum):
+    """
+    chain: edges that follow one another from the start page, done in one session, and ended at the first that does not lead where it did. all: every edge of the graph, each from the screen it was made on.
+    """
+
+    chain = "chain"
+    all = "all"
+
+
+class Ended(Enum):
+    """
+    Why the replay ended. complete: every edge asked for was dealt with. timeout and max-requests: that limit was reached, and the edges not reached are not-run. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.
+    """
+
+    complete = "complete"
+    timeout = "timeout"
+    max_requests = "max-requests"
+    cancelled = "cancelled"
+    error = "error"
+
+
+class ReplayGraph(BaseModel):
+    """
+    The graph that was replayed.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(
+        ...,
+        validation_alias="schemaVersion", serialization_alias="schemaVersion",
+        description="The layout version of the graph.json.",
+        ge=0,
+    )
+    start_url: str = Field(
+        ...,
+        validation_alias="startUrl", serialization_alias="startUrl",
+        description="The address the replay started from, with secret parameters replaced. It is the graph's own, or, with --origin, the graph's with its origin changed.",
+    )
+    states: int = Field(..., ge=0)
+    edges: int = Field(..., ge=0)
+
+
+class ReplayCounts(BaseModel):
+    """
+    How the steps came out. `replayable` is the steps that were asked for and that the walk had completed: the others are recorded-failed and are not counted against the replay.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    replayable: int = Field(..., ge=0)
+    reproduced: int = Field(..., ge=0)
+    diverged: int = Field(..., ge=0)
+    missing: int = Field(..., ge=0)
+    blocked: int = Field(..., ge=0)
+    not_run: int = Field(..., validation_alias="notRun", serialization_alias="notRun", ge=0)
+    recorded_failed: int = Field(..., validation_alias="recordedFailed", serialization_alias="recordedFailed", ge=0)
+    reproduced_per_mille: int | None = Field(
+        default=None,
+        validation_alias="reproducedPerMille", serialization_alias="reproducedPerMille",
+        description="reproduced out of replayable, in thousandths, rounded down. Absent when nothing was replayable.",
+        ge=0,
+        le=1000,
+    )
+
+
+class Action1(Enum):
+    click = "click"
+    type = "type"
+    press = "press"
+
+
+class Outcome(Enum):
+    """
+    reproduced: the page is the screen the graph says. diverged: the action was made, or failed, and the page is not that screen. missing: the component is not on the page, and nothing was done. blocked: the safety rules leave it alone (a replay is read-only unless --allow-writes), or there is no recorded text to type. not-run: it was not tried, because an earlier step of the chain broke, its screen could not be reopened, or the replay ended first. recorded-failed: the walk did not complete it, so there is nothing to compare with.
+    """
+
+    reproduced = "reproduced"
+    diverged = "diverged"
+    missing = "missing"
+    blocked = "blocked"
+    not_run = "not-run"
+    recorded_failed = "recorded-failed"
+
+
+class ReplayStep(BaseModel):
+    """
+    One edge, and what performing it again came to.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    edge: str = Field(..., description="The edge, as named in graph.json.")
+    state: str = Field(..., description="The screen the edge was made on.")
+    component: str
+    label: str
+    action: Action1
+    outcome: Outcome = Field(
+        ...,
+        description="reproduced: the page is the screen the graph says. diverged: the action was made, or failed, and the page is not that screen. missing: the component is not on the page, and nothing was done. blocked: the safety rules leave it alone (a replay is read-only unless --allow-writes), or there is no recorded text to type. not-run: it was not tried, because an earlier step of the chain broke, its screen could not be reopened, or the replay ended first. recorded-failed: the walk did not complete it, so there is nothing to compare with.",
+    )
+    expected: str | None = Field(
+        default=None,
+        description="The screen the edge led to in the walk. Absent for an edge that led nowhere.",
+    )
+    actual: str | None = Field(
+        default=None,
+        description="For reproduced, the same as expected. For diverged, the screen the page was, or `unknown` for a page the graph has no screen like. Absent when the action did not complete.",
+    )
+    note: str | None = Field(
+        default=None, description="Why, in a sentence, when there is something to say."
+    )
+
+
 class Timings(BaseModel):
     """
     Where the time of one target went, in milliseconds. The parts do not add up to durationMs exactly: grouping and writing files are not listed.
@@ -1299,7 +1729,7 @@ class Event(BaseModel):
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
     type: str = Field(
         ...,
-        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error.",
+        description="Known values: run.started, target.started, page.opened, elements.collected, page.scrolled, components.grouped, crop.saved, warning, target.retried, target.cancelled, target.finished, run.finished, error. `traceqa explore` also writes progress (a plain line), explore.state.new, explore.action.start, explore.action.end, explore.policy.block, explore.replay and model.call; their `data` is described in the notes of backlog items EXP-6 and EXP-7 and in the module comment of `crates/traceqa-engine/src/explore/events.rs`. `traceqa replay` writes progress, replay.step (one for each edge asked for) and replay.reopen; their `data` is described in the note of backlog item EXP-8 and in `crates/traceqa-engine/src/explore/replay_out.rs`.",
     )
     target: str | None = Field(
         default=None,
@@ -1554,7 +1984,7 @@ class VisualThresholds(BaseModel):
     )
 
 
-class Status(StrEnum):
+class Status1(StrEnum):
     """
     same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.
     """
@@ -1576,7 +2006,7 @@ class VisualResult(BaseModel):
     id: str = Field(..., description="The component id.")
     role: str
     name: str
-    status: Status = Field(
+    status: Status1 = Field(
         ...,
         description="same and different: the crops were compared. size_changed: the component's size differs by more than 1 px, or the crops differ in size (also a different devicePixelRatio), so no pixels were compared. skipped: see reason.",
     )
@@ -1675,6 +2105,23 @@ class StorageOrigin(BaseModel):
     local_storage: list[StorageItem] = Field(..., validation_alias="localStorage", serialization_alias="localStorage")
 
 
+class CoverageState(BaseModel):
+    """
+    One screen.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str = Field(..., description="The screen's id in graph.json.")
+    url: str = Field(..., description="As in graph.json.")
+    counts: CoverageCounts
+    discovered: list[str] = Field(..., description="Component ids, sorted.")
+    touched: list[str]
+    skipped: list[CoverageSkip]
+    untouched: list[str]
+
+
 class DiffEntry(BaseModel):
     """
     One component that is only on one side, or that is on both and differs. Boxes and crops are not compared.
@@ -1709,6 +2156,83 @@ class DiffEntry(BaseModel):
     )
 
 
+class Capabilities(BaseModel):
+    """
+    What this browser session can do. The engine adapts to these instead of knowing browser names.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    clip_screenshot: bool = Field(
+        ...,
+        validation_alias="clipScreenshot", serialization_alias="clipScreenshot",
+        description="Can screenshot one rectangle of the page.",
+    )
+    full_page_screenshot: bool = Field(
+        ...,
+        validation_alias="fullPageScreenshot", serialization_alias="fullPageScreenshot",
+        description="Can screenshot the whole scrollable page.",
+    )
+    eval_all_frames: bool = Field(
+        ...,
+        validation_alias="evalAllFrames", serialization_alias="evalAllFrames",
+        description="Can run a script in every frame, not only the top one.",
+    )
+    cross_origin_frames: bool = Field(
+        ...,
+        validation_alias="crossOriginFrames", serialization_alias="crossOriginFrames",
+        description="Can run a script inside frames from another origin.",
+    )
+    parallel_sessions: bool = Field(
+        ...,
+        validation_alias="parallelSessions", serialization_alias="parallelSessions",
+        description="Can hold more than one session at a time.",
+    )
+    set_viewport: bool = Field(
+        ..., validation_alias="setViewport", serialization_alias="setViewport", description="Can set an exact viewport size."
+    )
+    console_events: bool = Field(..., validation_alias="consoleEvents", serialization_alias="consoleEvents")
+    network_events: bool = Field(..., validation_alias="networkEvents", serialization_alias="networkEvents")
+    failed_requests: bool | None = Field(
+        default=None,
+        validation_alias="failedRequests", serialization_alias="failedRequests",
+        description="Reports requests for scripts, styles, data and frames that failed while the page loaded, in page.eval's requestsFailed. Absent means false.",
+    )
+    eval_async: bool | None = Field(
+        default=None,
+        validation_alias="evalAsync", serialization_alias="evalAsync",
+        description="page.eval accepts awaitPromise. Absent means false.",
+    )
+    action_kinds: list[ActionKind] | None = Field(
+        default=None,
+        validation_alias="actionKinds", serialization_alias="actionKinds",
+        description="The action kinds page.act accepts. Absent or empty means page.act is not supported by this session.",
+    )
+    event_kinds: list[str] | None = Field(
+        default=None,
+        validation_alias="eventKinds", serialization_alias="eventKinds",
+        description="What page.act reports about an action. Known values: navigation, popups, dialogs, downloads, console, network, dom. A kind that is not listed is not observed: an empty list for it in a page.act result does not mean nothing happened. Absent means none.",
+    )
+
+
+class SessionOpenResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    session_id: str = Field(..., validation_alias="sessionId", serialization_alias="sessionId")
+    browser: BrowserInfo
+    capabilities: Capabilities
+    viewport: Viewport | None = Field(
+        default=None,
+        description="The viewport the session really has, when the driver could not give the one asked for. Absent means the one asked for.",
+    )
+    policy: ActPolicy | None = Field(
+        default=None,
+        description="The policy the session enforces, as the driver understood it. Sent when the request carried one. A caller compares it with what it asked for and closes the session when they differ: a driver that does not know about policies would send none.",
+    )
+
+
 class PageGotoResult(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1718,6 +2242,11 @@ class PageGotoResult(BaseModel):
         default=None, description="HTTP status of the main document, when known.", ge=0
     )
     title: str
+    request_counts: dict[str, int] | None = Field(
+        default=None,
+        validation_alias="requestCounts", serialization_alias="requestCounts",
+        description="How many requests the session's browser has sent to each origin since the session was opened, up to and including this call. Only in a session opened with a policy. A request the policy stopped never left the browser and is not counted. Requests the page makes by itself after the call (a timer, a lazy load) are counted by the next call that reports counts.",
+    )
     load_complete: bool | None = Field(
         default=None,
         validation_alias="loadComplete", serialization_alias="loadComplete",
@@ -1744,6 +2273,67 @@ class PageEvalResult(BaseModel):
         ..., description="One entry per frame, main frame first."
     )
     requests_failed: RequestsFailed | None = Field(default=None, validation_alias="requestsFailed", serialization_alias="requestsFailed")
+
+
+class GraphFile(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(..., validation_alias="schemaVersion", serialization_alias="schemaVersion", ge=0)
+    start_url: str = Field(
+        ...,
+        validation_alias="startUrl", serialization_alias="startUrl",
+        description="The address the walk started from, as asked for.",
+    )
+    seed: int = Field(
+        ...,
+        description="Decides the text typed into fields. The same seed on the same site gives the same walk.",
+        ge=0,
+    )
+    strategy: Strategy = Field(
+        ...,
+        description="The order screens waiting to be explored are taken: bfs takes everything one action away before going deeper, dfs goes as deep as it can first.",
+    )
+    state_similarity_per_mille: int = Field(
+        ...,
+        validation_alias="stateSimilarityPerMille", serialization_alias="stateSimilarityPerMille",
+        description="How alike two readings of a page must be to count as the same screen, in thousandths: the share of their component ids that are the same (Jaccard). 900 is 90%.",
+        ge=0,
+        le=1000,
+    )
+    chrome_pages: int = Field(
+        ...,
+        validation_alias="chromePages", serialization_alias="chromePages",
+        description="How many pages were read before the walk to find the ids that are on every page, the first one included.",
+        ge=0,
+    )
+    chrome: list[str] = Field(
+        ...,
+        description="The component ids that are on (nearly) every page, sorted. They are left out of the ids that screens are compared by, and are still listed in each screen's components when they were all it had.",
+    )
+    budgets: GraphBudgets
+    stopped: GraphStop
+    actions: int = Field(
+        ...,
+        description="How many actions were made, against --max-actions. At least the number of edges whose status is not missing: it is more when a screen that has no address of its own (a dialog, an open drawer) was reopened by replaying the actions that led to it, because those actions count and make no edge. Each one is an explore.replay event.",
+        ge=0,
+    )
+    states: list[GraphState] = Field(
+        ...,
+        description="The screens, in the order they were first seen. A screen's id is s followed by its position.",
+    )
+    edges: list[GraphEdge] = Field(
+        ...,
+        description="The actions, in the order they were made. An edge's id is e followed by its position.",
+    )
+    skipped: list[GraphSkipped] = Field(
+        ...,
+        description="Components that were found and not touched, once per screen and component.",
+    )
+    unreachable: list[str] = Field(
+        ...,
+        description="Screens that could not be opened again after the walk left them, so what was left on them was not tried.",
+    )
 
 
 class HealItem(BaseModel):
@@ -1842,6 +2432,31 @@ class VerifyTarget(BaseModel):
     )
     passed: bool
     issues: list[VerifyIssue]
+
+
+class ReplayFile(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(..., validation_alias="schemaVersion", serialization_alias="schemaVersion", ge=0)
+    graph: ReplayGraph
+    mode: Mode = Field(
+        ...,
+        description="chain: edges that follow one another from the start page, done in one session, and ended at the first that does not lead where it did. all: every edge of the graph, each from the screen it was made on.",
+    )
+    ended: Ended = Field(
+        ...,
+        description="Why the replay ended. complete: every edge asked for was dealt with. timeout and max-requests: that limit was reached, and the edges not reached are not-run. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.",
+    )
+    actions: int = Field(
+        ...,
+        description="How many actions were made, the ones that only reopened a screen included.",
+        ge=0,
+    )
+    totals: ReplayCounts
+    steps: list[ReplayStep] = Field(
+        ..., description="One entry for each edge asked for, in the order asked."
+    )
 
 
 class TargetSummary(BaseModel):
@@ -2155,6 +2770,38 @@ class StorageState(BaseModel):
     )
 
 
+class CoverageFile(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    schema_version: int = Field(..., validation_alias="schemaVersion", serialization_alias="schemaVersion", ge=0)
+    start_url: str = Field(
+        ...,
+        validation_alias="startUrl", serialization_alias="startUrl",
+        description="The address the walk started from, as in graph.json.",
+    )
+    stopped: GraphStop = Field(
+        ...,
+        description="Why the walk ended, as in graph.json. A walk that did not end with `complete` leaves untouched components.",
+    )
+    totals: CoverageTotals
+    states: list[CoverageState] = Field(
+        ..., description="One entry for each screen of graph.json, in the same order."
+    )
+    shared: list[str] = Field(
+        ...,
+        description="The component ids that are on (nearly) every page, sorted, as `chrome` in graph.json. Each is counted on the first screen that shows it.",
+    )
+    unreachable: list[str] = Field(
+        ...,
+        description="Screens that could not be opened again after the walk left them, so what was left on them was not tried. Their untouched components are the ones it could not get to.",
+    )
+    skipped: list[CoverageSkipped] = Field(
+        ...,
+        description="Every component that was left alone, with the reason, sorted by screen and component. The same ones as the `skipped` lists of the screens.",
+    )
+
+
 class DiffFile(BaseModel):
     """
     Output of `traceqa diff --format json`. Fully determined by its two inputs: it holds no timestamp of its own and the entries have a fixed order (removed, added, changed; then path, role, name, id).
@@ -2191,6 +2838,10 @@ class SessionOpenParams(BaseModel):
         default=None,
         validation_alias="storageState", serialization_alias="storageState",
         description="Cookies and stored values to put in place before the first page is loaded.",
+    )
+    policy: ActPolicy | None = Field(
+        default=None,
+        description="The safety policy of a session that will be given page.act. A driver refuses page.act on a session opened without one, and a driver that cannot enforce a policy refuses to open a session that asks for one.",
     )
 
 
@@ -2251,7 +2902,7 @@ class RunManifest(BaseModel):
     )
     format_version: int = Field(..., validation_alias="formatVersion", serialization_alias="formatVersion", ge=0)
     run_id: str = Field(..., validation_alias="runId", serialization_alias="runId")
-    feature: str = Field(..., description="Known values: extract.")
+    feature: str = Field(..., description="Known values: extract, explore, replay.")
     url: str
     status: RunStatus
     started_at: str = Field(

@@ -62,3 +62,10 @@ def test_gives_up_when_the_page_never_rests() -> None:
     world = World(read_cost=0.0, sleep_cost=0.1, states=growing)
     wait_until_settled(world.read, world.sleep, 2, now=world.now)
     assert 19 <= world.reads <= 22
+
+
+def test_says_whether_the_page_was_quiet() -> None:
+    quiet = World(read_cost=0.0, sleep_cost=0.1, states=lambda _n: {"height": 1000, "animating": 0})
+    assert wait_until_settled(quiet.read, quiet.sleep, 5, now=quiet.now) is True
+    busy = World(read_cost=0.0, sleep_cost=0.1, states=growing)
+    assert wait_until_settled(busy.read, busy.sleep, 1, now=busy.now) is False

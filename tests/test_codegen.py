@@ -541,7 +541,8 @@ def test_ci_installs_the_codegen_test_tools_before_the_python_tests() -> None:
     steps = ci["jobs"]["test"]["steps"]
     install = next(i for i, s in enumerate(steps) if s.get("working-directory") == "tests/codegen_ts")
     assert steps[install]["run"].strip() == "npm ci"
-    pytest_step = next(i for i, s in enumerate(steps) if s.get("run", "").strip() == "uv run pytest")
+    # The command takes a -m argument, which splits the slow explorer tests into their own job (see ci.yml).
+    pytest_step = next(i for i, s in enumerate(steps) if s.get("run", "").strip().startswith("uv run pytest"))
     browsers = next(i for i, s in enumerate(steps) if "playwright install" in s.get("run", ""))
     assert browsers < install < pytest_step
     node = next(s for s in steps if str(s.get("uses", "")).startswith("actions/setup-node"))

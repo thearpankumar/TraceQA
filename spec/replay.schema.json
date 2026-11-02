@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "replay.schema.json",
+  "title": "TraceQA replay result",
+  "description": "replay.json, written by `traceqa replay` into its run folder (feature replay) next to run.json and events.jsonl: for each edge of a graph.json that was asked for, whether performing it again led where it did. Given the same site and graph the file is byte-identical: keys are sorted, the steps are in the order asked for, and nothing in it is a time. A component is found again by its id, and a page is the screen the graph says by the rule the walk used (the share of the same component ids, `stateSimilarityPerMille`), built from the graph itself.",
+  "x-traceqa": { "contract": "replay", "version": 1 },
+  "$defs": {
+    "ReplayFile": {
+      "type": "object",
+      "required": ["schemaVersion", "graph", "mode", "ended", "actions", "totals", "steps"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 0 },
+        "graph": { "$ref": "#/$defs/ReplayGraph" },
+        "mode": { "description": "chain: edges that follow one another from the start page, done in one session, and ended at the first that does not lead where it did. all: every edge of the graph, each from the screen it was made on.", "enum": ["chain", "all"] },
+        "ended": { "description": "Why the replay ended. complete: every edge asked for was dealt with. timeout and max-requests: that limit was reached, and the edges not reached are not-run. cancelled: Ctrl-C or SIGTERM. error: the browser failed; the message is in events.jsonl.", "enum": ["complete", "timeout", "max-requests", "cancelled", "error"] },
+        "actions": { "description": "How many actions were made, the ones that only reopened a screen included.", "type": "integer", "minimum": 0 },
+        "totals": { "$ref": "#/$defs/ReplayCounts" },
+        "steps": { "description": "One entry for each edge asked for, in the order asked.", "type": "array", "items": { "$ref": "#/$defs/ReplayStep" } }
+      }
+    },
+    "ReplayGraph": {
+      "description": "The graph that was replayed.",
+      "type": "object",
+      "required": ["schemaVersion", "startUrl", "states", "edges"],
+      "properties": {
+        "schemaVersion": { "description": "The layout version of the graph.json.", "type": "integer", "minimum": 0 },
+        "startUrl": { "description": "The address the replay started from, with secret parameters replaced. It is the graph's own, or, with --origin, the graph's with its origin changed.", "type": "string" },
+        "states": { "type": "integer", "minimum": 0 },
+        "edges": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ReplayCounts": {
+      "description": "How the steps came out. `replayable` is the steps that were asked for and that the walk had completed: the others are recorded-failed and are not counted against the replay.",
+      "type": "object",
+      "required": ["replayable", "reproduced", "diverged", "missing", "blocked", "notRun", "recordedFailed"],
+      "properties": {
+        "replayable": { "type": "integer", "minimum": 0 },
+        "reproduced": { "type": "integer", "minimum": 0 },
+        "diverged": { "type": "integer", "minimum": 0 },
+        "missing": { "type": "integer", "minimum": 0 },
+        "blocked": { "type": "integer", "minimum": 0 },
+        "notRun": { "type": "integer", "minimum": 0 },
+        "recordedFailed": { "type": "integer", "minimum": 0 },
+        "reproducedPerMille": { "description": "reproduced out of replayable, in thousandths, rounded down. Absent when nothing was replayable.", "type": "integer", "minimum": 0, "maximum": 1000 }
+      }
+    },
+    "ReplayStep": {
+      "description": "One edge, and what performing it again came to.",
+      "type": "object",
+      "required": ["edge", "state", "component", "label", "action", "outcome"],
+      "properties": {
+        "edge": { "description": "The edge, as named in graph.json.", "type": "string" },
+        "state": { "description": "The screen the edge was made on.", "type": "string" },
+        "component": { "type": "string" },
+        "label": { "type": "string" },
+        "action": { "enum": ["click", "type", "press"] },
+        "outcome": { "description": "reproduced: the page is the screen the graph says. diverged: the action was made, or failed, and the page is not that screen. missing: the component is not on the page, and nothing was done. blocked: the safety rules leave it alone (a replay is read-only unless --allow-writes), or there is no recorded text to type. not-run: it was not tried, because an earlier step of the chain broke, its screen could not be reopened, or the replay ended first. recorded-failed: the walk did not complete it, so there is nothing to compare with.", "enum": ["reproduced", "diverged", "missing", "blocked", "not-run", "recorded-failed"] },
+        "expected": { "description": "The screen the edge led to in the walk. Absent for an edge that led nowhere.", "type": "string" },
+        "actual": { "description": "For reproduced, the same as expected. For diverged, the screen the page was, or `unknown` for a page the graph has no screen like. Absent when the action did not complete.", "type": "string" },
+        "note": { "description": "Why, in a sentence, when there is something to say.", "type": "string" }
+      }
+    }
+  }
+}

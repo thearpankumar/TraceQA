@@ -17,6 +17,7 @@ EXPECTED = {
     "page.eval",
     "page.scroll",
     "page.screenshot",
+    "page.act",
 }
 
 

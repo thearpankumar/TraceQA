@@ -36,6 +36,8 @@ from traceqa_protocol.rpc import Channel, RpcError
 from traceqa_protocol.settle import PAGE_STATE, wait_until_settled
 from traceqa_protocol.urls import without_query
 
+from . import act, safety
+
 NAME = "traceqa-driver-playwright"
 VERSION = installed_version(NAME)
 DEFAULT_TIMEOUT_MS = 30_000
@@ -65,6 +67,8 @@ CAPABILITIES = models.Capabilities(
     failed_requests=True,
     # frame.evaluate always waits for a returned Promise, so params.await_promise needs no code here.
     eval_async=True,
+    action_kinds=act.ACTION_KINDS,
+    event_kinds=act.EVENT_KINDS,
 )
 
 # Requests that change the list of components when they fail. Pictures, fonts and media do not, and a
@@ -93,6 +97,11 @@ class Session:
     failed_count: int = 0
     failed_urls: list[str] = field(default_factory=list)
     failed_seen: set[Request] = field(default_factory=set)
+    # Present only on a session opened with a safety policy, which is the only kind `page.act` works on. A session
+    # that only reads pages has neither, and nothing in this file's guard or watchers runs for it.
+    policy: models.ActPolicy | None = None
+    guard: safety.Guard | None = None
+    watch: act.Watch | None = None
 
     def note_failed(self, request: Request) -> None:
         # One request counts once, even when the browser reports both its answer and its failure.
@@ -411,7 +420,28 @@ PRISTINE_INIT_SCRIPT = (
     '    Object.defineProperty(window, "__traceqa_pristine__", '
     "{ value: offer, writable: false, enumerable: false, configurable: false });\n"
     "  } catch (e) { /* already defined, or this frame is not a page */ }\n"
+    "  try {\n"
+    "    var stringify = JSON.stringify;\n"
+    "    var asJson = function (value) {\n"
+    "      // A page that gave plain objects or arrays a toJSON would change what is written down.\n"
+    '      if ("toJSON" in {} || "toJSON" in []) return null;\n'
+    "      return stringify(value);\n"
+    "    };\n"
+    '    Object.defineProperty(window, "__traceqa_json__", '
+    "{ value: asJson, writable: false, enumerable: false, configurable: false });\n"
+    "  } catch (e) { /* already defined, or this frame is not a page */ }\n"
     "})();"
+)
+
+# Runs the caller's function in the page and has the page write its result as JSON text with the JSON.stringify
+# captured before the page's own scripts (the init script above). `null` means it could not be done safely: the
+# originals were not captured, or the page gave plain objects a toJSON.
+AS_JSON_WRAPPER = (
+    "(arg) => {\n"
+    "  var write = window.__traceqa_json__;\n"
+    '  if (typeof write !== "function") return null;\n'
+    "  return write((\n__SCRIPT__\n)(arg));\n"
+    "}"
 )
 
 
@@ -536,6 +566,8 @@ class PlaywrightDriver(BaseDriver[Session]):
             self._playwright = sync_playwright().start()
         target = params.target
         viewport = ViewportSize(width=params.viewport.width, height=params.viewport.height)
+        # Read before any browser starts: a policy nobody can read is refused without launching anything.
+        guard = safety.Guard(params.policy, self._note_blocked) if params.policy is not None else None
         browser = None
         try:
             if target.browser == CDP:
@@ -553,19 +585,34 @@ class PlaywrightDriver(BaseDriver[Session]):
             state = playwright_state(params.storage_state)
             try:
                 context = browser.new_context(
-                    viewport=viewport, locale=params.locale, storage_state=cast(PlaywrightStorageState | None, state)
+                    viewport=viewport,
+                    locale=params.locale,
+                    storage_state=cast(PlaywrightStorageState | None, state),
+                    # A service worker makes requests of its own that the guard's routes do not see.
+                    service_workers="block" if guard else "allow",
                 )
                 owns_context = True
-            except PlaywrightError:
+            except PlaywrightError as unavailable:
                 # Some remote browsers only expose the context they started with.
                 if not browser.contexts:
                     raise
+                if guard:
+                    # Service workers cannot be blocked in a context the driver did not create, so the policy
+                    # cannot be kept. Closing a browser reached over CDP lets go of it and does not end it.
+                    with contextlib.suppress(PlaywrightError):
+                        browser.close()
+                    raise RpcError(
+                        "unsupported",
+                        "a safety policy needs a browser context the driver creates, and this browser only offers its own",
+                    ) from unavailable
                 context = browser.contexts[0]
                 owns_context = False
                 if state:
                     give_state(context, state)
             # Also for a context the driver did not create: its pages are opened after this.
             install_pristine(context)
+            if guard:
+                guard.install(context)
             page = context.new_page()
             if not owns_context:
                 page.set_viewport_size(viewport)
@@ -593,13 +640,25 @@ class PlaywrightDriver(BaseDriver[Session]):
         chromium = target.browser == CDP or BROWSERS.get(target.browser, ("",))[0] == "chromium"
         session = Session(browser, context, page, owns_context, chromium)
         session.watch_requests()
+        if guard:
+            session.policy = guard.policy
+            session.guard = guard
+            session.watch = act.Watch(page, context)
         self._sessions[session_id] = session
         self._channel.log("info", f"opened {target.browser} {browser.version}")
         return models.SessionOpenResult(
             session_id=session_id,
             browser=models.BrowserInfo(name=target.browser, version=browser.version),
             capabilities=CAPABILITIES,
+            # Said back, so the caller can see that this driver really understood the policy.
+            policy=guard.policy if guard else None,
         )
+
+    def _note_blocked(self, address: str, method: str, request: Request | None) -> None:
+        """The guard aborted a request. Whichever session it belonged to reports it to the action under way."""
+        for session in self._sessions.values():
+            if session.watch is not None:
+                session.watch.note_blocked(address, method, request)
 
     def session_storage(self, params: models.SessionStorageParams) -> models.StorageState:
         session = self._session(params.session_id)
@@ -666,6 +725,7 @@ class PlaywrightDriver(BaseDriver[Session]):
             final_url=page.url,
             status=response.status if response else None,
             title=title,
+            request_counts=session.guard.counts() if session.guard else None,
             load_complete=None if load_complete else False,
             closed_shadow_roots=count_closed_shadow_roots(page) if session.chromium else None,
             redirect_chain=redirect_chain(response),
@@ -675,7 +735,8 @@ class PlaywrightDriver(BaseDriver[Session]):
         session = self._session(params.session_id)
         page = session.page
         frames = page.frames if params.all_frames else [page.main_frame]
-        scroll = page.evaluate("() => [window.scrollX, window.scrollY]")
+        # Only the frames below the top one are placed on the page with it, so a page without frames is not asked.
+        scroll: list[float] | None = None
         results = []
         for frame in frames:
             if frame.is_detached():
@@ -691,11 +752,11 @@ class PlaywrightDriver(BaseDriver[Session]):
                     box = None
                 if box:
                     # bounding_box is relative to the viewport. The spec wants page coordinates.
-                    info.box = models.Rect(
-                        x=box["x"] + scroll[0], y=box["y"] + scroll[1], w=box["width"], h=box["height"]
-                    )
+                    at = scroll if scroll is not None else page.evaluate("() => [window.scrollX, window.scrollY]")
+                    scroll = at
+                    info.box = models.Rect(x=box["x"] + at[0], y=box["y"] + at[1], w=box["width"], h=box["height"])
             try:
-                value = frame.evaluate(params.script, params.arg)
+                value = self._evaluate(frame, params)
                 results.append(models.FrameEvalResult(frame=info, value=value))
             except PlaywrightError as error:
                 if frame == page.main_frame:
@@ -705,6 +766,16 @@ class PlaywrightDriver(BaseDriver[Session]):
             results=results,
             requests_failed=models.RequestsFailed(count=session.failed_count, urls=list(session.failed_urls)),
         )
+
+    @staticmethod
+    def _evaluate(frame: Frame, params: models.PageEvalParams) -> Any:
+        """The value the caller's function returns in `frame`. With `via_json` the page writes it as text, which is
+        read back; if that cannot be done safely the usual way is used, so the value is the same either way."""
+        if params.via_json and not params.await_promise:
+            text = frame.evaluate(AS_JSON_WRAPPER.replace("__SCRIPT__", params.script), params.arg)
+            if isinstance(text, str):
+                return json.loads(text)
+        return frame.evaluate(params.script, params.arg)
 
     def page_scroll(self, params: models.PageScrollParams) -> models.PageScrollResult:
         page = self._session(params.session_id).page
@@ -737,3 +808,21 @@ class PlaywrightDriver(BaseDriver[Session]):
             raise RpcError("internal", f"screenshot failed: {first_line(error.message)}") from error
         width, height = png_dimensions(path.read_bytes()[:24])
         return models.PageScreenshotResult(path=str(path), width=width, height=height)
+
+    def page_act(self, params: models.PageActParams) -> models.PageActResult:
+        session = self._session(params.session_id)
+        if session.policy is None or session.guard is None or session.watch is None:
+            raise RpcError(
+                "invalid_params",
+                "this session was opened without a safety policy, and page.act only works on one that has a policy",
+            )
+        wanted = params.target.frame_id or "main"
+        if wanted == "main":
+            frame = session.page.main_frame
+        else:
+            # Only frames the engine has already been told about: asking must not hand out new ids.
+            known = [f for f, frame_id in session.frame_ids.items() if frame_id == wanted and not f.is_detached()]
+            if not known:
+                raise RpcError("invalid_params", f"no frame {wanted!r}; read the page first so its frames have ids")
+            frame = known[0]
+        return act.act(session.page, session.watch, session.guard, frame, params)

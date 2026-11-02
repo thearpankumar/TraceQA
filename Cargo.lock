@@ -984,6 +984,7 @@ dependencies = [
  "traceqa-findings",
  "traceqa-heal",
  "traceqa-mcp",
+ "traceqa-models",
  "traceqa-recorder",
  "traceqa-visual",
  "unicode-normalization",
@@ -1066,6 +1067,13 @@ dependencies = [
  "traceqa-diff",
  "traceqa-engine",
  "traceqa-findings",
+]
+
+[[package]]
+name = "traceqa-models"
+version = "0.1.0"
+dependencies = [
+ "traceqa-engine",
 ]
 
 [[package]]

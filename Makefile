@@ -85,6 +85,10 @@ test-installers: ## Test the one-line installers against a local fake release
 bench: debug ## Run the end-to-end bench on the demo shop
 	uv run testbed/bench/run.py
 
+.PHONY: explorer-acceptance
+explorer-acceptance: debug ## Explorer acceptance on the demo shop in all three browsers (about 50 minutes; figures to stdout)
+	uv run pytest tests/test_acceptance.py -s $(PYTEST_ARGS)
+
 .PHONY: lint
 lint: ## Run every check of the CI lint job, and clippy
 	uv run scripts/check_version.py
